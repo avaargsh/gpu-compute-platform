@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -8,6 +8,8 @@ from sqlalchemy import select
 from app.core.auth import current_active_user
 from app.core.database import get_async_session
 from app.core.scheduler import IntelligentScheduler, TaskRequirement
+from app.core.websocket_manager import websocket_manager
+from app.core.task_status_broadcaster import task_broadcaster
 from app.models.user import User
 from app.models.task import GpuTask, TaskStatus, TaskPriority
 from app.gpu.interface import GpuSpec, JobConfig, JobResult, CostInfo
@@ -226,7 +228,7 @@ async def submit_job(
             memory_gb=job_config.gpu_spec.memory_gb or 0,
             vcpus=job_config.gpu_spec.vcpus,
             estimated_duration_minutes=60,  # 默认估计1小时，可以从job_config中提取
-            priority=priority.value if hasattr(priority, 'value') else 5
+            priority=_map_priority_to_int(priority)
         )
         
         # 如果指定了首选提供商，验证其存在
@@ -269,9 +271,17 @@ async def submit_job(
         
         # 提交异步任务到选定的队列
         provider_config = PROVIDERS[selected_provider]
+        
+        # 根据优先级选择队列
+        queue_name = "gpu_tasks"
+        if task_requirement.priority >= 8:
+            queue_name = "priority_high"
+        elif task_requirement.priority <= 2:
+            queue_name = "priority_low"
+        
         celery_task = execute_gpu_task.apply_async(
             args=[task.id, provider_config],
-            queue=routing_key
+            queue=queue_name
         )
         
         # 更新Celery任务ID
@@ -289,6 +299,7 @@ async def submit_job(
             "celery_task_id": celery_task.id,
             "provider": selected_provider,
             "routing_key": routing_key,
+            "queue": queue_name,
             "status": "queued",
             "message": f"Job intelligently scheduled to {selected_provider}",
             "created_at": task.created_at.isoformat(),
@@ -539,4 +550,205 @@ async def cancel_task(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to cancel task: {str(e)}"
+        )
+
+
+@router.websocket("/tasks/{task_id}/ws")
+async def websocket_task_status(
+    websocket: WebSocket,
+    task_id: str,
+    user: User = Depends(current_active_user)
+):
+    """WebSocket端点：实时获取任务状态更新
+    
+    客户端可以连接到此端点获取指定任务的实时状态更新。
+    消息格式：
+    {
+        "type": "task_status_update|task_progress|task_logs|task_error|task_completed",
+        "task_id": "任务ID",
+        "timestamp": "ISO格式时间戳",
+        "data": {...}
+    }
+    """
+    connection_id = None
+    
+    try:
+        # 验证任务存在且属于当前用户
+        session_gen = get_async_session()
+        session = await anext(session_gen)
+        
+        try:
+            stmt = select(GpuTask).where(
+                GpuTask.id == task_id,
+                GpuTask.user_id == str(user.id)
+            )
+            result = await session.execute(stmt)
+            task = result.scalar_one_or_none()
+            
+            if not task:
+                await websocket.close(code=4004, reason="Task not found")
+                return
+            
+            # 建立WebSocket连接
+            connection_id = await websocket_manager.connect(
+                websocket, task_id, str(user.id)
+            )
+            
+            # 发送当前任务状态
+            current_status_message = {
+                "type": "current_status",
+                "task_id": task_id,
+                "status": task.status.value if hasattr(task.status, 'value') else str(task.status),
+                "message": f"Current task status: {task.status}",
+                "progress": 100 if task.is_terminal_state else None,
+                "created_at": task.created_at.isoformat() if task.created_at else None,
+                "started_at": task.started_at.isoformat() if task.started_at else None,
+                "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+                "provider": task.provider_name,
+                "priority": task.priority.value if hasattr(task.priority, 'value') else str(task.priority),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            await websocket_manager.send_to_connection(connection_id, current_status_message)
+            
+            # 监听客户端消息（主要用于心跳）
+            while True:
+                try:
+                    # 等待客户端消息
+                    message = await websocket.receive_text()
+                    data = json.loads(message)
+                    
+                    # 处理心跳消息
+                    if data.get("type") == "ping":
+                        await websocket_manager.handle_ping(connection_id)
+                    
+                    # 处理客户端状态查询请求
+                    elif data.get("type") == "get_status":
+                        # 重新查询最新状态
+                        await session.refresh(task)
+                        await websocket_manager.send_to_connection(connection_id, {
+                            "type": "status_response",
+                            "task_id": task_id,
+                            "status": task.status.value if hasattr(task.status, 'value') else str(task.status),
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                    
+                except WebSocketDisconnect:
+                    break
+                except json.JSONDecodeError:
+                    # 忽略无效的JSON消息
+                    continue
+                except Exception as e:
+                    # 发送错误消息
+                    await websocket_manager.send_to_connection(connection_id, {
+                        "type": "error",
+                        "message": f"Error processing message: {str(e)}",
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+        
+        finally:
+            await session.close()
+            
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        if connection_id:
+            try:
+                await websocket_manager.send_to_connection(connection_id, {
+                    "type": "error",
+                    "message": f"Connection error: {str(e)}",
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+            except:
+                pass
+    finally:
+        if connection_id:
+            await websocket_manager.disconnect(connection_id)
+
+
+def _map_priority_to_int(priority) -> int:
+    """将TaskPriority映射为整数值"""
+    from app.models.task import TaskPriority
+    
+    if isinstance(priority, TaskPriority):
+        mapping = {
+            TaskPriority.LOW: 2,
+            TaskPriority.NORMAL: 5,
+            TaskPriority.HIGH: 8,
+            TaskPriority.URGENT: 10
+        }
+        return mapping.get(priority, 5)
+    elif isinstance(priority, str):
+        mapping = {
+            'low': 2,
+            'normal': 5,
+            'high': 8,
+            'urgent': 10
+        }
+        return mapping.get(priority.lower(), 5)
+    elif isinstance(priority, int):
+        return max(1, min(10, priority))  # 确保在1-10范围内
+    else:
+        return 5  # 默认值
+
+
+@router.get("/websocket/stats")
+async def get_websocket_stats(
+    user: User = Depends(current_active_user)
+):
+    """获取WebSocket连接统计信息"""
+    try:
+        stats = websocket_manager.get_statistics()
+        return {
+            "websocket_statistics": stats,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get WebSocket stats: {str(e)}"
+        )
+
+
+@router.get("/tasks/{task_id}/connections")
+async def get_task_connections(
+    task_id: str,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user)
+):
+    """获取指定任务的WebSocket连接信息"""
+    try:
+        # 验证任务存在且属于当前用户
+        stmt = select(GpuTask).where(
+            GpuTask.id == task_id,
+            GpuTask.user_id == str(user.id)
+        )
+        result = await session.execute(stmt)
+        task = result.scalar_one_or_none()
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Task not found"
+            )
+        
+        # 获取连接信息
+        connections = websocket_manager.get_task_connections(task_id)
+        connection_count = websocket_manager.get_connection_count(task_id)
+        
+        return {
+            "task_id": task_id,
+            "connection_count": connection_count,
+            "has_active_connections": connection_count > 0,
+            "connections": [
+                websocket_manager.get_connection_info(conn_id)
+                for conn_id in connections
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get task connections: {str(e)}"
         )

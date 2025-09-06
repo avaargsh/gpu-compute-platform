@@ -21,6 +21,31 @@ class TaskRequirement:
     def __post_init__(self):
         if self.gpu_count <= 0:
             raise ValueError("GPU count must be greater than 0")
+        
+        # 确保priority是整数
+        if hasattr(self.priority, 'value'):
+            # TaskPriority 枚举类型
+            from app.models.task import TaskPriority
+            priority_map = {
+                TaskPriority.LOW: 2,
+                TaskPriority.NORMAL: 5,
+                TaskPriority.HIGH: 8,
+                TaskPriority.URGENT: 10
+            }
+            self.priority = priority_map.get(self.priority, 5)
+        elif isinstance(self.priority, str):
+            # 字符串类型
+            priority_map = {
+                'low': 2,
+                'normal': 5, 
+                'high': 8,
+                'urgent': 10
+            }
+            self.priority = priority_map.get(self.priority.lower(), 5)
+        elif not isinstance(self.priority, int):
+            # 其他类型，设为默认值
+            self.priority = 5
+        
         if not (1 <= self.priority <= 10):
             raise ValueError("Priority must be between 1 and 10")
 
@@ -172,6 +197,13 @@ class IntelligentScheduler:
     
     def _get_routing_key(self, provider: str, gpu_type: str, gpu_count: int, priority: int = 5) -> str:
         """生成Celery路由键"""
+        # 确保priority是整数
+        if isinstance(priority, str):
+            try:
+                priority = int(priority)
+            except (ValueError, TypeError):
+                priority = 5
+        
         priority_suffix = ""
         if priority >= 9:
             priority_suffix = "_urgent"

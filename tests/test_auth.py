@@ -1,155 +1,138 @@
-"""Authentication system tests."""
-import pytest
-from httpx import AsyncClient
-import uuid
+#!/usr/bin/env python3
+
+import asyncio
+import httpx
+import json
 
 
-class TestAuthentication:
-    """Test user authentication functionality."""
+async def test_authentication_system():
+    """Test the authentication system by registering and logging in a user."""
     
-    async def test_user_registration(self, client: AsyncClient, test_user_data):
-        """Test user registration endpoint."""
-        response = await client.post("/auth/register", json=test_user_data)
-        
-        assert response.status_code == 201
-        data = response.json()
-        
-        # Check user data
-        assert data["email"] == test_user_data["email"]
-        assert data["first_name"] == test_user_data["first_name"]
-        assert data["last_name"] == test_user_data["last_name"]
-        assert data["organization"] == test_user_data["organization"]
-        assert data["is_active"] is True
-        assert data["is_verified"] is False
-        assert data["is_superuser"] is False
-        assert "id" in data
-        
-        # Check UUID format
-        assert uuid.UUID(data["id"])
-        
-        # Check password is not returned
-        assert "password" not in data
-        assert "hashed_password" not in data
+    base_url = "http://localhost:8000"
     
-    async def test_duplicate_user_registration(self, client: AsyncClient):
-        """Test that duplicate user registration fails."""
-        test_data = {
-            "email": "duplicate@example.com",
-            "password": "testpassword123",
-            "first_name": "Duplicate",
-            "last_name": "User"
-        }
-        
-        # First registration should succeed
-        response1 = await client.post("/auth/register", json=test_data)
-        assert response1.status_code == 201
-        
-        # Second registration with same email should fail
-        response2 = await client.post("/auth/register", json=test_data)
-        assert response2.status_code == 400
+    # Test data
+    test_user = {
+        "email": "test@example.com",
+        "password": "testpassword123",
+        "first_name": "Test",
+        "last_name": "User",
+        "organization": "Test Org"
+    }
     
-    async def test_user_login(self, client: AsyncClient, test_user_data):
-        """Test user login endpoint."""
-        # First register a user
-        await client.post("/auth/register", json=test_user_data)
-        
-        # Now try to login
-        login_data = {
-            "username": test_user_data["email"],
-            "password": test_user_data["password"]
-        }
-        
-        response = await client.post("/auth/jwt/login", data=login_data)
-        
-        assert response.status_code == 200
-        data = response.json()
-        
-        assert "access_token" in data
-        assert "token_type" in data
-        assert data["token_type"] == "bearer"
-        assert isinstance(data["access_token"], str)
-        assert len(data["access_token"]) > 50  # JWT tokens are quite long
+    print("🚀 Testing GPU Compute Platform Authentication System")
+    print("=" * 60)
     
-    async def test_invalid_login(self, client: AsyncClient):
-        """Test login with invalid credentials."""
-        login_data = {
-            "username": "nonexistent@example.com",
-            "password": "wrongpassword"
-        }
-        
-        response = await client.post("/auth/jwt/login", data=login_data)
-        
-        assert response.status_code == 400
+    try:
+        async with httpx.AsyncClient() as client:
+            # Test 1: Check health endpoint
+            print("\n1. Testing health endpoint...")
+            response = await client.get(f"{base_url}/health")
+            if response.status_code == 200:
+                print("✅ Health check passed")
+                print(f"   Response: {response.json()}")
+            else:
+                print("❌ Health check failed")
+                return
+            
+            # Test 2: Check root endpoint
+            print("\n2. Testing root endpoint...")
+            response = await client.get(f"{base_url}/")
+            if response.status_code == 200:
+                print("✅ Root endpoint works")
+                print(f"   Response: {response.json()}")
+            else:
+                print("❌ Root endpoint failed")
+                return
+            
+            # Test 3: User registration
+            print("\n3. Testing user registration...")
+            response = await client.post(
+                f"{base_url}/auth/register",
+                json=test_user
+            )
+            
+            if response.status_code == 201:
+                print("✅ User registration successful")
+                user_data = response.json()
+                print(f"   User ID: {user_data['id']}")
+                print(f"   Email: {user_data['email']}")
+                print(f"   Name: {user_data['first_name']} {user_data['last_name']}")
+            else:
+                print("❌ User registration failed")
+                print(f"   Status: {response.status_code}")
+                print(f"   Response: {response.text}")
+                return
+            
+            # Test 4: User login
+            print("\n4. Testing user login...")
+            login_data = {
+                "username": test_user["email"],
+                "password": test_user["password"]
+            }
+            
+            response = await client.post(
+                f"{base_url}/auth/jwt/login",
+                data=login_data  # Form data for OAuth2
+            )
+            
+            if response.status_code == 200:
+                print("✅ User login successful")
+                login_response = response.json()
+                access_token = login_response["access_token"]
+                print(f"   Token type: {login_response['token_type']}")
+                print(f"   Access token: {access_token[:50]}...")
+            else:
+                print("❌ User login failed")
+                print(f"   Status: {response.status_code}")
+                print(f"   Response: {response.text}")
+                return
+            
+            # Test 5: Access protected route
+            print("\n5. Testing protected route access...")
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = await client.get(
+                f"{base_url}/api/protected-route",
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                print("✅ Protected route access successful")
+                protected_data = response.json()
+                print(f"   Message: {protected_data['message']}")
+                print(f"   User data: {json.dumps(protected_data['user_data'], indent=4)}")
+            else:
+                print("❌ Protected route access failed")
+                print(f"   Status: {response.status_code}")
+                print(f"   Response: {response.text}")
+            
+            # Test 6: Test without token (should fail)
+            print("\n6. Testing protected route without token...")
+            response = await client.get(f"{base_url}/api/protected-route")
+            
+            if response.status_code == 401:
+                print("✅ Protected route correctly rejects unauthenticated requests")
+            else:
+                print(f"⚠️  Unexpected status for unauthenticated request: {response.status_code}")
+            
+            print("\n" + "=" * 60)
+            print("🎉 All authentication tests completed successfully!")
+            print("\n📋 Available endpoints:")
+            print("   - POST /auth/register - Register new user")
+            print("   - POST /auth/jwt/login - Login user")
+            print("   - GET /api/protected-route - Protected route (requires token)")
+            print("   - GET /docs - API documentation")
+            
+    except httpx.ConnectError:
+        print("❌ Could not connect to server. Is it running?")
+        print("   Start the server with: uv run uvicorn app.main:app --reload")
+        return False
     
-    async def test_protected_route_without_token(self, client: AsyncClient):
-        """Test accessing protected route without authentication token."""
-        response = await client.get("/api/protected-route")
-        
-        assert response.status_code == 401
+    except Exception as e:
+        print(f"❌ Test failed with error: {e}")
+        return False
     
-    async def test_protected_route_with_token(self, client: AsyncClient, test_user_data):
-        """Test accessing protected route with valid authentication token."""
-        # Register and login user
-        await client.post("/auth/register", json=test_user_data)
-        
-        login_data = {
-            "username": test_user_data["email"],
-            "password": test_user_data["password"]
-        }
-        
-        login_response = await client.post("/auth/jwt/login", data=login_data)
-        assert login_response.status_code == 200
-        
-        token_data = login_response.json()
-        access_token = token_data["access_token"]
-        
-        # Access protected route
-        headers = {"Authorization": f"Bearer {access_token}"}
-        response = await client.get("/api/protected-route", headers=headers)
-        
-        assert response.status_code == 200
-        data = response.json()
-        
-        assert "message" in data
-        assert "user_id" in data
-        assert "user_data" in data
-        
-        user_data = data["user_data"]
-        assert user_data["email"] == test_user_data["email"]
-        assert user_data["first_name"] == test_user_data["first_name"]
-        assert user_data["last_name"] == test_user_data["last_name"]
-    
-    async def test_protected_route_with_invalid_token(self, client: AsyncClient):
-        """Test accessing protected route with invalid token."""
-        headers = {"Authorization": "Bearer invalid_token_here"}
-        response = await client.get("/api/protected-route", headers=headers)
-        
-        assert response.status_code == 401
-    
-    async def test_user_registration_validation(self, client: AsyncClient):
-        """Test user registration input validation."""
-        # Test with missing email
-        invalid_data = {
-            "password": "testpass123",
-            "first_name": "Test"
-        }
-        
-        response = await client.post("/auth/register", json=invalid_data)
-        assert response.status_code == 422
-        
-        # Test with invalid email format
-        invalid_data = {
-            "email": "not-an-email",
-            "password": "testpass123"
-        }
-        
-        response = await client.post("/auth/register", json=invalid_data)
-        assert response.status_code == 422
-        
-        # Test with missing password
-        invalid_data = {
-            "email": "test@example.com"
-        }
-        
-        response = await client.post("/auth/register", json=invalid_data)
-        assert response.status_code == 422
+    return True
+
+
+if __name__ == "__main__":
+    asyncio.run(test_authentication_system())

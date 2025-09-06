@@ -166,3 +166,43 @@ cython_debug/
 alembic/versions/*.py
 !alembic/versions/__init__.py
 logs/
+
+# Frontend/Node.js
+frontend/node_modules/
+frontend/dist/
+frontend/.nuxt/
+frontend/.output/
+frontend/.vite/
+frontend/coverage/
+
+# Temporary files and logs
+*.log
+*.tmp
+nohup.out
+server.log
+backend.log
+celery_worker.log
+frontend.log
+frontend_*.log
+
+# Database files
+*.sqlite
+*.sqlite3
+gpu_compute.db
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# IDE and editor files
+*.swp
+*.swo
+*~
+
+# MLflow artifacts
+mlruns/
+artifacts/
+
+# Kubernetes and Docker
+*.kubeconfig
+docker-compose.override.yml

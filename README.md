@@ -84,7 +84,7 @@
 
 ```bash path=null start=null
 # 克隆仓库
-git clone <repository-url>
+git clone https://github.com/avaargsh/gpu-compute-platform.git
 cd gpu-compute-platform
 
 # 使用 uv 安装依赖（推荐）
@@ -104,10 +104,16 @@ uv run alembic upgrade head
 ### 3. 启动开发服务器
 
 ```bash
-# 方式1: 使用项目提供的启动脚本（推荐）
-uv run python run_dev.py
+# 方式1: 使用开发启动脚本（推荐 - 同时启动前后端）
+./scripts/start_dev.sh
 
-# 方式2: 直接使用 uvicorn
+# 方式2: 仅启动后端服务
+./scripts/start_backend.sh
+
+# 方式3: 手动启动后端
+uv run python scripts/run_dev.py
+
+# 方式4: 直接使用 uvicorn
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -155,6 +161,10 @@ uv run celery -A app.core.celery_app.celery_app worker -Q default,gpu_tasks -l i
 ### 运行测试用例
 
 ```bash
+# 方式1: 使用测试脚本（推荐）
+./scripts/run_tests.sh
+
+# 方式2: 手动运行测试
 # 推荐：在测试模式下运行，避免连接外部 MLflow 服务
 TESTING=true uv run pytest
 
@@ -172,7 +182,10 @@ uv run pytest --cov=app --cov-report=term-missing
 
 ```bash path=null start=null
 # 测试 GPU 提供商适配器（使用模拟数据）
-uv run python example_gpu_usage.py
+uv run python examples/example_gpu_usage.py
+
+# 测试 RunPod 适配器
+uv run python examples/example_runpod_usage.py
 
 # 手动测试 API 端点
 curl -s http://localhost:8000/health | jq
@@ -435,4 +448,4 @@ gpu-compute-platform/
 
 ---
 
-*最后更新: 2025-01*
+*最后更新: 2025-09*

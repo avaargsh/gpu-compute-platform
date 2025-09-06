@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from app.core.celery_app import celery_app
 from app.core.database import get_async_session
 from app.core.mlflow_config import MLflowTaskTracker
+from app.core.task_status_broadcaster import task_broadcaster, broadcast_task_status, broadcast_task_progress, broadcast_task_logs, broadcast_task_error
 from app.models.task import GpuTask, TaskStatus, TaskLog, TaskMetric
 from app.models.user import User
 from app.gpu.interface import JobConfig, JobResult, GpuProviderInterface
@@ -37,9 +38,10 @@ async def update_task_status(
     session: AsyncSession,
     task_id: str, 
     status: TaskStatus,
+    broadcast: bool = True,
     **kwargs
 ):
-    """更新任务状态"""
+    """更新任务状态并广播到WebSocket客户端"""
     try:
         update_data = {"status": status, "updated_at": datetime.now(timezone.utc)}
         update_data.update(kwargs)
@@ -49,6 +51,31 @@ async def update_task_status(
         await session.commit()
         
         logger.info(f"Updated task {task_id} status to {status}")
+        
+        # 广播状态更新到WebSocket客户端
+        if broadcast:
+            try:
+                # 计算进度
+                progress = None
+                if status == TaskStatus.RUNNING:
+                    progress = 25  # 开始执行
+                elif status == TaskStatus.COMPLETED:
+                    progress = 100  # 完成
+                elif status == TaskStatus.FAILED:
+                    progress = 100  # 失败也是终态
+                elif status == TaskStatus.CANCELLED:
+                    progress = 100  # 取消也是终态
+                
+                await broadcast_task_status(
+                    task_id=task_id,
+                    status=status,
+                    message=f"Task status updated to {status.value}",
+                    progress=progress,
+                    additional_data=update_data
+                )
+            except Exception as broadcast_error:
+                logger.warning(f"Failed to broadcast status update for task {task_id}: {broadcast_error}")
+        
     except Exception as e:
         logger.error(f"Failed to update task {task_id} status: {e}")
         await session.rollback()
@@ -60,9 +87,10 @@ async def log_task_message(
     task_id: str,
     level: str,
     message: str,
-    source: str = "worker"
+    source: str = "worker",
+    broadcast: bool = True
 ):
-    """记录任务日志"""
+    """记录任务日志并广播到WebSocket客户端"""
     try:
         log_entry = TaskLog(
             task_id=task_id,
@@ -73,6 +101,19 @@ async def log_task_message(
         )
         session.add(log_entry)
         await session.commit()
+        
+        # 广播日志到WebSocket客户端
+        if broadcast:
+            try:
+                await broadcast_task_logs(
+                    task_id=task_id,
+                    logs=message,
+                    level=level,
+                    source=source
+                )
+            except Exception as broadcast_error:
+                logger.warning(f"Failed to broadcast log message for task {task_id}: {broadcast_error}")
+        
     except Exception as e:
         logger.error(f"Failed to log task message: {e}")
         await session.rollback()
@@ -168,8 +209,23 @@ def execute_gpu_task(self, task_id: str, provider_config: Dict[str, Any]):
                     "worker"
                 )
                 
+                # 广播任务开始进度
+                await broadcast_task_progress(
+                    task_id=task_id,
+                    progress=10,
+                    message="Initializing GPU task execution",
+                    step_info={"step": "initialization", "provider": task.provider_name}
+                )
+                
                 try:
                     # 提交作业到GPU提供商
+                    await broadcast_task_progress(
+                        task_id=task_id,
+                        progress=20,
+                        message=f"Submitting job to {task.provider_name}",
+                        step_info={"step": "job_submission", "provider": task.provider_name}
+                    )
+                    
                     external_job_id = await adapter.submit_job(job_config)
                     
                     # 更新外部任务ID
@@ -186,14 +242,42 @@ def execute_gpu_task(self, task_id: str, provider_config: Dict[str, Any]):
                         "worker"
                     )
                     
+                    # 广播作业提交成功
+                    await broadcast_task_progress(
+                        task_id=task_id,
+                        progress=30,
+                        message=f"Job submitted successfully. External ID: {external_job_id}",
+                        step_info={"step": "job_submitted", "external_job_id": external_job_id}
+                    )
+                    
                     # 监控任务执行
+                    await broadcast_task_progress(
+                        task_id=task_id,
+                        progress=40,
+                        message="Monitoring job execution",
+                        step_info={"step": "monitoring", "external_job_id": external_job_id}
+                    )
+                    
                     job_result = await monitor_job_execution(
                         session, task_id, adapter, external_job_id, tracker
                     )
                     
                     # 获取成本信息
+                    cost_data = None
                     try:
+                        await broadcast_task_progress(
+                            task_id=task_id,
+                            progress=85,
+                            message="Collecting cost information",
+                            step_info={"step": "cost_collection"}
+                        )
+                        
                         cost_info = await adapter.get_cost_info(external_job_id)
+                        cost_data = {
+                            "total_cost": float(cost_info.total_cost),
+                            "currency": cost_info.currency
+                        }
+                        
                         await update_task_status(
                             session, task_id, job_result.status,
                             actual_cost=float(cost_info.total_cost),
@@ -212,6 +296,15 @@ def execute_gpu_task(self, task_id: str, provider_config: Dict[str, Any]):
                     
                     # 记录最终状态
                     final_status = TaskStatus.COMPLETED if job_result.status.value == "completed" else TaskStatus.FAILED
+                    
+                    # 广播任务即将完成
+                    await broadcast_task_progress(
+                        task_id=task_id,
+                        progress=95,
+                        message=f"Task finishing with status: {final_status.value}",
+                        step_info={"step": "finalizing", "final_status": final_status.value}
+                    )
+                    
                     await update_task_status(
                         session, 
                         task_id, 
@@ -237,6 +330,20 @@ def execute_gpu_task(self, task_id: str, provider_config: Dict[str, Any]):
                         session, task_id, "INFO", 
                         f"Task completed with status: {final_status}", 
                         "worker"
+                    )
+                    
+                    # 广播任务完成
+                    execution_time = task.duration_seconds if hasattr(task, 'duration_seconds') and task.duration_seconds else None
+                    await task_broadcaster.broadcast_task_completed(
+                        task_id=task_id,
+                        success=(final_status == TaskStatus.COMPLETED),
+                        result_data={
+                            "exit_code": job_result.exit_code,
+                            "external_job_id": external_job_id,
+                            "provider": task.provider_name
+                        },
+                        execution_time=execution_time,
+                        cost_info=cost_data
                     )
                     
                     # 更新MLflow运行ID
@@ -269,6 +376,13 @@ def execute_gpu_task(self, task_id: str, provider_config: Dict[str, Any]):
                         "worker"
                     )
                     
+                    # 广播任务错误
+                    await broadcast_task_error(
+                        task_id=task_id,
+                        error_message=error_message,
+                        error_code="TASK_EXECUTION_FAILED"
+                    )
+                    
                     # 记录错误到MLflow
                     tracker.log_error(error_message)
                     
@@ -295,7 +409,7 @@ async def monitor_job_execution(
     poll_interval: int = 30,
     max_polls: int = 120  # 最多监控1小时
 ) -> JobResult:
-    """监控作业执行"""
+    """监控作业执行并实时广播进度"""
     
     for poll_count in range(max_polls):
         try:
@@ -308,8 +422,33 @@ async def monitor_job_execution(
                 "monitor"
             )
             
+            # 计算监控进度 (40% - 80%)
+            monitor_progress = 40 + (poll_count / max_polls) * 40
+            await broadcast_task_progress(
+                task_id=task_id,
+                progress=monitor_progress,
+                message=f"Monitoring job execution: {job_result.status}",
+                step_info={
+                    "step": "monitoring",
+                    "poll_count": poll_count + 1,
+                    "max_polls": max_polls,
+                    "job_status": job_result.status.value if hasattr(job_result.status, 'value') else str(job_result.status),
+                    "external_job_id": external_job_id
+                }
+            )
+            
             # 检查是否为终态
             if job_result.status.value in ["completed", "failed", "cancelled"]:
+                # 监控完成，进度设为80%
+                await broadcast_task_progress(
+                    task_id=task_id,
+                    progress=80,
+                    message=f"Job execution finished: {job_result.status}",
+                    step_info={
+                        "step": "monitoring_complete",
+                        "final_status": job_result.status.value if hasattr(job_result.status, 'value') else str(job_result.status)
+                    }
+                )
                 return job_result
             
             # 等待下次轮询
@@ -321,6 +460,18 @@ async def monitor_job_execution(
                 session, task_id, "WARNING", 
                 f"Failed to get job status: {e}", 
                 "monitor"
+            )
+            
+            # 广播监控错误但继续尝试
+            await broadcast_task_progress(
+                task_id=task_id,
+                progress=40 + (poll_count / max_polls) * 40,
+                message=f"Monitoring warning: {str(e)}",
+                step_info={
+                    "step": "monitoring_warning",
+                    "poll_count": poll_count + 1,
+                    "warning": str(e)
+                }
             )
             
             if poll_count < max_polls - 1:
@@ -446,6 +597,12 @@ def cancel_gpu_task(self, task_id: str, provider_config: Dict[str, Any]):
                 session, task_id, "INFO", 
                 "Task cancelled", 
                 "worker"
+            )
+            
+            # 广播任务取消
+            await task_broadcaster.broadcast_task_cancelled(
+                task_id=task_id,
+                reason="Task was cancelled by user request"
             )
             
             return {"task_id": task_id, "status": "cancelled"}

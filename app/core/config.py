@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     app_name: str = "GPU Compute Platform"
     debug: bool = False
     version: str = "0.1.0"
+    environment: str = "development"
     
     # Security
     secret_key: str = secrets.token_urlsafe(32)
