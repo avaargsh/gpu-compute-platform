@@ -25,11 +25,13 @@ This document provides comprehensive guidance for testing the GPU Compute Platfo
 
 ## Running Tests
 
+> 推荐：在测试模式下运行以避免连接外部服务（如 MLflow）。将环境变量 `TESTING=true` 传递给 pytest 可跳过 MLflow 实验初始化等副作用。
+
 ### Quick Test Commands
 
 ```bash
-# Run all tests
-uv run pytest
+# Run all tests (recommended testing mode)
+TESTING=true uv run pytest
 
 # Run with verbose output
 uv run pytest -v

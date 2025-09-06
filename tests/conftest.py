@@ -72,9 +72,10 @@ async def client(test_session):
 
 @pytest.fixture
 def test_user_data():
-    """Test user data."""
+    """Test user data with unique email per test to avoid uniqueness conflicts."""
+    import uuid
     return {
-        "email": "test@example.com",
+        "email": f"test+{uuid.uuid4().hex[:8]}@example.com",
         "password": "testpassword123",
         "first_name": "Test",
         "last_name": "User",
@@ -84,9 +85,10 @@ def test_user_data():
 
 @pytest.fixture
 def test_admin_data():
-    """Test admin user data."""
+    """Test admin user data with unique email per test."""
+    import uuid
     return {
-        "email": "admin@example.com",
+        "email": f"admin+{uuid.uuid4().hex[:8]}@example.com",
         "password": "adminpassword123",
         "first_name": "Admin",
         "last_name": "User",

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.auth import router as auth_router
 from app.api.protected import router as protected_router
 from app.api.gpu_jobs import router as gpu_jobs_router
+from app.api.dag import router as dag_router
 from app.core.config import settings
 from app.core.database import create_db_and_tables
 
@@ -37,6 +38,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
 app.include_router(protected_router, prefix="/api", tags=["protected"])
 app.include_router(gpu_jobs_router, prefix="/api/gpu", tags=["gpu-jobs"])
+app.include_router(dag_router, prefix="/api", tags=["dag"])
 
 
 @app.get("/")

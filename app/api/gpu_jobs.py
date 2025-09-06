@@ -1,11 +1,17 @@
+import json
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
 from app.core.auth import current_active_user
+from app.core.database import get_async_session
+from app.core.scheduler import IntelligentScheduler, TaskRequirement
 from app.models.user import User
+from app.models.task import GpuTask, TaskStatus, TaskPriority
 from app.gpu.interface import GpuSpec, JobConfig, JobResult, CostInfo
-from app.gpu.providers.runpod import RunPodAdapter
-from app.gpu.providers.tencent import TencentCloudAdapter
-from app.gpu.providers.alibaba import AlibabaCloudAdapter
+from app.tasks.gpu_tasks import execute_gpu_task, cancel_gpu_task
 import os
 
 router = APIRouter()
@@ -39,13 +45,18 @@ def get_provider_adapter(provider_name: str):
         )
     
     config = PROVIDERS[provider_name]
+
+    # 实际适配器实现
+    from app.gpu.providers.tencent import TencentCloudAdapter
+    from app.gpu.providers.alibaba import AlibabaCloudAdapter
+    from app.gpu.providers.runpod import RunPodAdapter
     
-    if provider_name == "runpod":
-        return RunPodAdapter(config)
-    elif provider_name == "tencent":
+    if provider_name == "tencent":
         return TencentCloudAdapter(config)
     elif provider_name == "alibaba":
         return AlibabaCloudAdapter(config)
+    elif provider_name == "runpod":
+        return RunPodAdapter(config)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -111,24 +122,192 @@ async def check_provider_health(
         )
 
 
-@router.post("/jobs/submit")
-async def submit_job(
-    provider_name: str,
-    job_config: JobConfig,
+@router.get("/scheduling/recommendations")
+async def get_scheduling_recommendations(
+    gpu_type: str,
+    gpu_count: int = 1,
+    memory_gb: Optional[int] = None,
+    vcpus: int = 4,
+    estimated_duration_minutes: int = 60,
+    priority: int = 5,
     user: User = Depends(current_active_user)
 ):
-    """提交GPU作业"""
+    """获取针对特定任务的调度建议"""
     try:
-        adapter = get_provider_adapter(provider_name)
-        job_id = await adapter.submit_job(job_config)
+        scheduler = IntelligentScheduler()
+        
+        task_requirement = TaskRequirement(
+            gpu_type=gpu_type,
+            gpu_count=gpu_count,
+            memory_gb=memory_gb or 0,
+            vcpus=vcpus,
+            estimated_duration_minutes=estimated_duration_minutes,
+            priority=priority
+        )
+        
+        recommendations = {}
+        strategies = ["cost", "performance", "availability", "balanced"]
+        
+        for strategy in strategies:
+            provider, routing_key = await scheduler.select_optimal_provider(
+                task_requirement, strategy
+            )
+            if provider:
+                score = await scheduler.calculate_provider_score(
+                    provider, task_requirement, strategy
+                )
+                recommendations[strategy] = {
+                    "provider": provider,
+                    "routing_key": routing_key,
+                    "score": score
+                }
         
         return {
-            "job_id": job_id,
-            "provider": provider_name,
-            "status": "submitted",
-            "message": f"Job submitted successfully to {provider_name}"
+            "task_requirement": {
+                "gpu_type": task_requirement.gpu_type,
+                "gpu_count": task_requirement.gpu_count,
+                "memory_gb": task_requirement.memory_gb,
+                "vcpus": task_requirement.vcpus,
+                "estimated_duration_minutes": task_requirement.estimated_duration_minutes,
+                "priority": task_requirement.priority
+            },
+            "recommendations": recommendations,
+            "provider_metrics": scheduler.get_all_provider_metrics()
         }
+        
     except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get recommendations: {str(e)}"
+        )
+
+
+@router.get("/scheduling/metrics")
+async def get_scheduling_metrics(
+    user: User = Depends(current_active_user)
+):
+    """获取调度器指标和提供商统计"""
+    try:
+        scheduler = IntelligentScheduler()
+        metrics = scheduler.get_all_provider_metrics()
+        
+        return {
+            "provider_metrics": metrics,
+            "total_providers": len(metrics),
+            "healthy_providers": len([m for m in metrics.values() if m.get("health_score", 0) > 0.7]),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get scheduling metrics: {str(e)}"
+        )
+
+
+@router.post("/jobs/submit")
+async def submit_job(
+    job_config: JobConfig,
+    priority: TaskPriority = TaskPriority.NORMAL,
+    preferred_provider: Optional[str] = None,
+    scheduling_strategy: str = "balanced",  # cost, performance, availability, balanced
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user)
+):
+    """智能提交GPU作业到最优提供商"""
+    try:
+        # 创建智能调度器
+        scheduler = IntelligentScheduler()
+        
+        # 构建任务需求
+        task_requirement = TaskRequirement(
+            gpu_type=job_config.gpu_spec.gpu_type,
+            gpu_count=job_config.gpu_spec.gpu_count,
+            memory_gb=job_config.gpu_spec.memory_gb or 0,
+            vcpus=job_config.gpu_spec.vcpus,
+            estimated_duration_minutes=60,  # 默认估计1小时，可以从job_config中提取
+            priority=priority.value if hasattr(priority, 'value') else 5
+        )
+        
+        # 如果指定了首选提供商，验证其存在
+        if preferred_provider:
+            if preferred_provider not in PROVIDERS:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unsupported provider: {preferred_provider}"
+                )
+        
+        # 选择最优提供商和路由
+        selected_provider, routing_key = await scheduler.select_optimal_provider(
+            task_requirement, 
+            scheduling_strategy,
+            preferred_provider
+        )
+        
+        if not selected_provider:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No available providers for the requested GPU specification"
+            )
+        
+        # 创建任务记录
+        task = GpuTask(
+            name=job_config.name,
+            description=f"{job_config.name} on {selected_provider} (智能调度)",
+            user_id=str(user.id),
+            provider_name=selected_provider,
+            job_config=job_config.model_dump_json(),
+            status=TaskStatus.PENDING,
+            priority=priority,
+            gpu_spec=job_config.gpu_spec.model_dump_json() if job_config.gpu_spec else None,
+            created_at=datetime.now(timezone.utc)
+        )
+        
+        session.add(task)
+        await session.commit()
+        await session.refresh(task)
+        
+        # 提交异步任务到选定的队列
+        provider_config = PROVIDERS[selected_provider]
+        celery_task = execute_gpu_task.apply_async(
+            args=[task.id, provider_config],
+            queue=routing_key
+        )
+        
+        # 更新Celery任务ID
+        task.celery_task_id = celery_task.id
+        task.status = TaskStatus.QUEUED
+        await session.commit()
+        
+        # 获取调度决策的详细信息
+        provider_score = await scheduler.calculate_provider_score(
+            selected_provider, task_requirement, scheduling_strategy
+        )
+        
+        return {
+            "task_id": task.id,
+            "celery_task_id": celery_task.id,
+            "provider": selected_provider,
+            "routing_key": routing_key,
+            "status": "queued",
+            "message": f"Job intelligently scheduled to {selected_provider}",
+            "created_at": task.created_at.isoformat(),
+            "scheduling_info": {
+                "strategy": scheduling_strategy,
+                "provider_score": provider_score,
+                "estimated_duration": task_requirement.estimated_duration_minutes,
+                "gpu_spec": {
+                    "gpu_type": task_requirement.gpu_type,
+                    "gpu_count": task_requirement.gpu_count,
+                    "memory_gb": task_requirement.memory_gb,
+                    "vcpus": task_requirement.vcpus,
+                    "priority": task_requirement.priority
+                }
+            }
+        }
+        
+    except Exception as e:
+        await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Job submission failed: {str(e)}"
@@ -200,24 +379,164 @@ async def get_job_cost(
         )
 
 
-@router.post("/jobs/{provider_name}/{job_id}/cancel")
-async def cancel_job(
-    provider_name: str,
-    job_id: str,
+@router.get("/tasks")
+async def list_user_tasks(
+    skip: int = 0,
+    limit: int = 100,
+    status_filter: Optional[TaskStatus] = None,
+    provider_filter: Optional[str] = None,
+    session: AsyncSession = Depends(get_async_session),
     user: User = Depends(current_active_user)
 ):
-    """取消作业"""
+    """列出用户的任务"""
     try:
-        adapter = get_provider_adapter(provider_name)
-        success = await adapter.cancel_job(job_id)
+        query = select(GpuTask).where(GpuTask.user_id == str(user.id))
+        
+        if status_filter:
+            query = query.where(GpuTask.status == status_filter)
+        if provider_filter:
+            query = query.where(GpuTask.provider_name == provider_filter)
+            
+        query = query.order_by(GpuTask.created_at.desc()).offset(skip).limit(limit)
+        
+        result = await session.execute(query)
+        tasks = result.scalars().all()
+        
         return {
-            "provider": provider_name,
-            "job_id": job_id,
-            "cancelled": success,
-            "message": "Job cancellation request sent" if success else "Job cancellation failed"
+            "tasks": [
+                {
+                    "task_id": task.id,
+                    "name": task.name,
+                    "provider": task.provider_name,
+                    "status": task.status,
+                    "priority": task.priority,
+                    "created_at": task.created_at,
+                    "started_at": task.started_at,
+                    "completed_at": task.completed_at,
+                    "duration_seconds": task.duration_seconds,
+                    "actual_cost": float(task.actual_cost) if task.actual_cost else None,
+                    "currency": task.currency,
+                    "mlflow_run_id": task.mlflow_run_id
+                }
+                for task in tasks
+            ],
+            "total": len(tasks)
         }
+        
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to cancel job: {str(e)}"
+            detail=f"Failed to list tasks: {str(e)}"
+        )
+
+
+@router.get("/tasks/{task_id}")
+async def get_task_details(
+    task_id: str,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user)
+):
+    """获取任务详细信息"""
+    try:
+        stmt = select(GpuTask).where(
+            GpuTask.id == task_id,
+            GpuTask.user_id == str(user.id)
+        )
+        result = await session.execute(stmt)
+        task = result.scalar_one_or_none()
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Task not found"
+            )
+        
+        return {
+            "task_id": task.id,
+            "name": task.name,
+            "description": task.description,
+            "provider": task.provider_name,
+            "status": task.status,
+            "priority": task.priority,
+            "created_at": task.created_at,
+            "started_at": task.started_at,
+            "completed_at": task.completed_at,
+            "updated_at": task.updated_at,
+            "duration_seconds": task.duration_seconds,
+            "exit_code": task.exit_code,
+            "error_message": task.error_message,
+            "logs": task.logs,
+            "job_config": json.loads(task.job_config) if task.job_config else None,
+            "gpu_spec": json.loads(task.gpu_spec) if task.gpu_spec else None,
+            "estimated_cost": float(task.estimated_cost) if task.estimated_cost else None,
+            "actual_cost": float(task.actual_cost) if task.actual_cost else None,
+            "currency": task.currency,
+            "external_job_id": task.external_job_id,
+            "celery_task_id": task.celery_task_id,
+            "mlflow_run_id": task.mlflow_run_id,
+            "mlflow_experiment_name": task.mlflow_experiment_name
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get task details: {str(e)}"
+        )
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_task(
+    task_id: str,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user)
+):
+    """取消任务"""
+    try:
+        stmt = select(GpuTask).where(
+            GpuTask.id == task_id,
+            GpuTask.user_id == str(user.id)
+        )
+        result = await session.execute(stmt)
+        task = result.scalar_one_or_none()
+        
+        if not task:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Task not found"
+            )
+        
+        if task.is_terminal_state:
+            return {
+                "task_id": task_id,
+                "status": task.status,
+                "message": f"Task is already in terminal state: {task.status}"
+            }
+        
+        # 取消Celery任务
+        if task.celery_task_id:
+            from app.core.celery_app import celery_app
+            celery_app.control.revoke(task.celery_task_id, terminate=True)
+        
+        # 如果有外部任务ID，也要取消外部任务
+        if task.external_job_id:
+            provider_config = PROVIDERS[task.provider_name]
+            cancel_gpu_task.delay(task_id, provider_config)
+        
+        # 更新任务状态
+        task.status = TaskStatus.CANCELLED
+        task.completed_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        
+        return {
+            "task_id": task_id,
+            "status": "cancelled",
+            "message": "Task cancellation request sent"
+        }
+        
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel task: {str(e)}"
         )

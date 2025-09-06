@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from pydantic import Field
+from typing import List
 import secrets
 
 
@@ -18,9 +19,18 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./gpu_platform.db"
     
     # CORS
-    allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:8000"]
+    allowed_origins: List[str] = ["http://localhost:3000", "http://localhost:8000"]
     
-    # Redis (for future Celery integration)
+    # Celery配置
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/0"
+    
+    # MLflow配置
+    mlflow_tracking_uri: str = "http://localhost:5000"
+    mlflow_experiment_name: str = "gpu-compute-platform"
+    mlflow_artifact_location: str = "./mlruns"
+    
+    # Redis配置
     redis_url: str = "redis://localhost:6379/0"
     
     model_config = {"env_file": ".env", "case_sensitive": False}

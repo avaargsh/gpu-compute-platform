@@ -49,6 +49,13 @@ Cloud-specific implementations that adapt the unified interface to each provider
 - **Supported GPUs**: T4, V100, A100
 - **Features**: Full Kubernetes integration with pod logs and resource management
 
+#### RunPod Adapter (`runpod.py`)
+- **Strategy**: Serverless GPU via RunPod GraphQL API
+- **Implementation**: Creates on-demand pods based on `GpuSpec` (maps to RunPod GPU types)
+- **Status Tracking**: Maps RunPod `desiredStatus` to unified `JobStatus`
+- **Supported GPUs**: A100, RTX4090, A6000, T4, etc.
+- **Features**: Fast provisioning, simple API, built-in log retrieval and cost estimation
+
 ## Implementation Details
 
 ### Data Models
@@ -213,6 +220,18 @@ Required configuration:
     "region": "ap-shanghai", 
     "cluster_id": "cls-xxxxx",
     "kubeconfig": "base64_encoded_config"  # optional
+}
+```
+
+### RunPod
+Required configuration:
+```python
+{
+    "api_key": "your_runpod_api_key",
+    # optional
+    "endpoint_id": "existing_endpoint_id",
+    "base_url": "https://api.runpod.ai/graphql",
+    "timeout": 300
 }
 ```
 

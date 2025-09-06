@@ -21,6 +21,7 @@
 - **多云厂商支持**:
   - **阿里云 ECS 适配器**: 基于 IaaS 模式，通过 GPU ECS 实例运行容器化任务
   - **腾讯云 TKE 适配器**: 基于 Kubernetes 模式，通过 GPU Job 调度算力任务
+  - **RunPod 适配器**: 基于 Serverless GPU 的 GraphQL API，快速弹性运行
 - **统一数据模型**: `GpuSpec`、`JobConfig`、`JobResult` 等标准化数据结构
 - **任务生命周期管理**: 作业提交、状态查询、日志获取、费用估算
 - **错误处理**: 统一异常处理机制和错误信息反馈
@@ -37,10 +38,14 @@
 - **认证系统测试**: 完整的用户注册、登录、权限验证测试
 - **模拟环境测试**: 无需真实云资源即可完成功能验证
 
+#### 5. 任务调度与工作流
+- **任务队列**: 已集成 Celery + Redis 异步任务队列
+- **DAG 工作流**: 支持 DAG 定义/运行/状态跟踪（API: `/api/dag`）
+- **Worker 路由**: GPU 任务与 DAG 任务分队列执行，支持优先级路由
+
 ### 📋 技术路线图
 
 #### 近期计划（T3-T4周）
-- **任务调度系统**: 集成 Celery + Redis 实现异步任务队列
 - **监控仪表板**: 基础的前端管理界面，展示任务状态和资源使用情况
 - **成本优化**: 智能 GPU 实例选型和成本估算优化
 
@@ -62,10 +67,11 @@
 - **包管理**: uv (现代 Python 包管理器)
 
 ### GPU 提供商技术依赖
-- **阿里云**: alibabacloud-ecs20140526 (ECS GPU 实例管理)
-- **腾讯云**: tencentcloud-sdk-python + kubernetes (TKE 集群管理)
-- **容器编排**: Docker + Kubernetes (统一的容器运行环境)
-- **数据验证**: Pydantic 2.0+ (类型安全和数据验证)
+- **阿里云**: alibabacloud-ecs20140526（ECS GPU 实例管理）
+- **腾讯云**: tencentcloud-sdk-python + kubernetes（TKE 集群管理）
+- **RunPod**: runpod（Serverless GPU 平台，GraphQL API）
+- **容器编排**: Docker + Kubernetes（统一的容器运行环境）
+- **数据验证**: Pydantic 2.0+（类型安全和数据验证）
 
 ## 🚀 快速上手指南
 
@@ -97,12 +103,22 @@ uv run alembic upgrade head
 
 ### 3. 启动开发服务器
 
-```bash path=null start=null
+```bash
 # 方式1: 使用项目提供的启动脚本（推荐）
 uv run python run_dev.py
 
 # 方式2: 直接使用 uvicorn
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 3.1 启动 Redis 与 Celery Worker（异步任务与 DAG）
+
+```bash
+# 确保本地 Redis 已运行（默认 redis://localhost:6379/0）
+# Ubuntu 可安装：sudo apt-get install -y redis-server
+
+# 启动 Celery worker（默认队列 + GPU 任务队列）
+uv run celery -A app.core.celery_app.celery_app worker -Q default,gpu_tasks -l info
 ```
 
 ### 4. 验证服务启动
@@ -138,14 +154,14 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### 运行测试用例
 
-```bash path=null start=null
-# 运行所有测试（52 个测试用例）
-uv run pytest
+```bash
+# 推荐：在测试模式下运行，避免连接外部 MLflow 服务
+TESTING=true uv run pytest
 
 # 运行特定模块测试
-uv run pytest tests/test_auth.py -v          # 认证功能测试
-uv run pytest tests/test_gpu_providers.py -v # GPU 提供商测试
-uv run pytest tests/test_gpu_comprehensive.py -v # GPU 综合测试
+uv run pytest tests/test_auth.py -v                     # 认证功能测试
+uv run pytest tests/test_gpu_providers.py -v           # GPU 提供商测试
+uv run pytest tests/test_gpu_comprehensive.py -v       # GPU 综合测试
 
 # 生成测试覆盖报告
 uv run pytest --cov=app --cov-report=html
@@ -243,6 +259,13 @@ curl -X GET "http://localhost:8000/api/protected-route" \
 - **支持的 GPU**: T4、V100、A100、RTX 系列
 - **优势**: Kubernetes 原生调度，自动扩缩容，资源共享
 
+#### RunPod Serverless GPU 适配器
+- **服务模式**: Serverless（按需付费、秒级弹性）
+- **计算资源**: Pod 级 GPU 容器
+- **接口协议**: GraphQL API（https://api.runpod.ai/graphql）
+- **支持的 GPU**: A100、RTX 4090、A6000、T4 等
+- **优势**: 快速供给、性价比高、API 简洁
+
 ### GPU 任务提交示例
 
 ```python path=example_gpu_usage.py start=44
@@ -280,7 +303,7 @@ job_config = JobConfig(
 #### GPU 提供商配置
 
 **阿里云**：
-```bash path=null start=null
+```bash
 export ALIBABA_ACCESS_KEY_ID="your_access_key"
 export ALIBABA_ACCESS_KEY_SECRET="your_secret_key"
 export ALIBABA_REGION_ID="cn-hangzhou"
@@ -290,13 +313,26 @@ export ALIBABA_KEY_PAIR_NAME="gpu-compute-keypair"
 ```
 
 **腾讯云**：
-```bash path=null start=null
+```bash
 export TENCENT_SECRET_ID="your_secret_id"
 export TENCENT_SECRET_KEY="your_secret_key"
 export TENCENT_REGION="ap-shanghai"
 export TENCENT_CLUSTER_ID="cls-xxxxxx"
 # 可选：提供 base64 编码的 kubeconfig
 export TENCENT_KUBECONFIG="base64_encoded_kubeconfig"
+```
+
+**RunPod**：
+```bash
+export RUNPOD_API_KEY="your_runpod_api_key"
+# 可选：现有 Serverless endpoint ID
+export RUNPOD_ENDPOINT_ID="your_endpoint_id"
+```
+
+**Celery/Redis**（可选覆盖默认值）：
+```bash
+export CELERY_BROKER_URL="redis://localhost:6379/0"
+export CELERY_RESULT_BACKEND="redis://localhost:6379/0"
 ```
 
 ## 📊 项目结构
@@ -306,30 +342,36 @@ gpu-compute-platform/
 ├── app/                     # 主应用模块
 │   ├── api/                 # API 路由模块
 │   │   ├── auth.py          # 认证相关 API
-│   │   └── protected.py     # 受保护的 API
+│   │   ├── protected.py     # 受保护的 API
+│   │   ├── gpu_jobs.py      # GPU 作业提交/调度 API
+│   │   └── dag.py           # DAG 工作流 API
 │   ├── core/                # 核心配置模块
 │   │   ├── auth.py          # 认证配置
 │   │   ├── config.py        # 应用配置
-│   │   └── database.py      # 数据库配置
+│   │   ├── database.py      # 数据库配置
+│   │   ├── celery_app.py    # Celery 应用与队列配置
+│   │   └── dag_engine.py    # DAG 执行引擎
 │   ├── gpu/                 # GPU 提供商适配层
 │   │   ├── interface.py     # 统一接口定义
 │   │   └── providers/       # 各个云厂商适配器
 │   │       ├── alibaba.py   # 阿里云 ECS 适配器
-│   │       └── tencent.py   # 腾讯云 TKE 适配器
+│   │       ├── tencent.py   # 腾讯云 TKE 适配器
+│   │       └── runpod.py    # RunPod Serverless 适配器
 │   ├── models/              # 数据模型
-│   │   └── user.py          # 用户模型
+│   │   ├── user.py          # 用户模型
+│   │   ├── dag.py           # DAG/节点/运行模型
+│   │   └── task.py          # GPU 任务模型
 │   ├── schemas/             # API 数据模式
 │   │   └── user.py          # 用户数据模式
 │   └── main.py              # FastAPI 应用入口
 ├── tests/                   # 测试文件
-│   ├── test_auth.py         # 认证功能测试
-│   ├── test_gpu_providers.py # GPU 提供商测试
-│   └── test_gpu_comprehensive.py # GPU 综合测试
+│   ├── ...                  # 各模块单测/集成测试
 ├── docs/                    # 文档文件
 │   ├── gpu-providers.md     # GPU 提供商文档
 │   └── testing.md           # 测试说明文档
 ├── alembic/                 # 数据库迁移文件
-├── example_gpu_usage.py     # GPU 使用示例
+├── example_gpu_usage.py     # GPU 使用示例（通用）
+├── example_runpod_usage.py  # RunPod 使用示例
 ├── run_dev.py               # 开发服务器启动脚本
 ├── pyproject.toml           # Python 项目配置
 ├── pytest.ini               # pytest 配置
@@ -341,7 +383,6 @@ gpu-compute-platform/
 ### 详细文档
 - [GPU 提供商适配器设计](docs/gpu-providers.md)
 - [测试策略和测试用例](docs/testing.md)
-- [WARP AI 助手配置](WARP.md)
 
 ### 相关资源
 - [FastAPI 官方文档](https://fastapi.tiangolo.com/)
