@@ -319,8 +319,9 @@ class TencentCloudAdapter(GpuProviderInterface):
         if job_id not in self._jobs:
             raise JobNotFoundError(job_id, self.PROVIDER_NAME)
         
+        job_info = self._jobs[job_id]
+        
         try:
-            job_info = self._jobs[job_id]
             job_name = job_info["k8s_job_name"]
             
             k8s_status, status_info = await asyncio.to_thread(
@@ -348,7 +349,20 @@ class TencentCloudAdapter(GpuProviderInterface):
         except JobNotFoundError:
             raise
         except Exception as e:
-            raise ProviderError(f"Failed to get job status: {str(e)}", self.PROVIDER_NAME)
+            # Fallback to cached status when K8s is unavailable
+            logger.warning(f"Failed to get live job status, using cached status: {str(e)}")
+            cached_status = job_info.get("status", JobStatus.UNKNOWN)
+            
+            return JobResult(
+                job_id=job_id,
+                status=cached_status,
+                created_at=job_info["created_at"],
+                started_at=None,
+                completed_at=None,
+                exit_code=None,
+                logs=None,
+                error_message=f"Using cached status due to API unavailability: {str(e)}"
+            )
     
     async def cancel_job(self, job_id: str) -> bool:
         """Cancel job by deleting the Kubernetes job."""
@@ -472,7 +486,7 @@ class TencentCloudAdapter(GpuProviderInterface):
                 gpu_type="V100",
                 gpu_count=1,
                 memory_gb=32,
-                vcpus=8,
+                vcpus=6,
                 ram_gb=32
             ),
             GpuSpec(
@@ -480,7 +494,7 @@ class TencentCloudAdapter(GpuProviderInterface):
                 gpu_count=1,
                 memory_gb=40,
                 vcpus=12,
-                ram_gb=48
+                ram_gb=64
             )
         ]
     

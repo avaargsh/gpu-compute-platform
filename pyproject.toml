@@ -26,4 +26,9 @@ dependencies = [
     "tencentcloud-sdk-python>=3.0.0",
     "kubernetes>=29.0.0",
     "pydantic>=2.0.0",
+    # RunPod GPU Provider Dependencies
+    "runpod>=1.6.0",
+    "requests>=2.31.0",
+    # Enhanced Testing Dependencies
+    "pytest-mock>=3.12.0",
 ]

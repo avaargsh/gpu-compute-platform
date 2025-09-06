@@ -253,11 +253,10 @@ echo "$(date)" > job_completed_at.txt
             job_info = self._job_instances[job_id]
             instance_id = job_info['instance_id']
             
-            request = StopInstancesRequest(
-                region_id=self.config['region_id'],
-                instance_ids=f'["{instance_id}"]',
-                force_stop=True
-            )
+            request = StopInstancesRequest()
+            request.region_id = self.config['region_id']
+            request.instance_ids = f'["{instance_id}"]'
+            request.force_stop = True
             
             runtime_options = RuntimeOptions()
             await asyncio.to_thread(
