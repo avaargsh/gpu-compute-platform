@@ -1,10 +1,16 @@
 <template>
-  <el-container class="layout-container">
+  <!-- 未登录时显示认证布局 -->
+  <div v-if="!userStore.isLoggedIn" class="auth-layout">
+    <router-view />
+  </div>
+  
+  <!-- 已登录时显示主布局 -->
+  <el-container v-else class="layout-container">
     <!-- 侧边栏 -->
     <el-aside :width="sidebarCollapsed ? '64px' : '240px'" class="sidebar">
       <div class="logo">
-        <img v-if="!sidebarCollapsed" src="/logo.svg" alt="GPU Platform" class="logo-img">
-        <img v-else src="/logo-mini.svg" alt="GPU Platform" class="logo-img-mini">
+        <el-icon v-if="!sidebarCollapsed" class="logo-icon"><Monitor /></el-icon>
+        <el-icon v-else class="logo-icon-mini"><Monitor /></el-icon>
         <span v-if="!sidebarCollapsed" class="logo-text">GPU计算平台</span>
       </div>
       
@@ -16,7 +22,7 @@
         unique-opened
       >
         <el-menu-item
-          v-for="route in menuRoutes"
+          v-for="route in filteredMenuRoutes"
           :key="route.path"
           :index="route.path"
           @click="handleMenuClick(route.path)"
@@ -93,20 +99,36 @@
           </el-dropdown>
           
           <!-- 用户菜单 -->
-          <el-dropdown trigger="click" class="user-dropdown">
+          <el-dropdown trigger="click" class="user-dropdown" @command="handleUserCommand">
             <div class="user-info">
-              <el-avatar size="small">
+              <el-avatar 
+                size="small" 
+                :src="userStore.user?.avatar"
+              >
                 <el-icon><User /></el-icon>
               </el-avatar>
-              <span v-if="!sidebarCollapsed" class="username">管理员</span>
+              <span v-if="!sidebarCollapsed && userStore.user" class="username">
+                {{ userStore.user.nickname || userStore.user.username }}
+              </span>
+              <el-tag v-if="!sidebarCollapsed && userStore.isAdmin" size="small" type="danger" class="role-tag">
+                管理员
+              </el-tag>
             </div>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item @click="handleUserSettings">
-                  <el-icon><Setting /></el-icon>
-                  个人设置
+                <el-dropdown-item command="profile">
+                  <el-icon><User /></el-icon>
+                  个人资料
                 </el-dropdown-item>
-                <el-dropdown-item divided @click="handleLogout">
+                <el-dropdown-item command="password">
+                  <el-icon><Lock /></el-icon>
+                  修改密码
+                </el-dropdown-item>
+                <el-dropdown-item command="settings" v-if="userStore.hasPermission('system_settings')">
+                  <el-icon><Setting /></el-icon>
+                  系统设置
+                </el-dropdown-item>
+                <el-dropdown-item divided command="logout">
                   <el-icon><SwitchButton /></el-icon>
                   退出登录
                 </el-dropdown-item>
@@ -118,15 +140,36 @@
 
       <!-- 主要内容区域 -->
       <el-main class="main-content">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <transition name="fade-transform" mode="out-in">
+            <component :is="Component" />
+          </transition>
+        </router-view>
       </el-main>
     </el-container>
+    
+    <!-- 用户资料对话框 -->
+    <UserProfileDialog
+      v-model="profileDialogVisible"
+      @updated="handleProfileUpdated"
+    />
+    
+    <!-- 修改密码对话框 -->
+    <ChangePasswordDialog
+      v-model="passwordDialogVisible"
+    />
+    
+    <!-- 通知抽屉 -->
+    <NotificationDrawer
+      v-model="notificationDrawerVisible"
+    />
   </el-container>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { 
   Dashboard,
   Management,
@@ -138,23 +181,49 @@ import {
   Connection,
   SwitchButton,
   Expand,
-  Fold
+  Fold,
+  Lock
 } from '@element-plus/icons-vue'
 import { wsService } from '@/services/websocket'
+import { useUserStore } from '@/stores/userStore'
+import UserProfileDialog from './UserProfileDialog.vue'
+import ChangePasswordDialog from './ChangePasswordDialog.vue'
+import NotificationDrawer from './NotificationDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 // 响应式数据
 const sidebarCollapsed = ref(false)
 const wsConnected = ref(false)
 const notifications = ref<any[]>([])
+const profileDialogVisible = ref(false)
+const passwordDialogVisible = ref(false)
+const notificationDrawerVisible = ref(false)
 
 // 菜单路由配置
 const menuRoutes = computed(() => {
   return router.getRoutes().filter(route => 
     !route.meta?.hideInMenu && route.meta?.title
   )
+})
+
+// 过滤后的菜单路由（基于权限）
+const filteredMenuRoutes = computed(() => {
+  return menuRoutes.value.filter(route => {
+    // 成本优化页面只有管理员可见
+    if (route.path === '/cost') {
+      return userStore.hasPermission('view_cost')
+    }
+    
+    // 系统设置只有管理员可见
+    if (route.path === '/settings') {
+      return userStore.hasPermission('system_settings')
+    }
+    
+    return true
+  })
 })
 
 // 当前路由
@@ -197,13 +266,35 @@ const handleMenuClick = (path: string) => {
   }
 }
 
-const handleUserSettings = () => {
-  router.push('/settings')
+const handleUserCommand = (command: string) => {
+  switch (command) {
+    case 'profile':
+      profileDialogVisible.value = true
+      break
+    case 'password':
+      passwordDialogVisible.value = true
+      break
+    case 'settings':
+      router.push('/settings')
+      break
+    case 'logout':
+      handleLogout()
+      break
+  }
 }
 
-const handleLogout = () => {
-  // TODO: 实现退出登录逻辑
-  console.log('退出登录')
+const handleLogout = async () => {
+  try {
+    await userStore.logout()
+    await router.push('/login')
+  } catch (error) {
+    console.error('Logout failed:', error)
+    ElMessage.error('退出登录失败')
+  }
+}
+
+const handleProfileUpdated = () => {
+  ElMessage.success('个人资料更新成功')
 }
 
 // WebSocket 事件监听
@@ -232,7 +323,15 @@ const setupWebSocketListeners = () => {
 }
 
 // 组件生命周期
-onMounted(() => {
+onMounted(async () => {
+  // 初始化用户信息
+  userStore.initUser()
+  
+  // 如果有 token 但没有用户信息，尝试获取
+  if (userStore.token && !userStore.user) {
+    await userStore.getCurrentUser()
+  }
+  
   // 恢复侧边栏状态
   const savedCollapsed = localStorage.getItem('sidebarCollapsed')
   if (savedCollapsed !== null) {
@@ -252,6 +351,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* 认证布局 */
+.auth-layout {
+  width: 100vw;
+  height: 100vh;
+}
+
 .layout-container {
   height: 100vh;
 }
@@ -271,14 +376,15 @@ onUnmounted(() => {
   border-bottom: 1px solid #1f2937;
 }
 
-.logo-img {
-  height: 32px;
-  width: 32px;
+.logo-icon {
+  font-size: 24px;
+  color: #1890ff;
+  margin-right: 12px;
 }
 
-.logo-img-mini {
-  height: 24px;
-  width: 24px;
+.logo-icon-mini {
+  font-size: 20px;
+  color: #1890ff;
 }
 
 .logo-text {
@@ -377,6 +483,14 @@ onUnmounted(() => {
 .username {
   font-size: 14px;
   color: #333;
+  margin-right: 8px;
+}
+
+.role-tag {
+  font-size: 10px;
+  height: 16px;
+  line-height: 16px;
+  margin-left: 4px;
 }
 
 .notification-item {
@@ -400,9 +514,25 @@ onUnmounted(() => {
 }
 
 .main-content {
-  padding: 0;
+  padding: 20px;
   overflow-y: auto;
   background: #f0f2f5;
+}
+
+/* 页面切换动画 */
+.fade-transform-enter-active,
+.fade-transform-leave-active {
+  transition: all 0.3s;
+}
+
+.fade-transform-enter-from {
+  opacity: 0;
+  transform: translateX(30px);
+}
+
+.fade-transform-leave-to {
+  opacity: 0;
+  transform: translateX(-30px);
 }
 
 /* 响应式设计 */

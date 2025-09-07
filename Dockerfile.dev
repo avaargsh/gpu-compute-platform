@@ -1,0 +1,51 @@
+# Development Dockerfile for GPU Compute Platform
+# Optimized for development with hot reload and debugging
+
+FROM nvidia/cuda:12.1-runtime-ubuntu22.04
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.12 \
+    python3.12-venv \
+    python3-pip \
+    curl \
+    git \
+    build-essential \
+    libpq-dev \
+    wget \
+    vim \
+    htop \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv package manager
+RUN pip3 install uv
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app && \
+    chown -R appuser:appuser /app
+
+USER appuser
+WORKDIR /app
+
+# Copy Python project configuration
+COPY --chown=appuser:appuser pyproject.toml ./
+
+# Install Python dependencies with uv (including dev dependencies)
+RUN uv venv .venv && \
+    . .venv/bin/activate && \
+    uv pip install -e . && \
+    uv pip install ipython jupyter jupyterlab pytest-xdist
+
+# Set environment variables for development
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app"
+ENV ENVIRONMENT="development"
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Default working directory
+WORKDIR /app
+
+# Default command for development
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

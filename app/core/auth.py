@@ -1,4 +1,4 @@
-from fastapi import Depends, Request
+from fastapi import Depends, Request, HTTPException, status
 from fastapi_users import BaseUserManager, FastAPIUsers, UUIDIDMixin
 from fastapi_users.authentication import (
     AuthenticationBackend,
@@ -7,12 +7,13 @@ from fastapi_users.authentication import (
 )
 from fastapi_users.db import SQLAlchemyUserDatabase
 from sqlalchemy.ext.asyncio import AsyncSession
+from jose import jwt, JWTError
 
 from app.core.config import settings
 from app.core.database import get_async_session
 from app.models.user import User
 from app.schemas.user import UserCreate
-from typing import Optional, Union
+from typing import Optional, Union, Dict, Any
 import uuid
 
 
@@ -63,3 +64,50 @@ fastapi_users = FastAPIUsers[User, uuid.UUID](get_user_manager, [auth_backend])
 # Dependencies
 current_active_user = fastapi_users.current_user(active=True)
 current_superuser = fastapi_users.current_user(active=True, superuser=True)
+
+# Standard dependency for routes
+get_current_user = fastapi_users.current_user()
+
+
+async def get_current_user_websocket(token: str) -> User:
+    """从JWT令牌中获取当前用户（用于WebSocket认证）"""
+    try:
+        # 解码JWT令牌
+        payload = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.algorithm]
+        )
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="无效的认证凭据",
+            )
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无效的认证令牌",
+        )
+    
+    # 通过用户ID获取用户对象
+    async for session in get_async_session():
+        async for user_manager in get_user_manager(SQLAlchemyUserDatabase(session, User)):
+            try:
+                user = await user_manager.get(uuid.UUID(user_id))
+                if not user.is_active:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="账户未激活",
+                    )
+                return user
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=f"无法获取用户: {str(e)}",
+                )
+    
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="无法获取用户",
+    )

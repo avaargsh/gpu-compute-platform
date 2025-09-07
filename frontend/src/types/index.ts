@@ -94,6 +94,95 @@ export interface GPUMetricsMessage extends WebSocketMessage {
   data: GPUMetrics
 }
 
+// 用户相关类型
+export interface User {
+  id: string
+  username: string
+  email: string
+  nickname: string
+  avatar?: string
+  role: 'admin' | 'user'
+  token?: string
+  created_at: string
+  last_login?: string
+  is_active: boolean
+}
+
+export interface LoginForm {
+  username: string
+  password: string
+  remember?: boolean
+}
+
+export interface RegisterForm {
+  username: string
+  email: string
+  password: string
+  confirmPassword: string
+  nickname: string
+  agreement: boolean
+}
+
+export interface UserProfile {
+  nickname: string
+  email: string
+  avatar?: string
+}
+
+export interface ChangePasswordForm {
+  old_password: string
+  new_password: string
+  confirm_password: string
+}
+
+// 任务扩展类型
+export interface TaskWithUser extends Task {
+  user_id: string
+  user_name: string
+  provider: 'alibaba' | 'tencent' | 'runpod'
+  gpu_model: string
+  image: string
+  script: string
+  dataset_path?: string
+  scheduling_strategy: 'cost' | 'performance' | 'availability'
+  estimated_cost: number
+  actual_cost?: number
+  submitted_at: string
+}
+
+export interface TaskCreateForm {
+  name: string
+  provider: 'alibaba' | 'tencent' | 'runpod'
+  gpu_model: string
+  image: string
+  script: string
+  dataset_path?: string
+  scheduling_strategy: 'cost' | 'performance' | 'availability'
+  max_duration?: number
+  budget_limit?: number
+  environment_vars?: Record<string, string>
+  requirements?: string[]
+}
+
+// Provider 和 GPU 型号相关类型
+export interface Provider {
+  id: string
+  name: string
+  display_name: string
+  is_available: boolean
+  regions: string[]
+}
+
+export interface GPUModel {
+  id: string
+  name: string
+  provider: string
+  memory_gb: number
+  compute_capability: string
+  cost_per_hour: number
+  availability: 'high' | 'medium' | 'low'
+}
+
 // API 响应类型
 export interface ApiResponse<T = any> {
   success: boolean

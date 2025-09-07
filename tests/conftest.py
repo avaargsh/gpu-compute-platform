@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 import tempfile
 import os
 
-from app.main import app
+from app.main_test import app
 from app.core.database import get_async_session, Base
 from app.models.user import User
 

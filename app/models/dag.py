@@ -5,6 +5,7 @@ import uuid
 import json
 
 from sqlalchemy import Column, String, Text, DateTime, Enum as SQLEnum, ForeignKey, Integer, Boolean
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -50,7 +51,7 @@ class TaskDAG(Base):
     description = Column(Text, nullable=True, comment="DAG描述")
     
     # 用户信息
-    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True, comment="用户ID")
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True, comment="用户ID")
     user = relationship("User", back_populates="task_dags")
     
     # DAG配置
@@ -114,7 +115,7 @@ class DAGRun(Base):
     error_message = Column(Text, nullable=True, comment="错误信息")
     
     # 归属用户
-    user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True, comment="用户ID")
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True, comment="用户ID")
     
     # MLflow追踪
     mlflow_experiment_id = Column(String(255), nullable=True, comment="MLflow实验ID")
@@ -261,7 +262,7 @@ class DAGTemplate(Base):
     is_public = Column(Boolean, default=False, comment="是否公开")
     
     # 创建者
-    created_by = Column(String, ForeignKey("users.id"), nullable=False, comment="创建者ID")
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, comment="创建者ID")
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, comment="创建时间")
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False, comment="更新时间")
     

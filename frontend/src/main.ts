@@ -6,11 +6,13 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 import WebSocketPlugin from '@/services/websocket'
+import { useUserStore } from '@/stores/userStore'
 
 const app = createApp(App)
+const pinia = createPinia()
 
 // 安装插件
-app.use(createPinia())
+app.use(pinia)
 app.use(router)
 app.use(ElementPlus)
 app.use(WebSocketPlugin)
@@ -19,5 +21,9 @@ app.use(WebSocketPlugin)
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
   app.component(key, component)
 }
+
+// 初始化用户状态
+const userStore = useUserStore()
+userStore.initUser()
 
 app.mount('#app')

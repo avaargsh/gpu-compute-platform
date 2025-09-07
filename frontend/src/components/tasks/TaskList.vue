@@ -12,7 +12,7 @@
             @input="handleSearch"
           />
         </el-col>
-        <el-col :span="4">
+        <el-col :span="3">
           <el-select
             v-model="statusFilter"
             placeholder="状态筛选"
@@ -25,6 +25,19 @@
             <el-option label="已完成" value="completed" />
             <el-option label="失败" value="failed" />
             <el-option label="已取消" value="cancelled" />
+          </el-select>
+        </el-col>
+        <el-col :span="3">
+          <el-select
+            v-model="providerFilter"
+            placeholder="平台筛选"
+            clearable
+            @change="handleFilter"
+          >
+            <el-option label="全部" value="" />
+            <el-option label="阿里云" value="alibaba" />
+            <el-option label="腾讯云" value="tencent" />
+            <el-option label="RunPod" value="runpod" />
           </el-select>
         </el-col>
         <el-col :span="6">
@@ -59,7 +72,7 @@
     >
       <el-table-column type="selection" width="55" />
       
-      <el-table-column prop="name" label="任务名称" min-width="150">
+      <el-table-column prop="name" label="任务名称" min-width="180">
         <template #default="{ row }">
           <div class="task-name">
             <el-link type="primary" @click="handleViewTask(row.id)">
@@ -72,6 +85,17 @@
             >
               {{ getStatusText(row.status) }}
             </el-tag>
+          </div>
+          <div class="task-meta">
+            <el-text size="small" type="info">{{ row.provider }} • {{ row.gpu_model }}</el-text>
+          </div>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="用户" width="120" v-if="userStore.isAdmin">
+        <template #default="{ row }">
+          <div class="user-info">
+            <span class="user-name">{{ row.user_name }}</span>
           </div>
         </template>
       </el-table-column>
@@ -100,9 +124,22 @@
         </template>
       </el-table-column>
 
-      <el-table-column prop="created_at" label="创建时间" width="160">
+      <el-table-column label="创建时间" width="160">
         <template #default="{ row }">
-          {{ formatTime(row.created_at) }}
+          <div class="time-info">
+            <div>{{ formatTime(row.submitted_at || row.created_at) }}</div>
+            <el-text size="small" type="info">{{ getTimeAgo(row.submitted_at || row.created_at) }}</el-text>
+          </div>
+        </template>
+      </el-table-column>
+
+      <el-table-column label="费用" width="100" v-if="userStore.hasPermission('view_cost')">
+        <template #default="{ row }">
+          <div class="cost-info">
+            <span v-if="row.actual_cost">¥{{ row.actual_cost.toFixed(2) }}</span>
+            <span v-else-if="row.estimated_cost" class="estimated">~¥{{ row.estimated_cost.toFixed(2) }}</span>
+            <span v-else class="text-muted">-</span>
+          </div>
         </template>
       </el-table-column>
 
@@ -183,25 +220,37 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useTaskStore } from '@/stores/taskStore'
+import { useUserStore } from '@/stores/userStore'
 import { wsService } from '@/services/websocket'
-import type { Task } from '@/types'
+import { enhancedTaskApi } from '@/services/api'
+import type { TaskWithUser } from '@/types'
 
 const router = useRouter()
 const taskStore = useTaskStore()
+const userStore = useUserStore()
 
 // 响应式数据
 const searchText = ref('')
 const statusFilter = ref('')
-const selectedTasks = ref<Task[]>([])
+const providerFilter = ref('')
+const selectedTasks = ref<TaskWithUser[]>([])
+const tasks = ref<TaskWithUser[]>([])
+const loading = ref(false)
+const pagination = ref({
+  page: 1,
+  per_page: 20,
+  total: 0,
+  pages: 0
+})
 
 // 计算属性
-const { 
-  tasks, 
-  loading, 
-  pagination, 
-  runningTasks, 
-  failedTasks 
-} = taskStore
+const runningTasks = computed(() => 
+  tasks.value.filter(task => task.status === 'running')
+)
+
+const failedTasks = computed(() => 
+  tasks.value.filter(task => task.status === 'failed')
+)
 
 // 格式化函数
 const formatTime = (timeStr: string) => {
@@ -223,6 +272,24 @@ const getDuration = (startTime: string, endTime?: string) => {
   if (diff < 60) return `${diff}s`
   if (diff < 3600) return `${Math.floor(diff / 60)}m ${diff % 60}s`
   return `${Math.floor(diff / 3600)}h ${Math.floor((diff % 3600) / 60)}m`
+}
+
+const getTimeAgo = (timeStr: string) => {
+  const time = new Date(timeStr)
+  const now = new Date()
+  const diff = now.getTime() - time.getTime()
+
+  if (diff < 60 * 1000) return '刚刚'
+  if (diff < 60 * 60 * 1000) {
+    const minutes = Math.floor(diff / (60 * 1000))
+    return `${minutes}分钟前`
+  }
+  if (diff < 24 * 60 * 60 * 1000) {
+    const hours = Math.floor(diff / (60 * 60 * 1000))
+    return `${hours}小时前`
+  }
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000))
+  return `${days}天前`
 }
 
 const getStatusText = (status: string) => {
@@ -288,8 +355,9 @@ const handleCancelTask = async (taskId: string) => {
       }
     )
     
-    await taskStore.cancelTask(taskId)
+    await enhancedTaskApi.cancelTask(taskId)
     ElMessage.success('任务已取消')
+    await fetchTasks() // 重新加载任务列表
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('取消任务失败')
@@ -299,8 +367,9 @@ const handleCancelTask = async (taskId: string) => {
 
 const handleRestartTask = async (taskId: string) => {
   try {
-    // TODO: 实现重启任务功能
+    await enhancedTaskApi.restartTask(taskId)
     ElMessage.success('任务重启成功')
+    await fetchTasks() // 重新加载任务列表
   } catch (error) {
     ElMessage.error('重启任务失败')
   }
@@ -323,8 +392,9 @@ const handleDeleteTask = async (taskId: string) => {
       }
     )
     
-    // TODO: 实现删除任务功能
+    await enhancedTaskApi.deleteTask(taskId)
     ElMessage.success('任务已删除')
+    await fetchTasks() // 重新加载任务列表
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error('删除任务失败')
@@ -343,8 +413,42 @@ const handleCurrentChange = (currentPage: number) => {
 }
 
 // 获取任务列表
-const fetchTasks = () => {
-  taskStore.fetchTasks(pagination.page, pagination.per_page)
+const fetchTasks = async () => {
+  try {
+    loading.value = true
+    
+    const params = {
+      page: pagination.value.page,
+      per_page: pagination.value.per_page,
+      status: statusFilter.value || undefined,
+      provider: providerFilter.value || undefined,
+      search: searchText.value || undefined,
+      sort_by: 'created_at',
+      sort_order: 'desc' as const
+    }
+    
+    // 如果不是管理员，只显示自己的任务
+    if (!userStore.isAdmin && userStore.user) {
+      params.user_id = userStore.user.id
+    }
+    
+    const response = await enhancedTaskApi.getTasks(params)
+    
+    if (response.data) {
+      tasks.value = response.data.items
+      pagination.value = {
+        page: response.data.page,
+        per_page: response.data.per_page,
+        total: response.data.total,
+        pages: response.data.pages
+      }
+    }
+  } catch (error: any) {
+    console.error('Failed to fetch tasks:', error)
+    ElMessage.error('获取任务列表失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 // WebSocket 事件监听
@@ -378,6 +482,26 @@ onUnmounted(() => {
 .task-name {
   display: flex;
   align-items: center;
+}
+
+.task-meta {
+  margin-top: 4px;
+}
+
+.user-info .user-name {
+  font-size: 14px;
+  color: #303133;
+}
+
+.time-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cost-info .estimated {
+  color: #e6a23c;
+  font-style: italic;
 }
 
 .text-muted {

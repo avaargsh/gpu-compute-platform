@@ -1,0 +1,161 @@
+version: '3.8'
+
+services:
+  # Development application with hot reload
+  app-dev:
+    build: 
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gpu_platform
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - DEBUG=true
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+      - /app/frontend/node_modules  # Prevent overwriting node_modules
+      - gpu_data:/app/data
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - gpu-platform
+    command: >
+      bash -c "
+        echo 'Waiting for database...' &&
+        sleep 10 &&
+        echo 'Running database migrations...' &&
+        alembic upgrade head &&
+        echo 'Starting development server with hot reload...' &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      "
+
+  # Frontend development server
+  frontend-dev:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:8000
+    restart: unless-stopped
+    networks:
+      - gpu-platform
+    command: npm run dev -- --host 0.0.0.0
+
+  # Development Celery worker
+  celery-dev:
+    build: 
+      context: .
+      dockerfile: Dockerfile.dev
+    command: >
+      bash -c "
+        echo 'Waiting for Redis and database...' &&
+        sleep 15 &&
+        echo 'Starting Celery worker...' &&
+        celery -A app.core.celery_app.celery_app worker -Q default,gpu_tasks -l info --concurrency=2
+      "
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gpu_platform
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - PYTHONPATH=/app
+    volumes:
+      - .:/app
+      - gpu_data:/app/data
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+    networks:
+      - gpu-platform
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=gpu_platform
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - gpu-platform
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and task queue
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - gpu-platform
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Jupyter notebook for development and experiments (optional)
+  jupyter:
+    build: 
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8888:8888"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gpu_platform
+      - JUPYTER_ENABLE_LAB=yes
+    volumes:
+      - .:/app
+      - jupyter_data:/home/appuser/.jupyter
+    command: >
+      bash -c "
+        jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+      "
+    restart: unless-stopped
+    networks:
+      - gpu-platform
+    profiles:
+      - jupyter
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  gpu_data:
+    driver: local
+  jupyter_data:
+    driver: local
+
+networks:
+  gpu-platform:
+    driver: bridge

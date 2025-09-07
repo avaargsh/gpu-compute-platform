@@ -42,7 +42,7 @@ class GpuTask(Base):
     description = Column(Text, nullable=True, comment="任务描述")
     
     # 用户信息
-    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True, comment="用户ID")
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True, comment="用户ID")
     user = relationship("User", back_populates="gpu_tasks")
     
     # 任务配置

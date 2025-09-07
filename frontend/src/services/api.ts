@@ -6,7 +6,16 @@ import type {
   InstanceRecommendation,
   CostAnalysis,
   ApiResponse, 
-  PaginatedResponse 
+  PaginatedResponse,
+  User,
+  LoginForm,
+  RegisterForm,
+  UserProfile,
+  ChangePasswordForm,
+  TaskWithUser,
+  TaskCreateForm,
+  Provider,
+  GPUModel
 } from '@/types'
 
 // 创建 axios 实例
@@ -21,11 +30,11 @@ const apiClient: AxiosInstance = axios.create({
 // 请求拦截器
 apiClient.interceptors.request.use(
   (config) => {
-    // 可以在这里添加认证 token
-    // const token = localStorage.getItem('auth_token')
-    // if (token) {
-    //   config.headers.Authorization = `Bearer ${token}`
-    // }
+    // 添加认证 token
+    const token = localStorage.getItem('auth_token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
     return config
   },
   (error) => {
@@ -40,9 +49,10 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      // 处理未授权错误
-      console.error('Unauthorized access')
-      // 可以跳转到登录页面
+      // 处理未授权错误，清除 token 并跳转到登录页面
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('user_info')
+      window.location.href = '/login'
     }
     return Promise.reject(error)
   }
@@ -186,6 +196,116 @@ export const fileApi = {
     return apiClient.get(`/files/${fileId}`, {
       responseType: 'blob'
     })
+  }
+}
+
+// 用户认证相关 API
+export const authApi = {
+  // 用户登录
+  login: async (loginData: LoginForm): Promise<AxiosResponse<ApiResponse<User>>> => {
+    return apiClient.post('/auth/login', loginData)
+  },
+
+  // 用户注册
+  register: async (registerData: Omit<RegisterForm, 'confirmPassword' | 'agreement'>): Promise<AxiosResponse<ApiResponse<User>>> => {
+    return apiClient.post('/auth/register', registerData)
+  },
+
+  // 用户登出
+  logout: async (): Promise<AxiosResponse<ApiResponse<void>>> => {
+    return apiClient.post('/auth/logout')
+  },
+
+  // 获取当前用户信息
+  getCurrentUser: async (): Promise<AxiosResponse<ApiResponse<User>>> => {
+    return apiClient.get('/auth/user')
+  },
+
+  // 更新用户资料
+  updateProfile: async (profileData: UserProfile): Promise<AxiosResponse<ApiResponse<User>>> => {
+    return apiClient.put('/auth/profile', profileData)
+  },
+
+  // 修改密码
+  changePassword: async (passwordData: ChangePasswordForm): Promise<AxiosResponse<ApiResponse<void>>> => {
+    return apiClient.put('/auth/password', passwordData)
+  },
+
+  // 刷新 token
+  refreshToken: async (): Promise<AxiosResponse<ApiResponse<{ token: string }>>> => {
+    return apiClient.post('/auth/refresh')
+  }
+}
+
+// 更新后的任务相关 API
+export const enhancedTaskApi = {
+  // 获取任务列表（包含用户信息）
+  getTasks: async (params: { 
+    page?: number
+    per_page?: number
+    status?: string
+    provider?: string
+    search?: string
+    user_id?: string
+    sort_by?: 'created_at' | 'cost' | 'status'
+    sort_order?: 'asc' | 'desc'
+  }): Promise<AxiosResponse<PaginatedResponse<TaskWithUser>>> => {
+    return apiClient.get('/tasks', { params })
+  },
+
+  // 获取单个任务详情
+  getTask: async (taskId: string): Promise<AxiosResponse<TaskWithUser>> => {
+    return apiClient.get(`/tasks/${taskId}`)
+  },
+
+  // 提交新任务
+  createTask: async (taskData: TaskCreateForm): Promise<AxiosResponse<TaskWithUser>> => {
+    return apiClient.post('/tasks', taskData)
+  },
+
+  // 取消任务
+  cancelTask: async (taskId: string): Promise<AxiosResponse<void>> => {
+    return apiClient.post(`/tasks/${taskId}/cancel`)
+  },
+
+  // 删除任务
+  deleteTask: async (taskId: string): Promise<AxiosResponse<void>> => {
+    return apiClient.delete(`/tasks/${taskId}`)
+  },
+
+  // 获取任务日志
+  getTaskLogs: async (taskId: string): Promise<AxiosResponse<any>> => {
+    return apiClient.get(`/tasks/${taskId}/logs`)
+  },
+
+  // 重启任务
+  restartTask: async (taskId: string): Promise<AxiosResponse<TaskWithUser>> => {
+    return apiClient.post(`/tasks/${taskId}/restart`)
+  },
+
+  // 获取任务统计
+  getTaskStats: async (userId?: string): Promise<AxiosResponse<any>> => {
+    const params = userId ? { user_id: userId } : {}
+    return apiClient.get('/tasks/stats', { params })
+  }
+}
+
+// Provider 和 GPU 相关 API
+export const providerApi = {
+  // 获取所有 Provider
+  getProviders: async (): Promise<AxiosResponse<Provider[]>> => {
+    return apiClient.get('/providers')
+  },
+
+  // 获取 GPU 型号列表
+  getGPUModels: async (provider?: string): Promise<AxiosResponse<GPUModel[]>> => {
+    const params = provider ? { provider } : {}
+    return apiClient.get('/gpu/models', { params })
+  },
+
+  // 获取可用的 Docker 镜像
+  getImages: async (): Promise<AxiosResponse<string[]>> => {
+    return apiClient.get('/images')
   }
 }
 
