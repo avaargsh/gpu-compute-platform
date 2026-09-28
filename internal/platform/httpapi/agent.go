@@ -134,7 +134,7 @@ func (a *AgentAPI) FinalizeDesired(w http.ResponseWriter, r *http.Request) {
 		switch err {
 		case agentstore.ErrDesiredNotFound:
 			http.Error(w, err.Error(), http.StatusNotFound)
-		case agentstore.ErrStaleGeneration:
+		case agentstore.ErrStaleGeneration, agentstore.ErrDesiredNotDeleting:
 			http.Error(w, err.Error(), http.StatusConflict)
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
