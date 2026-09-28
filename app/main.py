@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
+from app.api.v2_workloads import router as v2_workloads_router
+import app.models.control_plane_resource  # register control-plane tables
 # 尝试导入增强的API，如果失败则跳过
 try:
     from app.api.enhanced_auth import router as enhanced_auth_router
@@ -75,6 +77,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(v2_workloads_router, prefix="/api/v2", tags=["control-plane-v2"])
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
 
 if HAS_ENHANCED_AUTH:
