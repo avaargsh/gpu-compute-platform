@@ -25,6 +25,18 @@ type DesiredResource struct {
 	Spec       map[string]any `json:"spec"`
 }
 
+type ReconcileLeaseRequest struct {
+	ClusterID  domain.ID `json:"clusterId"`
+	Kind       string    `json:"kind"`
+	ResourceID domain.ID `json:"resourceId"`
+	Owner      string    `json:"owner"`
+	TTLSeconds int64     `json:"ttlSeconds"`
+}
+
+type ReconcileLeaseResponse struct {
+	Claimed bool `json:"claimed"`
+}
+
 type Observation struct {
 	Kind               string             `json:"kind"`
 	ID                 domain.ID          `json:"id"`
@@ -38,4 +50,6 @@ type ControlPlane interface {
 	Heartbeat(context.Context, Heartbeat) error
 	PullDesired(context.Context, domain.ID) ([]DesiredResource, error)
 	Report(context.Context, domain.ID, []Observation) error
+	ClaimReconcileLease(context.Context, ReconcileLeaseRequest) (bool, error)
+	ReleaseReconcileLease(context.Context, ReconcileLeaseRequest) error
 }
