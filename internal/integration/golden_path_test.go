@@ -12,6 +12,7 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -83,8 +84,28 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 		t.Fatalf("unexpected workload observation: %#v", observed[1])
 	}
 
-	if _, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, "job-train-1", metav1.GetOptions{}); err != nil {
+	job, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, "job-train-1", metav1.GetOptions{})
+	if err != nil {
 		t.Fatalf("job was not projected: %v", err)
+	}
+	workloadObject := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "kueue.x-k8s.io/v1beta1",
+		"kind":       "Workload",
+		"metadata": map[string]any{
+			"name":      "job-train-1-workload",
+			"namespace": "project-1",
+		},
+		"status": map[string]any{
+			"conditions": []any{
+				map[string]any{"type": "QuotaReserved", "status": "True"},
+				map[string]any{"type": "Admitted", "status": "True"},
+			},
+		},
+	}}
+	workloadObject.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Job", UID: job.UID}})
+	workloadGVR := schema.GroupVersionResource{Group: "kueue.x-k8s.io", Version: "v1beta1", Resource: "workloads"}
+	if _, err := dynamicClient.Resource(workloadGVR).Namespace("project-1").Create(ctx, workloadObject, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
 	}
 
 	_, err = coreClient.CoreV1().Pods("project-1").Create(ctx, &corev1.Pod{
@@ -113,10 +134,18 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 			break
 		}
 	}
-	if len(workload.Conditions) != 1 {
-		t.Fatalf("workload conditions missing: %#v", workload)
+	wantTrue := map[string]bool{"Ready": false, "QuotaReserved": false, "Admitted": false, "PodsReady": false}
+	for _, condition := range workload.Conditions {
+		if _, ok := wantTrue[condition.Type]; ok && condition.Status == "True" {
+			wantTrue[condition.Type] = true
+		}
 	}
-	if workload.Conditions[0].Status != "True" || workload.Conditions[0].Reason != "PodsReady" {
-		t.Fatalf("workload did not converge to ready: %#v", workload)
+	for conditionType, found := range wantTrue {
+		if !found {
+			t.Fatalf("workload condition %s did not converge: %#v", conditionType, workload)
+		}
+	}
+	if len(workload.EvidenceRefs) < 2 {
+		t.Fatalf("expected job and kueue workload evidence: %#v", workload)
 	}
 }
