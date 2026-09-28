@@ -16,7 +16,7 @@ class ProviderStatus(dict):
 
 class SchedulerProvider(ABC):
     @abstractmethod
-    async def submit(self, workload: WorkloadSpec) -> str:
+    async def submit(self, workload: WorkloadSpec, generation: int | None = None) -> str:
         """Submit portable workload intent and return a provider binding ID."""
 
     @abstractmethod
