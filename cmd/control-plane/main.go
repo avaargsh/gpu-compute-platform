@@ -9,6 +9,8 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	postgresstore "github.com/avaargsh/gpu-compute-platform/internal/store/postgres"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
@@ -33,7 +35,7 @@ func buildStore() (agentstore.Store, func()) {
 		return agentstore.NewMemory(), func() {}
 	}
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		log.Fatalf("open postgres: %v", err)
 	}
