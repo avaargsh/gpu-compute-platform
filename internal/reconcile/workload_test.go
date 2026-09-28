@@ -13,6 +13,10 @@ type fakeWorkloadProvider struct {
 	calls int
 }
 
+func (f *fakeWorkloadProvider) DeleteWorkload(_ context.Context, _ provider.WorkloadProjection) (provider.DeletionObservation, error) {
+	return provider.DeletionObservation{Gone: true}, nil
+}
+
 func (f *fakeWorkloadProvider) ReconcileWorkload(_ context.Context, p provider.WorkloadProjection) (provider.WorkloadObservation, error) {
 	f.calls++
 	f.last = p
