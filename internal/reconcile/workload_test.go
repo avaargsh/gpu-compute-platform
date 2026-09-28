@@ -34,7 +34,7 @@ func TestWorkloadReconcilerResolvesPoolAcceleratorBinding(t *testing.T) {
 	pool := domain.ComputePool{
 		Metadata:  domain.Metadata{ID: "pool-1", Generation: 2},
 		ProjectID: "project-1",
-		Status: domain.ResourceStatus{ObservedGeneration: 2, Conditions: []domain.Condition{{Type: "Ready", Status: "True"}}},
+		Status:    domain.ResourceStatus{ObservedGeneration: 2, Conditions: []domain.Condition{{Type: "Ready", Status: "True"}}},
 		Spec: domain.ComputePoolSpec{AcceleratorBindings: []domain.AcceleratorBinding{{
 			Class: "h100-80g", ResourceName: "vendor.example/gpu", Flavor: "h100",
 		}}},
