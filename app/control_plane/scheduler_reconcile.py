@@ -28,6 +28,8 @@ class SchedulerReconcileProvider:
         }.get(status.get("phase", "pending"), "pending")
         return {
             "phase": phase,
-            "admitted": status.get("phase") != "pending",
+            "admitted": bool(status.get("admitted", False)),
+            "reason": "Evicted" if status.get("evicted") else ("Admitted" if status.get("admitted") else "PendingAdmission"),
+            "message": "workload was evicted by scheduler" if status.get("evicted") else "",
             "provider_status": dict(status),
         }
