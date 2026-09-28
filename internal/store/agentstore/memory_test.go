@@ -166,3 +166,61 @@ func TestReportPreservesTransitionTimeAtCurrentGeneration(t *testing.T) {
 		t.Fatalf("same-status report must preserve transition time: %#v", got.Conditions)
 	}
 }
+
+func TestMemoryReconcileLeaseLifecycle(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+
+	claimed, err := store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
+	if err != nil || !claimed {
+		t.Fatalf("initial claim: claimed=%t err=%v", claimed, err)
+	}
+	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-b", 30)
+	if err != nil || claimed {
+		t.Fatalf("competing claim must fail: claimed=%t err=%v", claimed, err)
+	}
+
+	now = now.Add(10 * time.Second)
+	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
+	if err != nil || !claimed {
+		t.Fatalf("owner renew: claimed=%t err=%v", claimed, err)
+	}
+
+	now = now.Add(31 * time.Second)
+	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-b", 30)
+	if err != nil || !claimed {
+		t.Fatalf("expired lease takeover: claimed=%t err=%v", claimed, err)
+	}
+
+	if err := store.ReleaseReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
+	if err != nil || claimed {
+		t.Fatalf("non-owner release must not clear lease: claimed=%t err=%v", claimed, err)
+	}
+
+	if err := store.ReleaseReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-b"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
+	if err != nil || !claimed {
+		t.Fatalf("owner release must clear lease: claimed=%t err=%v", claimed, err)
+	}
+}
+
+func TestMemoryReconcileLeaseValidatesIdentityAndTTL(t *testing.T) {
+	store := NewMemory()
+	ctx := context.Background()
+	if _, err := store.ClaimReconcileLease(ctx, "", "Workload", "train-1", "worker-a", 30); err == nil {
+		t.Fatal("missing identity must fail")
+	}
+	if _, err := store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 0); err == nil {
+		t.Fatal("non-positive ttl must fail")
+	}
+	if err := store.ReleaseReconcileLease(ctx, "cluster-a", "Workload", "train-1", ""); err == nil {
+		t.Fatal("missing owner must fail")
+	}
+}
