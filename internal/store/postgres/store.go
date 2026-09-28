@@ -125,6 +125,24 @@ func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []
 	defer tx.Rollback()
 
 	for _, item := range observations {
+		var previousJSON []byte
+		err := tx.QueryRowContext(ctx, `
+SELECT conditions
+FROM resource_observations
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
+`, clusterID, item.Kind, item.ID).Scan(&previousJSON)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil {
+			var previous []domain.Condition
+			if err := json.Unmarshal(previousJSON, &previous); err != nil {
+				return err
+			}
+			item.Conditions = agentstore.MergeConditions(previous, item.Conditions)
+		}
+
 		conditions, err := json.Marshal(item.Conditions)
 		if err != nil {
 			return err
