@@ -81,6 +81,8 @@ class KueuePoolManifestBuilder:
         manifests: list[dict[str, Any]] = []
 
         for flavor in binding.flavors:
+            # ResourceFlavor names the scheduling flavor; it does not need node
+            # labels for the CPU/fake-accelerator Golden Path.
             manifests.append(
                 {
                     "apiVersion": "kueue.x-k8s.io/v1beta1",
