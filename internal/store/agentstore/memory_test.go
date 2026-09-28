@@ -138,21 +138,23 @@ func TestReportRejectsObservationStaleAgainstDesiredGeneration(t *testing.T) {
 	}
 }
 
-func TestReportMergesConditionsAtCurrentGeneration(t *testing.T) {
+func TestReportPreservesTransitionTimeAtCurrentGeneration(t *testing.T) {
 	store := NewMemory()
 	clusterID := domain.ID("cluster-a")
+	t0 := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	t1 := t0.Add(time.Minute)
 	store.SetDesired(clusterID, []agent.DesiredResource{{
 		Kind: "Workload", ID: "train-1", Generation: 2,
 	}})
 	if err := store.Report(context.Background(), clusterID, []agent.Observation{{
 		Kind: "Workload", ID: "train-1", ObservedGeneration: 2,
-		Conditions: []domain.Condition{{Type: "Admitted", Status: "True"}},
+		Conditions: []domain.Condition{{Type: "Ready", Status: "False", Reason: "Pending", LastTransitionTime: t0}},
 	}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Report(context.Background(), clusterID, []agent.Observation{{
 		Kind: "Workload", ID: "train-1", ObservedGeneration: 2,
-		Conditions: []domain.Condition{{Type: "Ready", Status: "True"}},
+		Conditions: []domain.Condition{{Type: "Ready", Status: "False", Reason: "AwaitingPods", LastTransitionTime: t1}},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +162,7 @@ func TestReportMergesConditionsAtCurrentGeneration(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("observation missing: ok=%v err=%v", ok, err)
 	}
-	if len(got.Conditions) != 2 {
-		t.Fatalf("expected merged conditions, got %#v", got.Conditions)
+	if len(got.Conditions) != 1 || got.Conditions[0].Reason != "AwaitingPods" || !got.Conditions[0].LastTransitionTime.Equal(t0) {
+		t.Fatalf("same-status report must preserve transition time: %#v", got.Conditions)
 	}
 }
