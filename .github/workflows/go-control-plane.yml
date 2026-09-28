@@ -33,3 +33,11 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test ./...
+      - name: Build binaries
+        run: |
+          go build ./cmd/control-plane
+          go build ./cmd/cluster-agent
+      - name: Build container targets
+        run: |
+          docker build -f Dockerfile.go --target control-plane -t gpu-control-plane:test .
+          docker build -f Dockerfile.go --target cluster-agent -t gpu-cluster-agent:test .
