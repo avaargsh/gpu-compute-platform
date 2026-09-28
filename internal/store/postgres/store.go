@@ -272,12 +272,14 @@ func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind s
 	defer tx.Rollback()
 
 	var currentGeneration int64
+	var deletionTimestamp sql.NullTime
+	var finalizers []byte
 	err = tx.QueryRowContext(ctx, `
-SELECT generation
+SELECT generation, deletion_timestamp, finalizers
 FROM desired_resources
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 FOR UPDATE
-`, clusterID, kind, resourceID).Scan(&currentGeneration)
+`, clusterID, kind, resourceID).Scan(&currentGeneration, &deletionTimestamp, &finalizers)
 	if err == sql.ErrNoRows {
 		return agentstore.ErrDesiredNotFound
 	}
@@ -286,6 +288,20 @@ FOR UPDATE
 	}
 	if currentGeneration != generation {
 		return agentstore.ErrStaleGeneration
+	}
+	var currentFinalizers []string
+	if err := json.Unmarshal(finalizers, &currentFinalizers); err != nil {
+		return err
+	}
+	hasCleanupFinalizer := false
+	for _, finalizer := range currentFinalizers {
+		if finalizer == agentstore.ProviderCleanupFinalizer {
+			hasCleanupFinalizer = true
+			break
+		}
+	}
+	if !deletionTimestamp.Valid || !hasCleanupFinalizer {
+		return agentstore.ErrDesiredNotDeleting
 	}
 
 	if _, err := tx.ExecContext(ctx, `
