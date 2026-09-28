@@ -35,6 +35,15 @@ PY
     then printf '%s' "$payload"; return 0; fi
     sleep 2
   done
+  echo "--- platform status: $path ---" >&2
+  request GET "$path" >&2 || true
+  echo >&2
+  echo "--- ClusterQueue conditions ---" >&2
+  kubectl get clusterqueue "a100-golden-$RUN_ID" -o jsonpath='{.status.conditions}' >&2 || true
+  echo >&2
+  echo "--- LocalQueue conditions ---" >&2
+  kubectl get localqueue "a100-golden-$RUN_ID" -n golden-gpu -o jsonpath='{.status.conditions}' >&2 || true
+  echo >&2
   kubectl get clusterqueues,resourceflavors -o wide >&2 || true
   kubectl get localqueues,workloads,jobs,pods -n golden-gpu -o wide >&2 || true
   return 1
