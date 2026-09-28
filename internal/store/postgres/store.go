@@ -208,6 +208,20 @@ func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []
 	defer tx.Rollback()
 
 	for _, item := range observations {
+		var desiredGeneration int64
+		err := tx.QueryRowContext(ctx, `
+SELECT generation
+FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
+`, clusterID, item.Kind, item.ID).Scan(&desiredGeneration)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil && item.ObservedGeneration != desiredGeneration {
+			continue
+		}
+
 		var previousJSON []byte
 		var previousGeneration int64
 		err := tx.QueryRowContext(ctx, `
