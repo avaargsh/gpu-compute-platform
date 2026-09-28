@@ -42,6 +42,18 @@ func (c *Client) PullDesired(ctx context.Context, clusterID domain.ID) ([]agent.
 	return out, nil
 }
 
+func (c *Client) ClaimReconcileLease(ctx context.Context, in agent.ReconcileLeaseRequest) (bool, error) {
+	var out agent.ReconcileLeaseResponse
+	if err := c.postJSON(ctx, "/api/v1/agent/reconcile-lease/claim", in, &out); err != nil {
+		return false, err
+	}
+	return out.Claimed, nil
+}
+
+func (c *Client) ReleaseReconcileLease(ctx context.Context, in agent.ReconcileLeaseRequest) error {
+	return c.post(ctx, "/api/v1/agent/reconcile-lease/release", in)
+}
+
 func (c *Client) Report(ctx context.Context, clusterID domain.ID, observations []agent.Observation) error {
 	payload := struct {
 		ClusterID    domain.ID           `json:"clusterId"`
@@ -85,4 +97,25 @@ func (c *Client) post(ctx context.Context, path string, in any) error {
 		return fmt.Errorf("control plane returned %s", resp.Status)
 	}
 	return nil
+}
+
+func (c *Client) postJSON(ctx context.Context, path string, in, out any) error {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("control plane returned %s", resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }
