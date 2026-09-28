@@ -79,14 +79,10 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 		out.Phase = "Failed"
 		out.Failed = true
 		out.Message = "job has failed pods"
-		return out, nil
-	}
-	if job.Status.Succeeded > 0 {
+	} else if job.Status.Succeeded > 0 {
 		out.Phase = "Succeeded"
-		out.PodsReady = true
-		return out, nil
-	}
-	if job.Status.Active > 0 {
+		out.Succeeded = true
+	} else if job.Status.Active > 0 {
 		out.Phase = "Running"
 	}
 
@@ -124,7 +120,9 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 	for _, pod := range pods.Items {
 		if podReady(pod.Status.Conditions) {
 			out.PodsReady = true
-			out.Phase = "Running"
+			if !out.Failed && !out.Succeeded {
+				out.Phase = "Running"
+			}
 			break
 		}
 	}
