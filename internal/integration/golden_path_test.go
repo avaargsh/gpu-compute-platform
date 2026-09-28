@@ -54,7 +54,7 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 	}`)
 	putJSON("/api/v1/compute-pools/pool-h100", `{
 		"metadata":{"id":"pool-h100","generation":1},"projectId":"project-1",
-		"spec":{"accelerators":[{"class":"h100-80g","quota":8}],"scheduling":{"mode":"default"}},"status":{"observedGeneration":0}
+		"spec":{"accelerators":[{"class":"h100-80g","quota":8}],"acceleratorBindings":[{"class":"h100-80g","resourceName":"nvidia.com/gpu","flavor":"h100-80g","nodeLabels":{"nvidia.com/gpu.product":"NVIDIA-H100-80GB-HBM3"}}],"scheduling":{"mode":"default"}},"status":{"observedGeneration":0}
 	}`)
 	putJSON("/api/v1/workloads/train-1", `{
 		"metadata":{"id":"train-1","generation":1},"projectId":"project-1","poolId":"pool-h100",
