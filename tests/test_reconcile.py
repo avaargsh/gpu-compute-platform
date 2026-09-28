@@ -9,7 +9,7 @@ class FakeProvider:
         self.phase = phase
         self.applied = None
 
-    async def apply(self, desired):
+    async def apply(self, desired, generation=None):
         self.applied = desired
         return "team-a/qwen"
 
@@ -28,11 +28,11 @@ class FakeProvider:
 @pytest.mark.asyncio
 async def test_reconcile_applies_observes_and_normalizes_status():
     provider = FakeProvider()
-    result = await Reconciler(provider).reconcile({"name": "qwen"})
+    result = await Reconciler(provider).reconcile({"name": "qwen"}, generation=3)
     assert provider.applied == {"name": "qwen"}
     assert result.provider_ref == "team-a/qwen"
     assert result.state.phase == Phase.READY
-    assert result.state.conditions[0].type == "Ready"
+    assert result.state.conditions[0].type == "Ready"\n    assert result.state.observed_generation == 3\n    assert result.state.conditions[0].observed_generation == 3
     assert result.state.conditions[0].status is True
     assert result.state.replicas_ready == 2
     assert result.state.evidence_refs[0].digest == "sha256:abc"
