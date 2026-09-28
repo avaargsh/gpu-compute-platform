@@ -3,13 +3,13 @@ SHELL := /bin/bash
 .PHONY: fmt fmt-check install-hooks migrate compose-migrate test contract-test kind-up install-kueue install-fake-gpu e2e-golden e2e-gpu-golden e2e-up e2e-gpu-up
 
 fmt:
-	./scripts/go-format.sh
+	bash scripts/go-format.sh
 
 fmt-check:
-	./scripts/go-format.sh --check
+	bash scripts/go-format.sh --check
 
 install-hooks:
-	./scripts/install-git-hooks.sh
+	bash scripts/install-git-hooks.sh
 
 migrate:
 	uv run alembic upgrade head
