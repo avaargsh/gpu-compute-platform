@@ -2,10 +2,13 @@ package agentstore
 
 import (
 	"context"
+	"errors"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 )
+
+var ErrStaleGeneration = errors.New("stale generation")
 
 type Store interface {
 	Register(context.Context, agent.Registration) error
