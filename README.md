@@ -131,7 +131,9 @@ make migrate
 kind get kubeconfig --name ai-compute > .kubeconfig-e2e
 export CONTROL_PLANE_SCHEDULER_PROVIDER=kueue
 export CONTROL_PLANE_KUBECONFIG="$PWD/.kubeconfig-e2e"
-docker compose up -d postgres redis app celery-worker
+docker compose up -d postgres redis
+make compose-migrate
+docker compose up -d app celery-worker
 
 make e2e-golden
 ```
