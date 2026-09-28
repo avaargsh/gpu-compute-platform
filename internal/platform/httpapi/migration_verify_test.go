@@ -16,9 +16,11 @@ func TestVerifyTargetAdvancesCutoverToRetiring(t *testing.T) {
 	bindings.pools["pool-1"] = Placement{ClusterID: "cluster-b", Provider: "kueue"}
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
 		"migration-1": {
-			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
-			PoolID:   "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
-			Phase: domain.PlacementMigrationCutover,
+			Metadata:     domain.Metadata{ID: "migration-1", Generation: 1},
+			PoolID:       "pool-1",
+			SourceClusterID: "cluster-a",
+			TargetClusterID: "cluster-b",
+			Phase:        domain.PlacementMigrationCutover,
 			EvidenceRefs: []string{"cutover://pool-1"},
 		},
 	}
@@ -30,7 +32,7 @@ func TestVerifyTargetAdvancesCutoverToRetiring(t *testing.T) {
 	}
 	if err := resources.Report(ctx, "cluster-b", []agent.Observation{{
 		Kind: "ComputePool", ID: "pool-1", ObservedGeneration: 3,
-		Conditions: []domain.Condition{{Type: "Ready", Status: "True"}},
+		Conditions:   []domain.Condition{{Type: "Ready", Status: "True"}},
 		EvidenceRefs: []string{"k8s://cluster-b/pool-1"},
 	}}); err != nil {
 		t.Fatal(err)
@@ -63,9 +65,11 @@ func TestVerifyTargetRejectsBindingDrift(t *testing.T) {
 	bindings.pools["pool-1"] = Placement{ClusterID: "cluster-x", Provider: "kueue"}
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
 		"migration-1": {
-			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
-			PoolID:   "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
-			Phase: domain.PlacementMigrationCutover,
+			Metadata:        domain.Metadata{ID: "migration-1", Generation: 1},
+			PoolID:          "pool-1",
+			SourceClusterID: "cluster-a",
+			TargetClusterID: "cluster-b",
+			Phase:           domain.PlacementMigrationCutover,
 		},
 	}
 	server := httptest.NewServer(NewRouterWithDependencies(agentstore.NewMemory(), bindings))
@@ -90,9 +94,11 @@ func TestVerifyTargetRejectsStaleObservation(t *testing.T) {
 	bindings.pools["pool-1"] = Placement{ClusterID: "cluster-b", Provider: "kueue"}
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
 		"migration-1": {
-			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
-			PoolID:   "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
-			Phase: domain.PlacementMigrationCutover,
+			Metadata:        domain.Metadata{ID: "migration-1", Generation: 1},
+			PoolID:          "pool-1",
+			SourceClusterID: "cluster-a",
+			TargetClusterID: "cluster-b",
+			Phase:           domain.PlacementMigrationCutover,
 		},
 	}
 	resources := agentstore.NewMemory()
