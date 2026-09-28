@@ -283,7 +283,7 @@ func (m *Memory) ClaimReconcileLease(
 	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
 	now := m.now().UTC()
 	current, ok := m.leases[key]
-	if ok && current.owner != owner && !current.until.Before(now) {
+	if ok && current.owner != owner && current.until.After(now) {
 		return false, nil
 	}
 	m.leases[key] = memoryLease{
