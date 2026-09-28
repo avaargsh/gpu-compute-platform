@@ -76,9 +76,11 @@ request POST "$workload_path" "$workload_payload" >/dev/null
 result="$(wait_status "$workload_path/gpu-smoke-$RUN_ID" workload-ready)"
 printf '%s\n' "$result"
 
-job="$(printf '%s' "$result" | python -c 'import json,sys; print((json.load(sys.stdin).get("status") or {}).get("provider_ref") or "")')"
-[[ -n "$job" ]] || { echo "workload status did not expose provider_ref" >&2; exit 1; }
-requested="$(kubectl get job "$job" -n golden-gpu -o jsonpath='{.spec.template.spec.containers[0].resources.requests.nvidia\.com/gpu}')"
+provider_ref="$(printf '%s' "$result" | python -c 'import json,sys; print((json.load(sys.stdin).get("status") or {}).get("provider_ref") or "")')"
+job_namespace="${provider_ref%%/*}"
+job="${provider_ref#*/}"
+[[ -n "$provider_ref" && "$job_namespace/$job" == "$provider_ref" ]] || { echo "invalid provider_ref: $provider_ref" >&2; exit 1; }
+requested="$(kubectl get job "$job" -n "$job_namespace" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.nvidia\.com/gpu}')"
 [[ "$requested" == "1" ]] || { echo "expected nvidia.com/gpu request=1, got $requested" >&2; exit 1; }
 
 echo "Fake GPU Golden PASS: a100-80g -> nvidia.com/gpu -> Kueue -> Job -> ObservedState"
