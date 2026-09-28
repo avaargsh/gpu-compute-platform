@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -53,6 +54,9 @@ func (c *KubeClient) ApplyJob(ctx context.Context, in Job) error {
 	if err == nil {
 		job.ResourceVersion = current.ResourceVersion
 		_, err = jobs.Update(ctx, job, metav1.UpdateOptions{})
+		return err
+	}
+	if !apierrors.IsNotFound(err) {
 		return err
 	}
 	_, err = jobs.Create(ctx, job, metav1.CreateOptions{})
@@ -114,6 +118,9 @@ func (c *KubeClient) apply(ctx context.Context, gvr schema.GroupVersionResource,
 			_, err = resource.Namespace(namespace).Update(ctx, obj, metav1.UpdateOptions{})
 			return err
 		}
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
 		_, err = resource.Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
 		return err
 	}
@@ -122,6 +129,9 @@ func (c *KubeClient) apply(ctx context.Context, gvr schema.GroupVersionResource,
 	if err == nil {
 		obj.SetResourceVersion(current.GetResourceVersion())
 		_, err = resource.Update(ctx, obj, metav1.UpdateOptions{})
+		return err
+	}
+	if !apierrors.IsNotFound(err) {
 		return err
 	}
 	_, err = resource.Create(ctx, obj, metav1.CreateOptions{})
