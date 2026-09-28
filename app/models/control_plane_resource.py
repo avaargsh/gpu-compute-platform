@@ -19,6 +19,7 @@ class ControlPlaneResource(Base):
     generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     desired: Mapped[dict] = mapped_column(JSON, nullable=False)
     observed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    observed_generation: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     lifecycle: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     lease_owner: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
