@@ -130,7 +130,6 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 	return out, nil
 }
 
-
 func (c *KubeClient) DeleteJob(ctx context.Context, namespace, name string) (bool, error) {
 	if c.core == nil {
 		return false, fmt.Errorf("kubernetes client is required")
