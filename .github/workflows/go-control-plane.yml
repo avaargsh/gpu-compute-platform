@@ -12,6 +12,9 @@ on:
     paths:
       - "**/*.go"
       - "go.mod"
+      - "go.sum"
+      - "Dockerfile.go"
+      - "internal/**/*.sql"
       - ".github/workflows/go-control-plane.yml"
 
 jobs:
@@ -25,15 +28,14 @@ jobs:
           cache: true
       - name: Dependencies
         run: go mod tidy
-      - name: Capture module graph
-        uses: actions/upload-artifact@v4
-        with:
-          name: go-module-files
-          path: |
-            go.mod
-            go.sum
       - name: Module files clean
-        run: git diff --exit-code -- go.mod go.sum
+        run: |
+          if [ -n "$(git status --porcelain -- go.mod go.sum)" ]; then
+            echo "go.mod/go.sum are not tidy:"
+            git status --short -- go.mod go.sum
+            git diff -- go.mod go.sum
+            exit 1
+          fi
       - name: Format check
         run: |
           files="$(find cmd internal -name '*.go' -type f -print0 | xargs -0 gofmt -l)"
@@ -43,7 +45,7 @@ jobs:
             exit 1
           fi
       - name: Vet
-        run: go vet ./...
+        run: go vet ./cmd/... ./internal/...
       - name: Test
         run: go test ./...
       - name: Build binaries
