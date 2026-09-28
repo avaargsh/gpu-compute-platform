@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mapfile -d '' files < <(find cmd internal -name '*.go' -type f -print0 | sort -z)
-if ((${#files[@]} == 0)); then
-  exit 0
-fi
-
 if [[ "${1:-}" == "--check" ]]; then
-  unformatted="$(printf '%s\\0' "${files[@]}" | xargs -0 gofmt -l)"
+  unformatted="$(find cmd internal -name '*.go' -type f -print0 | sort -z | xargs -0 -r gofmt -l)"
   if [[ -n "$unformatted" ]]; then
     echo "gofmt required for:"
     echo "$unformatted"
@@ -20,4 +15,4 @@ if [[ "${1:-}" == "--check" ]]; then
   exit 0
 fi
 
-printf '%s\\0' "${files[@]}" | xargs -0 gofmt -w
+find cmd internal -name '*.go' -type f -print0 | sort -z | xargs -0 -r gofmt -w
