@@ -7,6 +7,8 @@ from app.control_plane.domain import WorkloadSpec
 from app.control_plane.resource_store_sqlalchemy import SQLAlchemyResourceStore
 from app.control_plane.reconcile_signal import enqueue_reconcile
 from app.core.database import get_async_session
+from app.core.auth import current_active_user
+from app.models.user import User
 
 router = APIRouter()
 
@@ -16,8 +18,8 @@ def workload_key(name: str) -> str:
 
 
 @router.post("/workloads", status_code=status.HTTP_202_ACCEPTED)
-async def submit_workload(spec: WorkloadSpec, session: AsyncSession = Depends(get_async_session)):
-    store = SQLAlchemyResourceStore(session)
+async def submit_workload(spec: WorkloadSpec, session: AsyncSession = Depends(get_async_session), user: User = Depends(current_active_user)):
+    store = SQLAlchemyResourceStore(session, owner_id=str(user.id))
     key = workload_key(spec.name)
     record = await store.put_desired(key, spec)
     enqueue_reconcile(key)
@@ -30,8 +32,8 @@ async def submit_workload(spec: WorkloadSpec, session: AsyncSession = Depends(ge
 
 
 @router.get("/workloads/{name}")
-async def get_workload(name: str, session: AsyncSession = Depends(get_async_session)):
-    record = await SQLAlchemyResourceStore(session).get(workload_key(name))
+async def get_workload(name: str, session: AsyncSession = Depends(get_async_session), user: User = Depends(current_active_user)):
+    record = await SQLAlchemyResourceStore(session, owner_id=str(user.id)).get(workload_key(name))
     if record is None:
         raise HTTPException(status_code=404, detail="Workload not found")
     return {
@@ -44,9 +46,9 @@ async def get_workload(name: str, session: AsyncSession = Depends(get_async_sess
 
 
 @router.delete("/workloads/{name}", status_code=status.HTTP_202_ACCEPTED)
-async def delete_workload(name: str, session: AsyncSession = Depends(get_async_session)):
+async def delete_workload(name: str, session: AsyncSession = Depends(get_async_session), user: User = Depends(current_active_user)):
     from datetime import datetime, timezone
-    store = SQLAlchemyResourceStore(session)
+    store = SQLAlchemyResourceStore(session, owner_id=str(user.id))
     record = await store.get(workload_key(name))
     if record is None:
         raise HTTPException(status_code=404, detail="Workload not found")
