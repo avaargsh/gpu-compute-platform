@@ -13,6 +13,7 @@ class ControlPlaneResource(Base):
 
     key: Mapped[str] = mapped_column(String(512), primary_key=True)
     kind: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     desired: Mapped[dict] = mapped_column(JSON, nullable=False)
     observed: Mapped[dict | None] = mapped_column(JSON, nullable=True)
