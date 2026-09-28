@@ -9,10 +9,12 @@ import (
 )
 
 type fakeWorkloadProvider struct {
-	last provider.WorkloadProjection
+	last  provider.WorkloadProjection
+	calls int
 }
 
 func (f *fakeWorkloadProvider) ReconcileWorkload(_ context.Context, p provider.WorkloadProjection) (provider.WorkloadObservation, error) {
+	f.calls++
 	f.last = p
 	return provider.WorkloadObservation{ObservedGeneration: p.Generation}, nil
 }
@@ -30,8 +32,9 @@ func TestWorkloadReconcilerResolvesPoolAcceleratorBinding(t *testing.T) {
 		},
 	}
 	pool := domain.ComputePool{
-		Metadata:  domain.Metadata{ID: "pool-1"},
+		Metadata:  domain.Metadata{ID: "pool-1", Generation: 2},
 		ProjectID: "project-1",
+		Status: domain.ResourceStatus{ObservedGeneration: 2, Conditions: []domain.Condition{{Type: "Ready", Status: "True"}}},
 		Spec: domain.ComputePoolSpec{AcceleratorBindings: []domain.AcceleratorBinding{{
 			Class: "h100-80g", ResourceName: "vendor.example/gpu", Flavor: "h100",
 		}}},
@@ -63,5 +66,41 @@ func TestWorkloadReconcilerFailsClosedWhenClassIsUnbound(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("expected unbound accelerator class to fail")
+	}
+}
+
+func TestWorkloadReconcilerDoesNotCallProviderWhenPoolIsNotReady(t *testing.T) {
+	fp := &fakeWorkloadProvider{}
+	r := NewWorkloadReconciler(fp)
+	_, err := r.Reconcile(context.Background(),
+		domain.Workload{Metadata: domain.Metadata{ID: "train-1"}, ProjectID: "project-1", PoolID: "pool-1"},
+		domain.ComputePool{Metadata: domain.Metadata{ID: "pool-1", Generation: 2}, ProjectID: "project-1",
+			Status: domain.ResourceStatus{ObservedGeneration: 2, Conditions: []domain.Condition{{Type: "Ready", Status: "False"}}}},
+		domain.ProjectBinding{ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "project-1"},
+		domain.ClusterBinding{PoolID: "pool-1", ClusterID: "cluster-a"},
+	)
+	if err == nil {
+		t.Fatal("expected not-ready compute pool to block workload")
+	}
+	if fp.calls != 0 {
+		t.Fatalf("provider called %d times for not-ready pool", fp.calls)
+	}
+}
+
+func TestWorkloadReconcilerDoesNotCallProviderWhenPoolObservationIsStale(t *testing.T) {
+	fp := &fakeWorkloadProvider{}
+	r := NewWorkloadReconciler(fp)
+	_, err := r.Reconcile(context.Background(),
+		domain.Workload{Metadata: domain.Metadata{ID: "train-1"}, ProjectID: "project-1", PoolID: "pool-1"},
+		domain.ComputePool{Metadata: domain.Metadata{ID: "pool-1", Generation: 3}, ProjectID: "project-1",
+			Status: domain.ResourceStatus{ObservedGeneration: 2, Conditions: []domain.Condition{{Type: "Ready", Status: "True"}}}},
+		domain.ProjectBinding{ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "project-1"},
+		domain.ClusterBinding{PoolID: "pool-1", ClusterID: "cluster-a"},
+	)
+	if err == nil {
+		t.Fatal("expected stale compute pool observation to block workload")
+	}
+	if fp.calls != 0 {
+		t.Fatalf("provider called %d times for stale pool observation", fp.calls)
 	}
 }
