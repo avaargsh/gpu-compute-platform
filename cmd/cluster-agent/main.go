@@ -32,6 +32,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("kubernetes clients: %v", err)
 	}
+	serverVersion, err := clients.Core.Discovery().ServerVersion()
+	if err != nil {
+		log.Fatalf("discover kubernetes version: %v", err)
+	}
+
 	runtime, err := cluster.NewRuntime(clients)
 	if err != nil {
 		log.Fatalf("cluster runtime: %v", err)
@@ -45,7 +50,7 @@ func main() {
 
 	control := httpclient.New(controlPlaneURL, &http.Client{Timeout: 10 * time.Second})
 	runner := agent.NewRunner(clusterID, control, runtime)
-	lifecycle := agent.NewLifecycle(clusterID, control, runner, agentVersion, "", 15*time.Second)
+	lifecycle := agent.NewLifecycle(clusterID, control, runner, agentVersion, serverVersion.GitVersion, 15*time.Second)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
