@@ -17,7 +17,7 @@ KUEUE_QUEUE_LABEL = "kueue.x-k8s.io/queue-name"
 class KueueBinding:
     namespace: str
     local_queue: str
-    accelerator_resource: str = "nvidia.com/gpu"
+    accelerator_resources: dict[str, str]
 
 
 class KueueManifestBuilder:
@@ -26,13 +26,13 @@ class KueueManifestBuilder:
 
     def build_job(self, workload: WorkloadSpec, generation: int | None = None) -> dict[str, Any]:
         job_name = workload.name if generation is None else f"{workload.name}-g{generation}"
+        try:
+            resource_name = self.binding.accelerator_resources[workload.accelerator.class_name]
+        except KeyError as exc:
+            raise ValueError(f"accelerator class {workload.accelerator.class_name!r} is not available in compute pool") from exc
         resources = {
-            "requests": {
-                self.binding.accelerator_resource: str(workload.accelerator.count),
-            },
-            "limits": {
-                self.binding.accelerator_resource: str(workload.accelerator.count),
-            },
+            "requests": {resource_name: str(workload.accelerator.count)},
+            "limits": {resource_name: str(workload.accelerator.count)},
         }
         container: dict[str, Any] = {
             "name": "workload",
