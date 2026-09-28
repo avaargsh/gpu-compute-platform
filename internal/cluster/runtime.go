@@ -35,3 +35,17 @@ func (r *Runtime) ReconcileWorkload(ctx context.Context, in provider.WorkloadPro
 	}
 	return r.Kueue.ReconcileWorkload(ctx, in)
 }
+
+func (r *Runtime) DeletePool(ctx context.Context, in provider.PoolProjection) (provider.DeletionObservation, error) {
+	if r == nil || r.Kueue == nil {
+		return provider.DeletionObservation{}, fmt.Errorf("kueue provider is unavailable")
+	}
+	return r.Kueue.DeletePool(ctx, in)
+}
+
+func (r *Runtime) DeleteWorkload(ctx context.Context, in provider.WorkloadProjection) (provider.DeletionObservation, error) {
+	if r == nil || r.Kueue == nil {
+		return provider.DeletionObservation{}, fmt.Errorf("kueue provider is unavailable")
+	}
+	return r.Kueue.DeleteWorkload(ctx, in)
+}
