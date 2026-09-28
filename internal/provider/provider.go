@@ -28,7 +28,6 @@ type WorkloadProjection struct {
 	PoolID      domain.ID
 	ClusterID   domain.ID
 	Namespace   string
-	QueueName   string
 	Generation  int64
 	Image       string
 	Command     []string
