@@ -43,7 +43,9 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 				Spec: map[string]any{
 					"projectID": "project-1",
 					"namespace": "project-1",
-					"accelerators": []any{map[string]any{"class": "h100-80g", "quota": float64(8)}},
+					"accelerators": []any{
+						map[string]any{"class": "h100-80g", "quota": float64(8)},
+					},
 				},
 			},
 			{
