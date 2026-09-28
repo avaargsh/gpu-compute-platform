@@ -2,10 +2,22 @@ name: CI
 
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "Dockerfile.go"
+      - ".github/workflows/go-control-plane.yml"
   push:
     branches:
       - master
       - "feat/**"
+    paths-ignore:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "Dockerfile.go"
+      - ".github/workflows/go-control-plane.yml"
 
 permissions:
   contents: read
