@@ -52,6 +52,33 @@ class ModelRevisionRef(BaseModel):
     revision: str
 
 
+class ServingRole(str, Enum):
+    UNIFIED = "unified"
+    PREFILL = "prefill"
+    DECODE = "decode"
+
+
+class WorkerPoolSpec(BaseModel):
+    role: ServingRole
+    accelerator: AcceleratorClass
+    replicas: int = Field(default=1, ge=0)
+    tensor_parallelism: int = Field(default=1, ge=1)
+
+
+class ServingTopology(BaseModel):
+    worker_pools: list[WorkerPoolSpec]
+
+    @model_validator(mode="after")
+    def validate_roles(self):
+        roles = [pool.role for pool in self.worker_pools]
+        if ServingRole.UNIFIED in roles and len(roles) != 1:
+            raise ValueError("unified topology cannot be mixed with prefill/decode pools")
+        if ServingRole.UNIFIED not in roles:
+            if roles.count(ServingRole.PREFILL) != 1 or roles.count(ServingRole.DECODE) != 1:
+                raise ValueError("disaggregated topology requires one prefill and one decode pool")
+        return self
+
+
 class ServingConfig(BaseModel):
     runtime: RuntimeKind
     accelerator: AcceleratorClass
@@ -59,6 +86,7 @@ class ServingConfig(BaseModel):
     pipeline_parallelism: int = Field(default=1, ge=1)
     expert_parallelism: int = Field(default=1, ge=1)
     quantization: str | None = None
+    topology: ServingTopology | None = None
     runtime_args: dict[str, Any] = Field(default_factory=dict)
     extensions: dict[str, Any] = Field(default_factory=dict)
 
