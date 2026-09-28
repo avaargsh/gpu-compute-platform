@@ -41,7 +41,8 @@ func (r *PoolReconciler) Reconcile(
 		ClusterID:    clusterBinding.ClusterID,
 		Namespace:    projectBinding.Namespace,
 		Generation:   pool.Metadata.Generation,
-		Accelerators: pool.Spec.Accelerators,
+		Accelerators:        pool.Spec.Accelerators,
+		AcceleratorBindings: pool.Spec.AcceleratorBindings,
 		Scheduling:   pool.Spec.Scheduling,
 	})
 	if err != nil {
