@@ -31,7 +31,7 @@ type ComputePool struct {
 type ComputePoolSpec struct {
 	Accelerators        []AcceleratorRequest `json:"accelerators,omitempty"`
 	AcceleratorBindings []AcceleratorBinding `json:"acceleratorBindings,omitempty"`
-	Scheduling   SchedulingPolicy     `json:"scheduling"`
+	Scheduling          SchedulingPolicy     `json:"scheduling"`
 }
 
 type AcceleratorRequest struct {
