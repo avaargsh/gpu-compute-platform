@@ -38,7 +38,8 @@ async def test_scheduler_adapter_normalizes_running_to_progressing():
     ref = await provider.apply(workload())
     observed = await provider.observe(ref)
     assert observed["phase"] == "progressing"
-    assert observed["admitted"] is True\n    assert observed["replicas_ready"] == 2
+    assert observed["admitted"] is True
+    assert observed["replicas_ready"] == 2
 
 
 @pytest.mark.asyncio
