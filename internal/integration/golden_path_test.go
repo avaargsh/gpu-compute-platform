@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 )
@@ -54,7 +55,12 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 	defer server.Close()
 
 	coreClient := kubefake.NewSimpleClientset()
-	dynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{
+			{Group: "kueue.x-k8s.io", Version: "v1beta1", Resource: "workloads"}: "WorkloadList",
+		},
+	)
 	runtime, err := cluster.NewRuntime(&cluster.Clients{Core: coreClient, Dynamic: dynamicClient})
 	if err != nil {
 		t.Fatal(err)
