@@ -56,10 +56,12 @@ func (f *fakeControlPlane) FinalizeDesired(_ context.Context, in FinalizeDesired
 }
 
 type fakeRuntime struct {
-	poolCalls     int
-	workload      provider.WorkloadProjection
-	workloadErr   error
-	workloadCalls int
+	poolCalls           int
+	poolDeleteCalls     int
+	workload            provider.WorkloadProjection
+	workloadErr         error
+	workloadCalls       int
+	workloadDeleteCalls int
 }
 
 func (f *fakeRuntime) ReconcilePool(_ context.Context, p provider.PoolProjection) (provider.PoolObservation, error) {
@@ -68,10 +70,12 @@ func (f *fakeRuntime) ReconcilePool(_ context.Context, p provider.PoolProjection
 }
 
 func (f *fakeRuntime) DeletePool(_ context.Context, _ provider.PoolProjection) (provider.DeletionObservation, error) {
+	f.poolDeleteCalls++
 	return provider.DeletionObservation{Gone: true, EvidenceRefs: []string{"pool-delete-evidence"}}, nil
 }
 
 func (f *fakeRuntime) DeleteWorkload(_ context.Context, _ provider.WorkloadProjection) (provider.DeletionObservation, error) {
+	f.workloadDeleteCalls++
 	return provider.DeletionObservation{Gone: true, EvidenceRefs: []string{"job-delete-evidence"}}, nil
 }
 
@@ -223,5 +227,62 @@ func TestRunnerSkipsProviderWhenLeaseIsContended(t *testing.T) {
 	}
 	if len(control.reported) != 0 {
 		t.Fatalf("contended reconcile must not report terminal state: %#v", control.reported)
+	}
+}
+
+func TestRunnerDeletionCleansDependentsBeforePoolAndFinalizesAfterGone(t *testing.T) {
+	now := time.Date(2026, 9, 29, 2, 0, 0, 0, time.UTC)
+	control := &fakeControlPlane{desired: []DesiredResource{
+		{
+			Kind: "ComputePool", ID: "pool-1", Generation: 3, DeletionTimestamp: &now,
+			Finalizers: []string{"gpu-compute-platform.io/provider-cleanup"},
+			Spec: map[string]any{
+				"namespace": "project-1",
+				"accelerators": []any{map[string]any{"class": "h100", "quota": float64(4)}},
+				"acceleratorBindings": []any{
+					map[string]any{"class": "h100", "resourceName": "nvidia.com/gpu", "flavor": "h100"},
+				},
+			},
+		},
+		{
+			Kind: "Workload", ID: "train-1", Generation: 4, DeletionTimestamp: &now,
+			Finalizers: []string{"gpu-compute-platform.io/provider-cleanup"},
+			Spec: map[string]any{
+				"poolID": "pool-1", "namespace": "project-1",
+				"image": "example/train:latest",
+				"accelerator": map[string]any{"class": "h100", "quota": float64(1)},
+			},
+		},
+	}}
+	runtime := &fakeRuntime{}
+	runner := NewRunner("cluster-a", control, runtime)
+
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.poolDeleteCalls != 0 {
+		t.Fatalf("pool cleanup ran before dependent workload finalized: %d", runtime.poolDeleteCalls)
+	}
+	if runtime.workloadDeleteCalls != 1 {
+		t.Fatalf("workload cleanup calls=%d, want 1", runtime.workloadDeleteCalls)
+	}
+	if len(control.desired) != 1 || control.desired[0].Kind != "ComputePool" {
+		t.Fatalf("workload must be finalized after provider gone: %#v", control.desired)
+	}
+	if len(control.reported) != 1 || control.reported[0].Conditions[0].Reason != "Deleted" {
+		t.Fatalf("final deletion evidence must be reported before finalize: %#v", control.reported)
+	}
+
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.poolDeleteCalls != 1 {
+		t.Fatalf("pool cleanup calls=%d, want 1 after workload finalized", runtime.poolDeleteCalls)
+	}
+	if len(control.desired) != 0 {
+		t.Fatalf("pool must be hard-deleted after provider resources are gone: %#v", control.desired)
+	}
+	if len(control.reported) != 2 || control.reported[1].EvidenceRefs[0] != "pool-delete-evidence" {
+		t.Fatalf("pool final evidence missing: %#v", control.reported)
 	}
 }
