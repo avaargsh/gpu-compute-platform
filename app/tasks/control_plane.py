@@ -89,7 +89,7 @@ async def _reconcile_resource(resource_key: str) -> None:
             reconciler = Reconciler(provider)
             result = await reconciler.reconcile(workload, generation=record.generation)
             written = await store.put_observed(resource_key, record.generation, result.state)
-            if written and result.needs_follow_up(state.phase):
+            if written and needs_follow_up(result.state.phase):
                 enqueue_reconcile(resource_key, countdown=2)
             revisions = SQLAlchemyRevisionStore(session)
             await revisions.upsert(resource_key, record.generation, result.state)
