@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/provider"
@@ -24,7 +26,9 @@ func (f *fakeControlPlane) Report(_ context.Context, _ domain.ID, observations [
 }
 
 type fakeRuntime struct {
-	workload provider.WorkloadProjection
+	workload     provider.WorkloadProjection
+	workloadErr  error
+	workloadCalls int
 }
 
 func (*fakeRuntime) ReconcilePool(_ context.Context, p provider.PoolProjection) (provider.PoolObservation, error) {
@@ -33,6 +37,10 @@ func (*fakeRuntime) ReconcilePool(_ context.Context, p provider.PoolProjection) 
 
 func (f *fakeRuntime) ReconcileWorkload(_ context.Context, p provider.WorkloadProjection) (provider.WorkloadObservation, error) {
 	f.workload = p
+	f.workloadCalls++
+	if f.workloadErr != nil {
+		return provider.WorkloadObservation{}, f.workloadErr
+	}
 	return provider.WorkloadObservation{ObservedGeneration: p.Generation, Phase: "Running", EvidenceRefs: []string{"job-evidence"}}, nil
 }
 
@@ -95,5 +103,54 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 	}
 	if control.reported[1].EvidenceRefs[0] != "job-evidence" {
 		t.Fatalf("missing workload evidence: %#v", control.reported[1])
+	}
+}
+
+func TestRunnerBacksOffRetryableFailureAndResetsOnNewGeneration(t *testing.T) {
+	control := &fakeControlPlane{desired: []DesiredResource{
+		{Kind: "ComputePool", ID: "pool-1", Generation: 1, Spec: map[string]any{
+			"acceleratorBindings": []any{map[string]any{"class": "h100", "resourceName": "nvidia.com/gpu", "flavor": "h100"}},
+		}},
+		{Kind: "Workload", ID: "train-1", Generation: 1, Spec: map[string]any{
+			"poolID": "pool-1", "accelerator": map[string]any{"class": "h100", "quota": float64(1)},
+		}},
+	}}
+	runtime := &fakeRuntime{workloadErr: provider.MarkRetryable(errors.New("api timeout"))}
+	runner := NewRunner("cluster-a", control, runtime)
+	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
+	runner.now = func() time.Time { return now }
+
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.workloadCalls != 1 {
+		t.Fatalf("calls=%d, want 1", runtime.workloadCalls)
+	}
+	if len(control.reported) != 1 {
+		t.Fatalf("retryable workload failure must not be reported as terminal: %#v", control.reported)
+	}
+
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.workloadCalls != 1 {
+		t.Fatalf("backoff must suppress immediate retry, calls=%d", runtime.workloadCalls)
+	}
+
+	control.desired[1].Generation = 2
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.workloadCalls != 2 {
+		t.Fatalf("new generation must bypass old backoff, calls=%d", runtime.workloadCalls)
+	}
+}
+
+func TestRetryBackoffIsDeterministicAndCapped(t *testing.T) {
+	want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second, 32 * time.Second}
+	for i, expected := range want {
+		if got := retryBackoff(i + 1); got != expected {
+			t.Fatalf("attempt %d: got %s want %s", i+1, got, expected)
+		}
 	}
 }
