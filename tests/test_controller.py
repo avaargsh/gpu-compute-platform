@@ -23,7 +23,7 @@ async def test_golden_control_loop_persists_observed_state():
 
     record = await controller.submit("workload/team-a/train-1", {"name": "train-1"})
     assert record.generation == 1
-    assert await controller.reconcile_one() is True
+    result = await controller.reconcile_one()\n    assert result.processed is True\n    assert result.error is None
 
     current = await store.get("workload/team-a/train-1")
     assert current.observed.phase == Phase.READY
