@@ -1,7 +1,7 @@
 package agent
 
 import (
-"context"
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -9,8 +9,8 @@ import (
 
 type lifecycleControl struct {
 	fakeControlPlane
-	registered int
-	heartbeats int
+	registered   int
+	heartbeats   int
 	heartbeatErr error
 }
 
