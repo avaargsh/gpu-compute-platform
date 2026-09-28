@@ -56,7 +56,6 @@ func TestPlacementMigrationCutoverAtomicallyMovesBinding(t *testing.T) {
 }
 
 func TestPlacementMigrationCutoverRejectsSourceDrift(t *testing.T) {
-	ctx := t.Context()
 	bindings := NewMemoryPlacementResolver()
 	bindings.pools["pool-1"] = Placement{ClusterID: "cluster-x", Provider: "kueue"}
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
