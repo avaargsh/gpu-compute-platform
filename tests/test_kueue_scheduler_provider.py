@@ -35,9 +35,6 @@ class FakeBatchClient:
     def delete_namespaced_job(self, name, namespace, **kwargs):
         self.deleted = (namespace, name, kwargs)
 
-    def list_namespaced_pod(self, namespace, **kwargs):
-        return SimpleNamespace(items=self.pods)
-
 
 class FakeCustomObjectsClient:
     def __init__(self):
@@ -59,7 +56,7 @@ def workload():
     )
 
 
-def provider(client=None, custom=None):
+def provider(client=None, custom=None, core=None):
     return KueueSchedulerProvider(
         client or FakeBatchClient(),
         KueueBinding(
@@ -135,7 +132,7 @@ async def test_submit_is_idempotent_when_job_already_exists():
 async def test_status_reports_ready_pods():
     client = FakeBatchClient()
     client.job.status = SimpleNamespace(active=1, succeeded=0, failed=0)
-    client.pods = [
+    core = FakeCoreClient()\n    core.pods = [
         SimpleNamespace(status=SimpleNamespace(conditions=[SimpleNamespace(type="Ready", status="True")])),
         SimpleNamespace(status=SimpleNamespace(conditions=[SimpleNamespace(type="Ready", status="False")])),
     ]
