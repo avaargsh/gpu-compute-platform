@@ -7,7 +7,7 @@ IDs, node names and scheduler decisions intentionally do not belong here.
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class WorkloadKind(str, Enum):
@@ -72,8 +72,24 @@ class DeploymentSpec(BaseModel):
     extensions: dict[str, Any] = Field(default_factory=dict)
 
 
+class TrafficTarget(BaseModel):
+    deployment: str
+    weight: int = Field(ge=0, le=100)
+    shadow: bool = False
+
+
 class EndpointSpec(BaseModel):
     name: str
-    deployments: dict[str, int]
+    targets: list[TrafficTarget]
+    hostname: str | None = None
     rate_limit_rpm: int | None = Field(default=None, ge=1)
     extensions: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_traffic(self):
+        primary = [target for target in self.targets if not target.shadow]
+        if not primary:
+            raise ValueError("endpoint requires at least one non-shadow traffic target")
+        if sum(target.weight for target in primary) != 100:
+            raise ValueError("non-shadow traffic weights must sum to 100")
+        return self
