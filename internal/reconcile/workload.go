@@ -36,6 +36,11 @@ func (r *WorkloadReconciler) Reconcile(
 		return provider.WorkloadObservation{}, fmt.Errorf("invalid cluster placement")
 	}
 
+	binding, err := resolveAcceleratorBinding(pool.Spec.AcceleratorBindings, workload.Spec.Accelerator.Class)
+	if err != nil {
+		return provider.WorkloadObservation{}, err
+	}
+
 	return r.provider.ReconcileWorkload(ctx, provider.WorkloadProjection{
 		WorkloadID:  workload.Metadata.ID,
 		ProjectID:   workload.ProjectID,
@@ -45,6 +50,30 @@ func (r *WorkloadReconciler) Reconcile(
 		Generation:  workload.Metadata.Generation,
 		Image:       workload.Spec.Image,
 		Command:     workload.Spec.Command,
-		Accelerator: workload.Spec.Accelerator,
+		Accelerator:        workload.Spec.Accelerator,
+		AcceleratorBinding: binding,
 	})
+}
+
+func resolveAcceleratorBinding(bindings []domain.AcceleratorBinding, class string) (domain.AcceleratorBinding, error) {
+	if class == "" {
+		return domain.AcceleratorBinding{}, fmt.Errorf("accelerator class is required")
+	}
+	var resolved domain.AcceleratorBinding
+	for _, binding := range bindings {
+		if binding.Class != class {
+			continue
+		}
+		if resolved.Class != "" {
+			return domain.AcceleratorBinding{}, fmt.Errorf("duplicate accelerator binding: %s", class)
+		}
+		resolved = binding
+	}
+	if resolved.Class == "" {
+		return domain.AcceleratorBinding{}, fmt.Errorf("accelerator binding not found: %s", class)
+	}
+	if resolved.ResourceName == "" || resolved.Flavor == "" {
+		return domain.AcceleratorBinding{}, fmt.Errorf("accelerator binding is incomplete: %s", class)
+	}
+	return resolved, nil
 }
