@@ -21,6 +21,11 @@ class RuntimeKind(str, Enum):
     SGLANG = "sglang"
 
 
+class AcceleratorRequest(BaseModel):
+    class_name: str
+    count: int = Field(default=1, ge=1)
+
+
 class AcceleratorClass(BaseModel):
     name: str
     vendor: str | None = None
@@ -39,7 +44,7 @@ class WorkloadSpec(BaseModel):
     name: str
     kind: WorkloadKind
     compute_pool: ComputePoolRef
-    accelerator: AcceleratorClass
+    accelerator: AcceleratorRequest
     image: str
     command: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
