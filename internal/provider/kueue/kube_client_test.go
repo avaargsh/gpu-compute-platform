@@ -219,3 +219,105 @@ func TestApplyJobForbiddenGetDoesNotCreate(t *testing.T) {
 		t.Fatal("forbidden GET must not fall back to CREATE")
 	}
 }
+
+
+func TestObserveSucceededJobPreservesKueueEvidenceWithoutInferringPodsReady(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+		workloadGVR: "WorkloadList",
+	})
+	coreClient := kubefake.NewSimpleClientset()
+	client := NewKubeClient(coreClient, dynamicClient)
+
+	if err := client.ApplyJob(ctx, Job{
+		Name: "job-success", Namespace: "project-1", QueueName: "lq-pool",
+		Image: "example/train:latest", Resources: map[string]int64{gpuResourceName: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, "job-success", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Status.Succeeded = 1
+	job, err = coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workload := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "kueue.x-k8s.io/v1beta1", "kind": "Workload",
+		"metadata": map[string]any{"name": "job-success-workload", "namespace": "project-1"},
+		"status": map[string]any{"conditions": []any{
+			map[string]any{"type": "QuotaReserved", "status": "True"},
+			map[string]any{"type": "Admitted", "status": "True"},
+		}},
+	}}
+	workload.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Job", UID: job.UID}})
+	if _, err := dynamicClient.Resource(workloadGVR).Namespace("project-1").Create(ctx, workload, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := client.ObserveJob(ctx, "project-1", "job-success")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Phase != "Succeeded" || !got.Succeeded || got.Failed {
+		t.Fatalf("unexpected terminal state: %#v", got)
+	}
+	if got.PodsReady {
+		t.Fatalf("succeeded job must not imply current pod readiness: %#v", got)
+	}
+	if !got.QuotaReserved || !got.Admitted || got.WorkloadName != "job-success-workload" {
+		t.Fatalf("terminal job lost kueue evidence: %#v", got)
+	}
+}
+
+func TestObserveFailedJobPreservesKueueEvidence(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{
+		workloadGVR: "WorkloadList",
+	})
+	coreClient := kubefake.NewSimpleClientset()
+	client := NewKubeClient(coreClient, dynamicClient)
+
+	if err := client.ApplyJob(ctx, Job{
+		Name: "job-failed", Namespace: "project-1", QueueName: "lq-pool",
+		Image: "example/train:latest", Resources: map[string]int64{gpuResourceName: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, "job-failed", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Status.Failed = 1
+	job, err = coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workload := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "kueue.x-k8s.io/v1beta1", "kind": "Workload",
+		"metadata": map[string]any{"name": "job-failed-workload", "namespace": "project-1"},
+		"status": map[string]any{"conditions": []any{
+			map[string]any{"type": "QuotaReserved", "status": "True"},
+			map[string]any{"type": "Admitted", "status": "True"},
+		}},
+	}}
+	workload.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Job", UID: job.UID}})
+	if _, err := dynamicClient.Resource(workloadGVR).Namespace("project-1").Create(ctx, workload, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := client.ObserveJob(ctx, "project-1", "job-failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Phase != "Failed" || !got.Failed || got.Succeeded {
+		t.Fatalf("unexpected terminal state: %#v", got)
+	}
+	if !got.QuotaReserved || !got.Admitted || got.WorkloadName != "job-failed-workload" {
+		t.Fatalf("failed job lost kueue evidence: %#v", got)
+	}
+}
