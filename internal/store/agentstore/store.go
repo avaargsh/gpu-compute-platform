@@ -15,6 +15,7 @@ var ErrPlacementSourceMismatch = errors.New("placement migration source does not
 var ErrPlacementMigrationConflict = errors.New("placement migration identity conflict")
 var ErrPlacementMigrationNotFound = errors.New("placement migration not found")
 var ErrPlacementMigrationTransition = errors.New("invalid placement migration transition")
+var ErrPlacementTargetNotReady = errors.New("placement migration target is not ready")
 
 type Store interface {
 	Register(context.Context, agent.Registration) error

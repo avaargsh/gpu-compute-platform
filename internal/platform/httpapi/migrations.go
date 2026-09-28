@@ -10,11 +10,12 @@ import (
 )
 
 type MigrationAPI struct {
-	store MigrationStore
+	store     MigrationStore
+	resources agentstore.Store
 }
 
-func NewMigrationAPI(store MigrationStore) *MigrationAPI {
-	return &MigrationAPI{store: store}
+func NewMigrationAPI(store MigrationStore, resources agentstore.Store) *MigrationAPI {
+	return &MigrationAPI{store: store, resources: resources}
 }
 
 func (a *MigrationAPI) Create(w http.ResponseWriter, r *http.Request) {
@@ -105,4 +106,69 @@ func (a *MigrationAPI) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (a *MigrationAPI) PrepareCutover(w http.ResponseWriter, r *http.Request) {
+	poolID := domain.ID(r.PathValue("poolID"))
+	migrationID := domain.ID(r.PathValue("migrationID"))
+	migration, err := a.store.GetPlacementMigration(r.Context(), poolID, migrationID)
+	if err != nil {
+		if errors.Is(err, agentstore.ErrPlacementMigrationNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if migration.Phase != domain.PlacementMigrationProjecting {
+		http.Error(w, agentstore.ErrPlacementMigrationTransition.Error(), http.StatusConflict)
+		return
+	}
+	desired, found, err := a.resources.GetDesired(r.Context(), migration.TargetClusterID, "ComputePool", poolID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, agentstore.ErrPlacementTargetNotReady.Error(), http.StatusConflict)
+		return
+	}
+	observation, observed, err := a.resources.GetObservation(r.Context(), migration.TargetClusterID, "ComputePool", poolID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !observed || observation.ObservedGeneration != desired.Generation || !conditionTrue(observation.Conditions, "Ready") {
+		http.Error(w, agentstore.ErrPlacementTargetNotReady.Error(), http.StatusConflict)
+		return
+	}
+	evidence := append([]string(nil), migration.EvidenceRefs...)
+	evidence = append(evidence, observation.EvidenceRefs...)
+	out, err := a.store.UpdatePlacementMigration(
+		r.Context(),
+		poolID,
+		migrationID,
+		domain.PlacementMigrationReadyToCutover,
+		migration.Conditions,
+		evidence,
+	)
+	if err != nil {
+		if errors.Is(err, agentstore.ErrPlacementMigrationTransition) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+func conditionTrue(conditions []domain.Condition, conditionType string) bool {
+	for _, condition := range conditions {
+		if condition.Type == conditionType && condition.Status == "True" {
+			return true
+		}
+	}
+	return false
 }
