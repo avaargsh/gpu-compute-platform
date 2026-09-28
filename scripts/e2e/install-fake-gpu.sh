@@ -4,6 +4,7 @@ set -euo pipefail
 : "${FAKE_GPU_NAMESPACE:=gpu-operator}"
 : "${FAKE_GPU_RELEASE:=fake-gpu-operator}"
 : "${FAKE_GPU_CHART:=oci://ghcr.io/run-ai/fake-gpu-operator/fake-gpu-operator}"
+: "${FAKE_GPU_VERSION:=0.2.0}"
 : "${TIMEOUT_SECONDS:=180}"
 
 for cmd in kubectl helm; do
@@ -17,6 +18,7 @@ kubectl label namespace "$FAKE_GPU_NAMESPACE" pod-security.kubernetes.io/enforce
 
 helm upgrade --install "$FAKE_GPU_RELEASE" "$FAKE_GPU_CHART" \
   --namespace "$FAKE_GPU_NAMESPACE" \
+  --version "$FAKE_GPU_VERSION" \
   --wait --timeout "${TIMEOUT_SECONDS}s"
 
 # Keep the acceptance contract independent of chart-internal topology value
