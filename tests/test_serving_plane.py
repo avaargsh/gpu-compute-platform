@@ -36,6 +36,7 @@ def test_native_serving_builds_deployment_and_service():
             namespace="team-a",
             accelerator_resource="vendor.example/gpu",
             image_vllm="registry.example/vllm:0.1.0",
+            image_sglang="registry.example/sglang:0.1.0",
         )
     ).build(deployment())
     deploy, service = manifests
