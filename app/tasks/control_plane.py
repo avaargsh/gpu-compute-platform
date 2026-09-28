@@ -78,7 +78,9 @@ async def _reconcile_resource(resource_key: str) -> None:
                     pool_key,
                     record.generation,
                 )
-                await store.put_observed(resource_key, record.generation, waiting_state)
+                written = await store.put_observed(resource_key, record.generation, waiting_state)
+                if written:
+                    enqueue_reconcile(resource_key, countdown=2)
                 logger.info("compute pool not ready; deferring workload key=%s pool=%s", resource_key, pool_key)
                 return
 
