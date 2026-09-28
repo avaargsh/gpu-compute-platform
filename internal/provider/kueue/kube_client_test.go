@@ -8,14 +8,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/dynamic/fake"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 )
 
 func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
-	dynamicClient := fake.NewSimpleDynamicClient(scheme)
+	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme)
 	coreClient := kubefake.NewSimpleClientset()
 	client := NewKubeClient(coreClient, dynamicClient)
 
@@ -126,7 +126,7 @@ func TestPodReady(t *testing.T) {
 func TestObserveJobDoesNotInferAdmissionFromRunningReadyPod(t *testing.T) {
 	ctx := context.Background()
 	coreClient := kubefake.NewSimpleClientset()
-	client := NewKubeClient(coreClient, fake.NewSimpleDynamicClient(runtime.NewScheme()))
+	client := NewKubeClient(coreClient, dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()))
 
 	if err := client.ApplyJob(ctx, Job{
 		Name: "job-no-admission", Namespace: "project-1", QueueName: "lq-pool",
