@@ -35,7 +35,21 @@ while (( SECONDS < deadline )); do
     # fake-gpu-operator publishes its own simulated product label (for example
     # Tesla-K80). Override it only after the operator is ready so the kind node
     # represents the H100 flavor exercised by this acceptance test.
-    kubectl label node "$node" nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3 --overwrite
+    # The operator may perform a final asynchronous label reconciliation after
+    # the extended resource first becomes allocatable. Keep the test fixture
+    # converged on the production-like H100 product label for a short stability
+    # window before handing the node to the Golden Path.
+    stable=0
+    while (( stable < 5 )); do
+      kubectl label node "$node" nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3 --overwrite >/dev/null
+      sleep 2
+      product="$(kubectl get node "$node" -o jsonpath='{.metadata.labels.nvidia\.com/gpu\.product}')"
+      if [[ "$product" == "NVIDIA-H100-80GB-HBM3" ]]; then
+        stable=$((stable + 1))
+      else
+        stable=0
+      fi
+    done
     echo "Fake GPU ready: node=$node nvidia.com/gpu=$allocatable product=NVIDIA-H100-80GB-HBM3"
     exit 0
   fi
