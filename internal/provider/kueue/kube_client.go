@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -128,6 +128,11 @@ func (c *KubeClient) apply(ctx context.Context, gvr schema.GroupVersionResource,
 	return err
 }
 
-func podReady(conditions []batchv1.JobCondition) bool {
+func podReady(conditions []corev1.PodCondition) bool {
+	for _, condition := range conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
 	return false
 }
