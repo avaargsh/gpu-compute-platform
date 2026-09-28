@@ -7,6 +7,7 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
+	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
 func (s *Store) ResolveProject(ctx context.Context, projectID domain.ID) (httpapi.Placement, error) {
@@ -45,7 +46,7 @@ func (s *Store) UpsertProjectBinding(ctx context.Context, in domain.ProjectBindi
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, `
 INSERT INTO project_bindings (project_id, cluster_id, namespace, generation)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (project_id) DO UPDATE SET
@@ -53,15 +54,26 @@ ON CONFLICT (project_id) DO UPDATE SET
     namespace = EXCLUDED.namespace,
     generation = EXCLUDED.generation,
     updated_at = now()
+WHERE project_bindings.generation <= EXCLUDED.generation
 `, in.ProjectID, in.ClusterID, in.Namespace, in.Metadata.Generation)
-	return err
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return agentstore.ErrStaleGeneration
+	}
+	return nil
 }
 
 func (s *Store) UpsertClusterBinding(ctx context.Context, in domain.ClusterBinding) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, `
 INSERT INTO cluster_bindings (pool_id, cluster_id, provider, generation)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (pool_id) DO UPDATE SET
@@ -69,6 +81,17 @@ ON CONFLICT (pool_id) DO UPDATE SET
     provider = EXCLUDED.provider,
     generation = EXCLUDED.generation,
     updated_at = now()
+WHERE cluster_bindings.generation <= EXCLUDED.generation
 `, in.PoolID, in.ClusterID, in.Provider, in.Metadata.Generation)
-	return err
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return agentstore.ErrStaleGeneration
+	}
+	return nil
 }
