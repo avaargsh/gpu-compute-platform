@@ -313,3 +313,64 @@ func TestMemoryUpsertCannotCancelDeletionLifecycle(t *testing.T) {
 		t.Fatalf("upsert must preserve cleanup finalizer: %#v", got.Finalizers)
 	}
 }
+
+func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	clusterID := domain.ID("cluster-a")
+	store.SetDesired(clusterID, []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-1", Generation: 4, Spec: map[string]any{"image": "example/train:latest"},
+	}})
+	if err := store.Report(ctx, clusterID, []agent.Observation{{
+		Kind: "Workload", ID: "train-1", ObservedGeneration: 4,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "False", Reason: "Deleted"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimReconcileLease(ctx, clusterID, "Workload", "train-1", "worker-a", 120)
+	if err != nil || !claimed {
+		t.Fatalf("claim before finalize: claimed=%t err=%v", claimed, err)
+	}
+
+	if err := store.FinalizeDesired(ctx, clusterID, "Workload", "train-1", 4); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.GetObservation(ctx, clusterID, "Workload", "train-1"); err != nil || ok {
+		t.Fatalf("finalize must clean observation: ok=%t err=%v", ok, err)
+	}
+	claimed, err = store.ClaimReconcileLease(ctx, clusterID, "Workload", "train-1", "worker-b", 120)
+	if err != nil || !claimed {
+		t.Fatalf("finalize must clean lease: claimed=%t err=%v", claimed, err)
+	}
+
+	if err := store.Report(ctx, clusterID, []agent.Observation{{
+		Kind: "Workload", ID: "train-1", ObservedGeneration: 4,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "True", Reason: "LateOldAgent"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := store.GetObservation(ctx, clusterID, "Workload", "train-1"); ok {
+		t.Fatal("tombstone must suppress late observation at finalized generation")
+	}
+
+	if err := store.Report(ctx, clusterID, []agent.Observation{{
+		Kind: "Workload", ID: "train-1", ObservedGeneration: 5,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "True", Reason: "FutureReport"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, _ := store.GetObservation(ctx, clusterID, "Workload", "train-1"); !ok || got.ObservedGeneration != 5 {
+		t.Fatalf("missing desired must not categorically forbid newer reports: %#v", got)
+	}
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: "train-1", Generation: 4, Spec: map[string]any{},
+	}); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("recreate at tombstoned generation err=%v, want stale generation", err)
+	}
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: "train-1", Generation: 5, Spec: map[string]any{},
+	}); err != nil {
+		t.Fatalf("newer generation must be allowed to recreate resource: %v", err)
+	}
+}
