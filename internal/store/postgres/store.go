@@ -73,6 +73,36 @@ ORDER BY kind, resource_id
 	return out, rows.Err()
 }
 
+
+func (s *Store) UpsertDesired(ctx context.Context, clusterID domain.ID, in agent.DesiredResource) error {
+	if s.db == nil {
+		return fmt.Errorf("postgres database is required")
+	}
+	spec, err := json.Marshal(in.Spec)
+	if err != nil {
+		return fmt.Errorf("marshal desired spec: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO desired_resources (cluster_id, kind, resource_id, generation, spec)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
+    generation = EXCLUDED.generation,
+    spec = EXCLUDED.spec,
+    updated_at = now()
+`, clusterID, in.Kind, in.ID, in.Generation, spec)
+	return err
+}
+
+func (s *Store) DeleteDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) error {
+	if s.db == nil {
+		return fmt.Errorf("postgres database is required")
+	}
+	_, err := s.db.ExecContext(ctx, `
+DELETE FROM desired_resources WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, kind, resourceID)
+	return err
+}
+
 func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []agent.Observation) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
