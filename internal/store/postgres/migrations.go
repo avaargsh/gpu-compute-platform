@@ -110,3 +110,40 @@ WHERE pool_id = $1 AND migration_id = $2
 	}
 	return out, nil
 }
+
+func (s *Store) UpdatePlacementMigration(ctx context.Context, poolID, migrationID domain.ID, phase domain.PlacementMigrationPhase, conditions []domain.Condition, evidenceRefs []string) (domain.PlacementMigration, error) {
+	if s.db == nil {
+		return domain.PlacementMigration{}, fmt.Errorf("postgres database is required")
+	}
+	current, err := s.getPlacementMigration(ctx, poolID, migrationID)
+	if err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	if !current.Phase.CanTransitionTo(phase) {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationTransition
+	}
+	conditionsJSON, err := json.Marshal(conditions)
+	if err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	evidenceJSON, err := json.Marshal(evidenceRefs)
+	if err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	result, err := s.db.ExecContext(ctx, `
+UPDATE placement_migrations
+SET phase = $3, conditions = $4, evidence_refs = $5, updated_at = now()
+WHERE pool_id = $1 AND migration_id = $2 AND phase = $6
+`, poolID, migrationID, phase, conditionsJSON, evidenceJSON, current.Phase)
+	if err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	if affected == 0 {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationTransition
+	}
+	return s.getPlacementMigration(ctx, poolID, migrationID)
+}

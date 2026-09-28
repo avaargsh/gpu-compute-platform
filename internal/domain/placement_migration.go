@@ -34,3 +34,29 @@ func (m PlacementMigration) ValidateRequest() bool {
 func (p PlacementMigrationPhase) Terminal() bool {
 	return p == PlacementMigrationSucceeded || p == PlacementMigrationFailed
 }
+
+func (p PlacementMigrationPhase) CanTransitionTo(next PlacementMigrationPhase) bool {
+	if p == next {
+		return true
+	}
+	if p.Terminal() {
+		return false
+	}
+	if next == PlacementMigrationFailed {
+		return true
+	}
+	switch p {
+	case PlacementMigrationRequested:
+		return next == PlacementMigrationProjecting
+	case PlacementMigrationProjecting:
+		return next == PlacementMigrationReadyToCutover
+	case PlacementMigrationReadyToCutover:
+		return next == PlacementMigrationCutover
+	case PlacementMigrationCutover:
+		return next == PlacementMigrationRetiring
+	case PlacementMigrationRetiring:
+		return next == PlacementMigrationSucceeded
+	default:
+		return false
+	}
+}

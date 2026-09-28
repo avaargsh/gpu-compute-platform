@@ -75,3 +75,34 @@ func (a *MigrationAPI) Get(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }
+
+type migrationStatusUpdate struct {
+	Phase        domain.PlacementMigrationPhase `json:"phase"`
+	Conditions   []domain.Condition             `json:"conditions,omitempty"`
+	EvidenceRefs []string                       `json:"evidenceRefs,omitempty"`
+}
+
+func (a *MigrationAPI) UpdateStatus(w http.ResponseWriter, r *http.Request) {
+	poolID := domain.ID(r.PathValue("poolID"))
+	migrationID := domain.ID(r.PathValue("migrationID"))
+	var in migrationStatusUpdate
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Phase == "" {
+		http.Error(w, "valid migration phase is required", http.StatusBadRequest)
+		return
+	}
+	out, err := a.store.UpdatePlacementMigration(r.Context(), poolID, migrationID, in.Phase, in.Conditions, in.EvidenceRefs)
+	if err != nil {
+		if errors.Is(err, agentstore.ErrPlacementMigrationNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, agentstore.ErrPlacementMigrationTransition) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
