@@ -4,8 +4,6 @@ set -euo pipefail
 : "${FAKE_GPU_NAMESPACE:=gpu-operator}"
 : "${FAKE_GPU_RELEASE:=fake-gpu-operator}"
 : "${FAKE_GPU_CHART:=oci://ghcr.io/run-ai/fake-gpu-operator/fake-gpu-operator}"
-: "${FAKE_GPU_COUNT:=8}"
-: "${FAKE_GPU_PRODUCT:=NVIDIA-A100-SXM4-80GB}"
 : "${TIMEOUT_SECONDS:=180}"
 
 for cmd in kubectl helm; do
@@ -29,7 +27,7 @@ deadline=$((SECONDS + TIMEOUT_SECONDS))
 while (( SECONDS < deadline )); do
   allocatable="$(kubectl get node "$node" -o jsonpath='{.status.allocatable.nvidia\.com/gpu}' 2>/dev/null || true)"
   if [[ -n "$allocatable" && "$allocatable" != "0" ]]; then
-    echo "Fake GPU ready: node=$node nvidia.com/gpu=$allocatable product=$FAKE_GPU_PRODUCT"
+    echo "Fake GPU ready: node=$node nvidia.com/gpu=$allocatable"
     exit 0
   fi
   sleep 2
