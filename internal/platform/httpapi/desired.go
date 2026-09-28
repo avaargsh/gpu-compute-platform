@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
@@ -61,9 +62,13 @@ func (a *DesiredAPI) Delete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "clusterID, kind and resourceID are required", http.StatusBadRequest)
 		return
 	}
-	if err := a.store.DeleteDesired(r.Context(), clusterID, kind, resourceID); err != nil {
+	if err := a.store.MarkDesiredDeleting(r.Context(), clusterID, kind, resourceID, time.Now().UTC()); err != nil {
+		if errors.Is(err, agentstore.ErrDesiredNotFound) {
+			http.NotFound(w, r)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusAccepted)
 }
