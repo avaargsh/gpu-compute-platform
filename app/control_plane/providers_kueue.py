@@ -14,7 +14,7 @@ class BatchClient(Protocol):
     def create_namespaced_job(self, namespace: str, body: dict[str, Any]) -> Any: ...
     def read_namespaced_job_status(self, name: str, namespace: str) -> Any: ...
     def read_namespaced_job(self, name: str, namespace: str) -> Any: ...
-    def delete_namespaced_job(self, name: str, namespace: str, **kwargs: Any) -> Any: ...
+    def delete_namespaced_job(self, name: str, namespace: str, **kwargs: Any) -> Any: ...\n    def list_namespaced_pod(self, namespace: str, **kwargs: Any) -> Any: ...
 
 
 class CustomObjectsClient(Protocol):
@@ -73,7 +73,7 @@ class KueueSchedulerProvider(SchedulerProvider):
         else:
             phase = "pending"
 
-        conditions = await self._workload_conditions(namespace, metadata)
+        conditions = await self._workload_conditions(namespace, metadata)\n        pods_ready = await self._pods_ready(namespace, name)
         admitted = conditions.get("Admitted") == "True"
         evicted = conditions.get("Evicted") == "True"
 
@@ -87,7 +87,7 @@ class KueueSchedulerProvider(SchedulerProvider):
             resource_version=getattr(metadata, "resource_version", None),
             admitted=admitted,
             evicted=evicted,
-            conditions=conditions,
+            conditions=conditions,\n            pods_ready=pods_ready,
         )
 
     async def cancel(self, binding_id: str) -> None:
@@ -125,7 +125,7 @@ class KueueSchedulerProvider(SchedulerProvider):
             if item.get("type")
         }
 
-    def _binding_id(self, name: str) -> str:
+    async def _pods_ready(self, namespace: str, job_name: str) -> int:\n        pods = await asyncio.to_thread(\n            self._client.list_namespaced_pod,\n            namespace=namespace,\n            label_selector=f"job-name={job_name}",\n        )\n        items = getattr(pods, "items", []) or []\n        return sum(\n            1 for pod in items\n            if any(\n                getattr(condition, "type", None) == "Ready" and getattr(condition, "status", None) == "True"\n                for condition in (getattr(getattr(pod, "status", None), "conditions", None) or [])\n            )\n        )\n\n    def _binding_id(self, name: str) -> str:
         return f"{self._binding.namespace}/{name}"
 
     @staticmethod
