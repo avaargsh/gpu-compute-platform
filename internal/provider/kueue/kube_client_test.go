@@ -59,7 +59,7 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	job.Status.Active = 1
-	job, err = coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{})
+	updatedJob, err := coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 			},
 		},
 	}}
-	workload.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Job", UID: job.UID}})
+	workload.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Job", UID: updatedJob.UID}})
 	if _, err := dynamicClient.Resource(workloadGVR).Namespace("project-1").Create(ctx, workload, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
