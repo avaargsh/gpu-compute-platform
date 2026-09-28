@@ -32,11 +32,11 @@ func TestProviderAppliesPoolResourcesInDependencyOrder(t *testing.T) {
 	p := NewProvider(client)
 
 	got, err := p.ReconcilePool(context.Background(), baseprovider.PoolProjection{
-		PoolID:      "pool-1",
+		PoolID:       "pool-1",
 		ProjectID:   "project-1",
-		ClusterID:   "cluster-a",
+		ClusterID:    "cluster-a",
 		Namespace:   "project-1",
-		Generation:  7,
+		Generation:   7,
 		Accelerators: []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 8}},
 	})
 	if err != nil {
