@@ -95,3 +95,28 @@ func writeJSON(w http.ResponseWriter, status int, in any) {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(in)
 }
+
+func (a *AgentAPI) ClaimReconcileLease(w http.ResponseWriter, r *http.Request) {
+	var in agent.ReconcileLeaseRequest
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	claimed, err := a.store.ClaimReconcileLease(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Owner, in.TTLSeconds)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, agent.ReconcileLeaseResponse{Claimed: claimed})
+}
+
+func (a *AgentAPI) ReleaseReconcileLease(w http.ResponseWriter, r *http.Request) {
+	var in agent.ReconcileLeaseRequest
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if err := a.store.ReleaseReconcileLease(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Owner); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
