@@ -147,3 +147,69 @@ WHERE pool_id = $1 AND migration_id = $2 AND phase = $6
 	}
 	return s.getPlacementMigration(ctx, poolID, migrationID)
 }
+
+func (s *Store) CutoverPlacementMigration(ctx context.Context, poolID, migrationID domain.ID) (out domain.PlacementMigration, err error) {
+	if s.db == nil {
+		return domain.PlacementMigration{}, fmt.Errorf("postgres database is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var phase domain.PlacementMigrationPhase
+	var sourceClusterID, targetClusterID domain.ID
+	err = tx.QueryRowContext(ctx, `
+SELECT phase, source_cluster_id, target_cluster_id
+FROM placement_migrations
+WHERE pool_id = $1 AND migration_id = $2
+FOR UPDATE
+`, poolID, migrationID).Scan(&phase, &sourceClusterID, &targetClusterID)
+	if err == sql.ErrNoRows {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationNotFound
+	}
+	if err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	if phase != domain.PlacementMigrationReadyToCutover {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationTransition
+	}
+
+	var currentClusterID domain.ID
+	err = tx.QueryRowContext(ctx, `
+SELECT cluster_id
+FROM cluster_bindings
+WHERE pool_id = $1
+FOR UPDATE
+`, poolID).Scan(&currentClusterID)
+	if err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	if currentClusterID != sourceClusterID {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementSourceMismatch
+	}
+
+	if _, err = tx.ExecContext(ctx, `
+UPDATE cluster_bindings
+SET cluster_id = $2, generation = generation + 1, updated_at = now()
+WHERE pool_id = $1
+`, poolID, targetClusterID); err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `
+UPDATE placement_migrations
+SET phase = $3, updated_at = now()
+WHERE pool_id = $1 AND migration_id = $2
+`, poolID, migrationID, domain.PlacementMigrationCutover); err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	return s.getPlacementMigration(ctx, poolID, migrationID)
+}

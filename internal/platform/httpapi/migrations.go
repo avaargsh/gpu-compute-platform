@@ -172,3 +172,23 @@ func conditionTrue(conditions []domain.Condition, conditionType string) bool {
 	}
 	return false
 }
+
+func (a *MigrationAPI) Cutover(w http.ResponseWriter, r *http.Request) {
+	poolID := domain.ID(r.PathValue("poolID"))
+	migrationID := domain.ID(r.PathValue("migrationID"))
+	out, err := a.store.CutoverPlacementMigration(r.Context(), poolID, migrationID)
+	if err != nil {
+		switch {
+		case errors.Is(err, agentstore.ErrPlacementMigrationNotFound):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		case errors.Is(err, agentstore.ErrPlacementMigrationTransition),
+			errors.Is(err, agentstore.ErrPlacementSourceMismatch):
+			http.Error(w, err.Error(), http.StatusConflict)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}

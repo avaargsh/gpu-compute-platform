@@ -14,6 +14,7 @@ type MigrationStore interface {
 	CreatePlacementMigration(context.Context, domain.PlacementMigration) (domain.PlacementMigration, bool, error)
 	GetPlacementMigration(context.Context, domain.ID, domain.ID) (domain.PlacementMigration, error)
 	UpdatePlacementMigration(context.Context, domain.ID, domain.ID, domain.PlacementMigrationPhase, []domain.Condition, []string) (domain.PlacementMigration, error)
+	CutoverPlacementMigration(context.Context, domain.ID, domain.ID) (domain.PlacementMigration, error)
 }
 
 func (r *MemoryPlacementResolver) CreatePlacementMigration(_ context.Context, in domain.PlacementMigration) (domain.PlacementMigration, bool, error) {
@@ -96,4 +97,32 @@ func (r *MemoryPlacementResolver) UpdatePlacementMigration(_ context.Context, po
 	current.Metadata.UpdatedAt = time.Now().UTC()
 	items[migrationID] = current
 	return current, nil
+}
+
+func (r *MemoryPlacementResolver) CutoverPlacementMigration(_ context.Context, poolID, migrationID domain.ID) (domain.PlacementMigration, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items := r.migrations[poolID]
+	if items == nil {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationNotFound
+	}
+	migration, ok := items[migrationID]
+	if !ok {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationNotFound
+	}
+	if migration.Phase != domain.PlacementMigrationReadyToCutover {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationTransition
+	}
+	current, ok := r.pools[poolID]
+	if !ok || current.ClusterID != migration.SourceClusterID {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementSourceMismatch
+	}
+
+	current.ClusterID = migration.TargetClusterID
+	r.pools[poolID] = current
+	migration.Phase = domain.PlacementMigrationCutover
+	migration.Metadata.UpdatedAt = time.Now().UTC()
+	items[migrationID] = migration
+	return migration, nil
 }
