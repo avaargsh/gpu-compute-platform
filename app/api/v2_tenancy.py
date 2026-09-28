@@ -1,4 +1,4 @@
-"""Tenant and Project APIs for the canonical v2 ownership model."""
+"""Canonical Tenant and Project REST resources."""
 
 import uuid
 
@@ -23,21 +23,21 @@ class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
 
 
-async def require_project_member(project_id: uuid.UUID, user: User, session: AsyncSession) -> Project:
-    membership = (
+async def require_project_member(tenant_id: uuid.UUID, project_id: uuid.UUID, user: User, session: AsyncSession) -> Project:
+    row = (
         await session.execute(
-            select(ProjectMember).where(
-                ProjectMember.project_id == project_id,
+            select(Project)
+            .join(ProjectMember, ProjectMember.project_id == Project.id)
+            .where(
+                Project.id == project_id,
+                Project.tenant_id == tenant_id,
                 ProjectMember.user_id == user.id,
             )
         )
     ).scalar_one_or_none()
-    if membership is None:
+    if row is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    project = await session.get(Project, project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return project
+    return row
 
 
 @router.post("/tenants", status_code=status.HTTP_201_CREATED)
@@ -50,19 +50,19 @@ async def create_tenant(payload: TenantCreate, session: AsyncSession = Depends(g
     await session.flush()
     session.add(ProjectMember(project_id=project.id, user_id=user.id, role="owner"))
     await session.commit()
-    return {"id": tenant.id, "name": tenant.name, "default_project_id": project.id}
+    return {"id": tenant.id, "name": tenant.name, "default_project": {"id": project.id, "name": project.name}}
 
 
 @router.post("/tenants/{tenant_id}/projects", status_code=status.HTTP_201_CREATED)
 async def create_project(tenant_id: uuid.UUID, payload: ProjectCreate, session: AsyncSession = Depends(get_async_session), user: User = Depends(current_active_user)):
-    owner_membership = (
+    owner = (
         await session.execute(
             select(ProjectMember)
             .join(Project, Project.id == ProjectMember.project_id)
             .where(Project.tenant_id == tenant_id, ProjectMember.user_id == user.id, ProjectMember.role == "owner")
         )
     ).scalar_one_or_none()
-    if owner_membership is None:
+    if owner is None:
         raise HTTPException(status_code=404, detail="Tenant not found")
     project = Project(tenant_id=tenant_id, name=payload.name)
     session.add(project)
