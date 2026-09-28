@@ -226,7 +226,6 @@ func TestMemoryReconcileLeaseValidatesIdentityAndTTL(t *testing.T) {
 	}
 }
 
-
 func TestMemoryDesiredDeletionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemory()
