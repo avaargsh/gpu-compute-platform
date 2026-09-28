@@ -167,6 +167,9 @@ func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind st
 			if item.Generation != generation {
 				return ErrStaleGeneration
 			}
+			if item.DeletionTimestamp == nil || !containsFinalizer(item.Finalizers, ProviderCleanupFinalizer) {
+				return ErrDesiredNotDeleting
+			}
 			found = true
 			continue
 		}
@@ -303,4 +306,13 @@ func (m *Memory) ReleaseReconcileLease(
 		delete(m.leases, key)
 	}
 	return nil
+}
+
+func containsFinalizer(finalizers []string, target string) bool {
+	for _, finalizer := range finalizers {
+		if finalizer == target {
+			return true
+		}
+	}
+	return false
 }
