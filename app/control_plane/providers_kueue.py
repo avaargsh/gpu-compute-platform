@@ -12,6 +12,7 @@ from app.control_plane.providers import ProviderStatus, SchedulerProvider
 class BatchClient(Protocol):
     def create_namespaced_job(self, namespace: str, body: dict[str, Any]) -> Any: ...
     def read_namespaced_job_status(self, name: str, namespace: str) -> Any: ...
+    def read_namespaced_job(self, name: str, namespace: str) -> Any: ...
     def delete_namespaced_job(self, name: str, namespace: str, **kwargs: Any) -> Any: ...
 
 
@@ -25,10 +26,18 @@ class KueueSchedulerProvider(SchedulerProvider):
 
     async def submit(self, workload: WorkloadSpec) -> str:
         manifest = self._builder.build_job(workload)
-        self._client.create_namespaced_job(
-            namespace=self._binding.namespace,
-            body=manifest,
-        )
+        try:
+            self._client.read_namespaced_job(
+                name=workload.name,
+                namespace=self._binding.namespace,
+            )
+        except Exception as exc:
+            if getattr(exc, "status", None) != 404:
+                raise
+            self._client.create_namespaced_job(
+                namespace=self._binding.namespace,
+                body=manifest,
+            )
         return self._binding_id(workload.name)
 
     async def status(self, binding_id: str) -> ProviderStatus:
