@@ -2,15 +2,19 @@ package kueue
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
@@ -164,5 +168,54 @@ func TestObserveJobDoesNotInferAdmissionFromRunningReadyPod(t *testing.T) {
 	}
 	if !observed.PodsReady || observed.Phase != "Running" {
 		t.Fatalf("expected running ready workload: %#v", observed)
+	}
+}
+
+func TestJobObjectKeepsQueueLabelOffPodTemplate(t *testing.T) {
+	job, err := jobObject(Job{
+		Name:      "job-train-1",
+		Namespace: "project-1",
+		Image:     "example/train:latest",
+		Resources: map[string]int64{gpuResourceName: 1},
+		Labels:    map[string]string{"kueue.x-k8s.io/queue-name": "lq-pool"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Labels["kueue.x-k8s.io/queue-name"] != "lq-pool" {
+		t.Fatalf("job queue label missing: %#v", job.Labels)
+	}
+	if _, ok := job.Spec.Template.Labels["kueue.x-k8s.io/queue-name"]; ok {
+		t.Fatalf("queue label must not leak to pod template: %#v", job.Spec.Template.Labels)
+	}
+	if job.Spec.Template.Labels["ai.compute/workload"] != "job-train-1" {
+		t.Fatalf("pod workload identity missing: %#v", job.Spec.Template.Labels)
+	}
+}
+
+func TestApplyJobForbiddenGetDoesNotCreate(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	createCalled := false
+	coreClient.PrependReactor("get", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(batchv1.Resource("jobs"), "job-denied", errors.New("denied"))
+	})
+	coreClient.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		createCalled = true
+		return false, nil, nil
+	})
+
+	client := NewKubeClient(coreClient, nil)
+	err := client.ApplyJob(ctx, Job{
+		Name:      "job-denied",
+		Namespace: "project-1",
+		Image:     "example/train:latest",
+		Resources: map[string]int64{gpuResourceName: 1},
+	})
+	if err == nil || !apierrors.IsForbidden(err) {
+		t.Fatalf("expected forbidden error, got %v", err)
+	}
+	if createCalled {
+		t.Fatal("forbidden GET must not fall back to CREATE")
 	}
 }
