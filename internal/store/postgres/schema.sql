@@ -93,3 +93,16 @@ CREATE TABLE IF NOT EXISTS reconcile_leases (
 
 CREATE INDEX IF NOT EXISTS reconcile_leases_expiry_idx
     ON reconcile_leases (lease_until);
+
+
+CREATE TABLE IF NOT EXISTS deletion_tombstones (
+    cluster_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    generation BIGINT NOT NULL,
+    finalized_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (cluster_id, kind, resource_id)
+);
+
+CREATE INDEX IF NOT EXISTS deletion_tombstones_finalized_idx
+    ON deletion_tombstones (finalized_at);
