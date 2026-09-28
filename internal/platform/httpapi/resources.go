@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
@@ -139,7 +140,7 @@ func (a *ResourceAPI) GetWorkload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if !found || desired.Spec["poolID"] != string(poolID) {
+	if !found || domain.ID(fmt.Sprint(desired.Spec["poolID"])) != poolID {
 		http.NotFound(w, r)
 		return
 	}
@@ -152,4 +153,41 @@ func (a *ResourceAPI) GetWorkload(w http.ResponseWriter, r *http.Request) {
 	status.Kind = desired.Kind
 	status.ID = desired.ID
 	writeJSON(w, http.StatusOK, workloadView{Spec: desired.Spec, Status: status})
+}
+
+
+type computePoolView struct {
+	Spec   map[string]any `json:"spec"`
+	Status resourceState  `json:"status"`
+}
+
+func (a *ResourceAPI) GetComputePool(w http.ResponseWriter, r *http.Request) {
+	resourceID := domain.ID(r.PathValue("resourceID"))
+	if resourceID == "" {
+		http.Error(w, "resource id is required", http.StatusBadRequest)
+		return
+	}
+	placement, err := a.placement.ResolvePool(r.Context(), resourceID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	desired, found, err := a.store.GetDesired(r.Context(), placement.ClusterID, "ComputePool", resourceID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	observation, observed, err := a.store.GetObservation(r.Context(), placement.ClusterID, "ComputePool", resourceID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	status := projectResourceState(desired.Generation, observed, observation.ObservedGeneration, observation.Conditions, observation.EvidenceRefs)
+	status.Kind = desired.Kind
+	status.ID = desired.ID
+	writeJSON(w, http.StatusOK, computePoolView{Spec: desired.Spec, Status: status})
 }
