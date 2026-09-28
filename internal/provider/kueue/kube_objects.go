@@ -54,7 +54,6 @@ func clusterQueueObject(in ClusterQueue) *unstructured.Unstructured {
 	}}
 }
 
-
 func coveredResources(quotas []ResourceQuota) []any {
 	seen := make(map[string]struct{}, len(quotas))
 	out := make([]any, 0, len(quotas))
