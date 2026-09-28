@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.auth import router as auth_router
 from app.api.v2_tenancy import router as tenancy_router
 from app.api.v2_workloads import router as workloads_router
+from app.api.v1_compute_pools import router as compute_pools_router
 from app.core.config import settings
 import app.models.control_plane_resource
 import app.models.control_plane_revision
@@ -36,6 +37,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
 app.include_router(tenancy_router, prefix="/api/v1", tags=["tenancy"])
 app.include_router(workloads_router, prefix="/api/v1", tags=["workloads"])
+app.include_router(compute_pools_router, prefix="/api/v1", tags=["compute-pools"])
 
 
 @app.get("/")
