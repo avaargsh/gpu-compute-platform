@@ -9,10 +9,10 @@ import (
 )
 
 type PoolReconciler struct {
-	provider provider.ComputeProvider
+	provider provider.PoolProvider
 }
 
-func NewPoolReconciler(p provider.ComputeProvider) *PoolReconciler {
+func NewPoolReconciler(p provider.PoolProvider) *PoolReconciler {
 	return &PoolReconciler{provider: p}
 }
 
