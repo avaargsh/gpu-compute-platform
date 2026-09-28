@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Any
+import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,13 +13,16 @@ from app.models.control_plane_resource import ControlPlaneResource
 
 
 class SQLAlchemyResourceStore:
-    def __init__(self, session: AsyncSession, owner_id: str | None = None):
+    def __init__(self, session: AsyncSession, project_id: uuid.UUID | None = None):
         self.session = session
-        self.owner_id = owner_id
+        self.project_id = project_id
+
+    def _owned(self, row: ControlPlaneResource | None) -> bool:
+        return row is not None and (self.project_id is None or row.project_id == self.project_id)
 
     async def get(self, key: str) -> ResourceRecord | None:
         row = await self.session.get(ControlPlaneResource, key)
-        if row is None or (self.owner_id is not None and row.owner_id != self.owner_id):
+        if not self._owned(row):
             return None
         return ResourceRecord(
             key=row.key,
@@ -35,13 +39,16 @@ class SQLAlchemyResourceStore:
         payload = desired.model_dump(mode="json") if hasattr(desired, "model_dump") else desired
         row = await self.session.get(ControlPlaneResource, key)
         if row is None:
-            if self.owner_id is None:
-                raise ValueError("owner_id is required when creating control-plane resources")
-            row = ControlPlaneResource(key=key, kind=key.split("/", 1)[0], owner_id=self.owner_id, generation=1, desired=payload, lifecycle={"finalizers": []})
+            if self.project_id is None:
+                raise ValueError("project_id is required when creating control-plane resources")
+            row = ControlPlaneResource(
+                key=key, kind=key.split("/")[-2], project_id=self.project_id,
+                generation=1, desired=payload, lifecycle={"finalizers": []},
+            )
             self.session.add(row)
         else:
-            if self.owner_id is not None and row.owner_id != self.owner_id:
-                raise PermissionError("resource belongs to another owner")
+            if not self._owned(row):
+                raise PermissionError("resource belongs to another project")
             row.generation += 1
             row.desired = payload
             row.observed = None
@@ -57,7 +64,7 @@ class SQLAlchemyResourceStore:
 
     async def mark_deleting(self, key: str, deletion_timestamp: datetime) -> None:
         row = await self.session.get(ControlPlaneResource, key)
-        if row is None or (self.owner_id is not None and row.owner_id != self.owner_id):
+        if not self._owned(row):
             return
         lifecycle = dict(row.lifecycle or {})
         lifecycle["deletion_timestamp"] = deletion_timestamp.isoformat()
@@ -66,6 +73,6 @@ class SQLAlchemyResourceStore:
 
     async def delete(self, key: str) -> None:
         row = await self.session.get(ControlPlaneResource, key)
-        if row is not None and (self.owner_id is None or row.owner_id == self.owner_id):
+        if self._owned(row):
             await self.session.delete(row)
             await self.session.commit()
