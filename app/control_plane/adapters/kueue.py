@@ -71,4 +71,4 @@ class KueueManifestBuilder:
                 }
             },
         }
-        return manifest\n
+        return manifest
