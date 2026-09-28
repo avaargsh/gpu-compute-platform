@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/cluster"
@@ -22,5 +23,15 @@ func main() {
 		log.Fatalf("cluster runtime: %v", err)
 	}
 
-	log.Printf("cluster-agent ready: kueue_provider=%t", runtime.Kueue != nil)
+	capabilities, err := clients.Discover(context.Background())
+	if err != nil {
+		log.Fatalf("discover cluster capabilities: %v", err)
+	}
+
+	log.Printf(
+		"cluster-agent ready: kueue_provider=%t kueue=%t accelerators=%v",
+		runtime.Kueue != nil,
+		capabilities.Kueue,
+		capabilities.Accelerators,
+	)
 }
