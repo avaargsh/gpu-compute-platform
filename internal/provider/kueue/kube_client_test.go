@@ -46,7 +46,9 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 		QueueName: "lq-pool-h100",
 		Image:     "example/train:latest",
 		Resources: map[string]int64{gpuResourceName: 2},
-		Annotations: map[string]string{"kueue.x-k8s.io/queue-name": "lq-pool-h100"},
+		Annotations: map[string]string{
+			"kueue.x-k8s.io/queue-name": "lq-pool-h100",
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -100,4 +102,3 @@ func TestPodReady(t *testing.T) {
 		t.Fatal("expected non-ready pod")
 	}
 }
-
