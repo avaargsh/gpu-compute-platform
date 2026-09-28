@@ -42,6 +42,7 @@ jobs:
           if [ -n "$files" ]; then
             echo "gofmt required for:"
             echo "$files"
+            gofmt -d $files
             exit 1
           fi
       - name: Vet
