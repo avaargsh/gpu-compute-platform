@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: migrate compose-migrate test contract-test kind-up install-kueue e2e-golden e2e-up
+.PHONY: migrate compose-migrate test contract-test kind-up install-kueue install-fake-gpu e2e-golden e2e-gpu-golden e2e-up
 
 migrate:
 	uv run alembic upgrade head
@@ -21,8 +21,14 @@ install-kueue:
 	kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/latest/download/manifests.yaml
 	kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout=180s
 
+install-fake-gpu:
+	bash scripts/e2e/install-fake-gpu.sh
+
 e2e-golden:
-	./scripts/e2e/golden-path.sh
+	bash scripts/e2e/golden-path.sh
+
+e2e-gpu-golden:
+	bash scripts/e2e/fake-gpu-golden.sh
 
 e2e-up:
 	./scripts/e2e/up.sh
