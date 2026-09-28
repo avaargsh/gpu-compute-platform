@@ -34,9 +34,14 @@ func (r *Runner) Sync(ctx context.Context) error {
 		return fmt.Errorf("pull desired resources: %w", err)
 	}
 
+	bindings, err := indexAcceleratorBindings(desired)
+	if err != nil {
+		return fmt.Errorf("index accelerator bindings: %w", err)
+	}
+
 	observations := make([]Observation, 0, len(desired))
 	for _, item := range desired {
-		observation, err := r.reconcile(ctx, item)
+		observation, err := r.reconcile(ctx, item, bindings)
 		if err != nil {
 			observation = Observation{
 				Kind:               item.Kind,
@@ -59,7 +64,7 @@ func (r *Runner) Sync(ctx context.Context) error {
 	return nil
 }
 
-func (r *Runner) reconcile(ctx context.Context, item DesiredResource) (Observation, error) {
+func (r *Runner) reconcile(ctx context.Context, item DesiredResource, bindings map[domain.ID]map[string]domain.AcceleratorBinding) (Observation, error) {
 	switch item.Kind {
 	case "ComputePool":
 		var projection provider.PoolProjection
@@ -89,6 +94,15 @@ func (r *Runner) reconcile(ctx context.Context, item DesiredResource) (Observati
 		projection.WorkloadID = item.ID
 		projection.ClusterID = r.clusterID
 		projection.Generation = item.Generation
+		poolBindings, ok := bindings[projection.PoolID]
+		if !ok {
+			return Observation{}, fmt.Errorf("accelerator bindings not found for pool %s", projection.PoolID)
+		}
+		binding, ok := poolBindings[projection.Accelerator.Class]
+		if !ok {
+			return Observation{}, fmt.Errorf("accelerator binding not found: %s", projection.Accelerator.Class)
+		}
+		projection.AcceleratorBinding = binding
 		got, err := r.runtime.ReconcileWorkload(ctx, projection)
 		if err != nil {
 			return Observation{}, err
@@ -115,4 +129,29 @@ func decodeSpec(spec map[string]any, out any) error {
 		return fmt.Errorf("decode desired spec: %w", err)
 	}
 	return nil
+}
+
+func indexAcceleratorBindings(desired []DesiredResource) (map[domain.ID]map[string]domain.AcceleratorBinding, error) {
+	out := make(map[domain.ID]map[string]domain.AcceleratorBinding)
+	for _, item := range desired {
+		if item.Kind != "ComputePool" {
+			continue
+		}
+		var projection provider.PoolProjection
+		if err := decodeSpec(item.Spec, &projection); err != nil {
+			return nil, fmt.Errorf("decode compute pool %s: %w", item.ID, err)
+		}
+		poolBindings := make(map[string]domain.AcceleratorBinding, len(projection.AcceleratorBindings))
+		for _, binding := range projection.AcceleratorBindings {
+			if binding.Class == "" || binding.ResourceName == "" || binding.Flavor == "" {
+				return nil, fmt.Errorf("accelerator binding is incomplete in pool %s", item.ID)
+			}
+			if _, exists := poolBindings[binding.Class]; exists {
+				return nil, fmt.Errorf("duplicate accelerator binding %s in pool %s", binding.Class, item.ID)
+			}
+			poolBindings[binding.Class] = binding
+		}
+		out[item.ID] = poolBindings
+	}
+	return out, nil
 }
