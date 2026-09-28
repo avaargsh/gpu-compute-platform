@@ -52,6 +52,7 @@ class SQLAlchemyResourceStore:
             row.generation += 1
             row.desired = payload
             row.observed = None
+            row.observed_generation = None
         await self.session.commit()
         return await self.get(key)
 
@@ -60,6 +61,7 @@ class SQLAlchemyResourceStore:
         if row is None or row.generation != generation:
             return
         row.observed = observed.model_dump(mode="json")
+        row.observed_generation = generation
         await self.session.commit()
 
     async def mark_deleting(self, key: str, deletion_timestamp: datetime) -> None:
