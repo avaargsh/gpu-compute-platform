@@ -268,3 +268,20 @@ func TestMemoryDesiredDeletionLifecycle(t *testing.T) {
 		t.Fatalf("second finalize err=%v, want ErrDesiredNotFound", err)
 	}
 }
+
+func TestFinalizeDesiredRejectsActiveResource(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	clusterID := domain.ID("cluster-a")
+	store.SetDesired(clusterID, []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-active", Generation: 7, Spec: map[string]any{"image": "example/train:latest"},
+	}})
+
+	err := store.FinalizeDesired(ctx, clusterID, "Workload", "train-active", 7)
+	if !errors.Is(err, ErrDesiredNotDeleting) {
+		t.Fatalf("finalize active desired err=%v, want ErrDesiredNotDeleting", err)
+	}
+	if _, ok, getErr := store.GetDesired(ctx, clusterID, "Workload", "train-active"); getErr != nil || !ok {
+		t.Fatalf("active desired must survive invalid finalize: ok=%t err=%v", ok, getErr)
+	}
+}
