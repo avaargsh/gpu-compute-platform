@@ -84,14 +84,8 @@ func (p *Provider) DeletePool(ctx context.Context, projection baseprovider.PoolP
 	}
 	allGone = allGone && gone
 
-	for _, flavor := range resources.Flavors {
-		evidence = append(evidence, fmt.Sprintf("k8s://%s/resourceflavor/%s", projection.ClusterID, flavor.Name))
-		gone, err = p.client.DeleteResourceFlavor(ctx, flavor.Name)
-		if err != nil {
-			return baseprovider.DeletionObservation{}, fmt.Errorf("delete resource flavor %s: %w", flavor.Name, classifyProviderError(err))
-		}
-		allGone = allGone && gone
-	}
-
+	// ResourceFlavor is cluster-scoped and may be shared by multiple ComputePools.
+	// A pool finalizer must only delete pool-owned resources. Shared flavor garbage
+	// collection requires explicit ownership/reference tracking at the control plane.
 	return baseprovider.DeletionObservation{Gone: allGone, EvidenceRefs: evidence}, nil
 }
