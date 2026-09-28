@@ -14,7 +14,7 @@ type fakeControlPlane struct {
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }
-func (f *fakeControlPlane) Heartbeat(context.Context, Heartbeat) error  { return nil }
+func (f *fakeControlPlane) Heartbeat(context.Context, Heartbeat) error   { return nil }
 func (f *fakeControlPlane) PullDesired(context.Context, domain.ID) ([]DesiredResource, error) {
 	return f.desired, nil
 }
