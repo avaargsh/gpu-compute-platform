@@ -237,7 +237,7 @@ func TestRunnerDeletionCleansDependentsBeforePoolAndFinalizesAfterGone(t *testin
 			Kind: "ComputePool", ID: "pool-1", Generation: 3, DeletionTimestamp: &now,
 			Finalizers: []string{"gpu-compute-platform.io/provider-cleanup"},
 			Spec: map[string]any{
-				"namespace": "project-1",
+				"namespace":    "project-1",
 				"accelerators": []any{map[string]any{"class": "h100", "quota": float64(4)}},
 				"acceleratorBindings": []any{
 					map[string]any{"class": "h100", "resourceName": "nvidia.com/gpu", "flavor": "h100"},
@@ -249,7 +249,7 @@ func TestRunnerDeletionCleansDependentsBeforePoolAndFinalizesAfterGone(t *testin
 			Finalizers: []string{"gpu-compute-platform.io/provider-cleanup"},
 			Spec: map[string]any{
 				"poolID": "pool-1", "namespace": "project-1",
-				"image": "example/train:latest",
+				"image":       "example/train:latest",
 				"accelerator": map[string]any{"class": "h100", "quota": float64(1)},
 			},
 		},
