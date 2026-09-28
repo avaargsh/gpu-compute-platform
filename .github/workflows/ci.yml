@@ -27,6 +27,7 @@ jobs:
           uv run alembic upgrade 20260928_cp_v2 --sql > /tmp/control-plane-v1.sql
           grep -q "CREATE TABLE users" /tmp/control-plane-v1.sql
           grep -q "CREATE TABLE control_plane_resources" /tmp/control-plane-v1.sql
+          grep -q "FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE" /tmp/control-plane-v1.sql
       - name: Validate Docker Compose model
         run: docker compose config -q
       - name: Validate Golden Path shell
