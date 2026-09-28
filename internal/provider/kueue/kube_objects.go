@@ -1,7 +1,6 @@
 package kueue
 
 import (
-	"encoding/json"
 	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -126,6 +125,3 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func toJSON(in any) ([]byte, error) {
-	return json.Marshal(in)
-}
