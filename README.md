@@ -1,176 +1,81 @@
 # AI Compute Control Plane
 
-Kubernetes-native control plane for GPU/NPU workloads, distributed training, and model serving.
+Kubernetes-native **Go** control plane for portable accelerator workloads.
 
-> **Status:** alpha. The previous GPU-task/multi-cloud MVP is discontinued. There is no backward-compatibility guarantee.
+> **Status:** alpha. The legacy Python control plane has been retired on this branch. The Go control plane and cluster agent are the canonical implementation.
 
-## API
-
-Canonical API prefix:
+## Runtime boundary
 
 ```text
-/api/v1
-```
-
-Resource hierarchy:
-
-```text
-Tenant
-└── Project
-    ├── ComputePool
-    ├── Workload
-    ├── ModelRevision
-    ├── Deployment
-    └── Endpoint
-```
-
-Current Workload endpoints:
-
-```text
-POST   /api/v1/tenants
-POST   /api/v1/tenants/{tenant_id}/projects
-
-POST   /api/v1/tenants/{tenant_id}/projects/{project_id}/workloads
-GET    /api/v1/tenants/{tenant_id}/projects/{project_id}/workloads/{name}
-PUT    /api/v1/tenants/{tenant_id}/projects/{project_id}/workloads/{name}
-DELETE /api/v1/tenants/{tenant_id}/projects/{project_id}/workloads/{name}
-```
-
-Mutations that require provider reconciliation return `202 Accepted`. Provider job IDs, Celery task IDs, physical GPU IDs, Kubernetes node names, credentials, and scheduler-specific resource names are not part of the public resource contract.
-
-## Architecture
-
-```text
-Client / CLI / SDK
-       |
-       v
-Tenant -> Project
-       |
-       v
-Desired State API
-       |
-       v
+Client / CLI
+    |
+    | REST /api/v1
+    v
+Go Control Plane
+    |
+    | desired state / generation / finalizers
+    v
 PostgreSQL
-       |
-       +---- Celery wake-up
-       +---- periodic convergence sweep
-       |
-       v
-Reconcile lease
-       |
-       v
-Controllers
-       |
-       +--> Kueue ---------- admission / quota
-       +--> Volcano/KAI ---- placement / gang
-       +--> DRA/HAMi ------- devices / sharing
-       +--> KServe/llm-d --- serving
-       +--> vLLM/SGLang ---- runtime
-       |
-       v
-Observed State / Conditions / Evidence / Revision History
+    |
+    | pull / report / reconcile lease
+    v
+Cluster Agent
+    |
+    | provider reconciliation
+    v
+Kubernetes + Kueue + accelerator provider
+    |
+    | observed state / evidence
+    v
+Go Control Plane
 ```
 
-## Invariants
-
-- PostgreSQL is the source of truth for desired and observed platform state.
-- Redis/Celery only accelerates reconciliation.
-- API resources express portable user intent; providers translate that intent.
-- Tenant/Project is the ownership and authorization boundary.
-- Desired-state mutations increment generation.
-- Observed writes are generation-aware.
-- Reconcile side effects are serialized by database leases.
-- Batch workload provider revisions are immutable.
-- Kubernetes access is fail-closed unless explicitly configured.
-- Production schema is managed by Alembic, never application startup `create_all()`.
-
-## Golden path
+## Current Golden Path
 
 ```text
 Project
- -> ComputePool
- -> Workload
- -> Kueue admission
- -> scheduler placement
- -> DRA/HAMi allocation
- -> Kubernetes execution
- -> ObservedState / Evidence
+  -> ComputePool
+  -> Accelerator Binding
+  -> Workload
+  -> Kueue admission
+  -> Job / Pod
+  -> Observation / Evidence
+  -> Finalizer / Provider Cleanup
+  -> Tombstone / Hard Delete
 ```
 
-Serving:
+The current CPU-only acceptance environment uses Run:ai Fake GPU Operator with an H100 profile. The operator owns simulated hardware facts; the platform consumes them through the portable `h100-80g` binding.
 
-```text
-ModelRevision
- -> Deployment
- -> KServe / llm-d
- -> vLLM / SGLang
- -> InferencePool
- -> Gateway API
- -> OpenAI-compatible endpoint
-```
+## Invariants
+
+- PostgreSQL is the management-plane source of truth.
+- Kubernetes is an execution provider, not a second product source of truth.
+- ComputePool accelerator classes are portable intent; provider bindings map them to resource names, flavors, and node labels.
+- The cluster agent owns provider reconciliation and downstream observation.
+- Desired and observed state are generation-aware.
+- Reconcile side effects require a remote lease.
+- Deletion retains Desired state until provider cleanup is observed complete.
+- Finalization writes a generation tombstone and removes observation/lease state atomically in PostgreSQL.
+- Shared cluster-scoped resources such as Kueue ResourceFlavor are not garbage-collected by a single ComputePool without explicit ownership/reference tracking.
+- DRA, HAMi, MIG, multi-provider expansion, and advanced placement are intentionally deferred until the current Golden Path is frozen.
 
 ## Development
 
-Requires Python 3.12+ and `uv`.
+Requires Go 1.24+, Docker, kind, kubectl, and Helm for the full Golden Path.
 
 ```bash
-uv sync --frozen
-uv run alembic upgrade head
-uv run pytest -q
+make fmt-check
+make vet
+make test
+make build
 ```
 
-Phase 0 acceptance path:
+Run the real acceptance path:
 
 ```bash
-make kind-up
-make install-kueue
-make migrate
-
-# Export a real kubeconfig file path (not ~/.kube/config if it contains
-# relative certificate paths), then start the API/worker:
-kind get kubeconfig --name ai-compute > .kubeconfig-e2e
-export CONTROL_PLANE_SCHEDULER_PROVIDER=kueue
-export CONTROL_PLANE_KUBECONFIG="$PWD/.kubeconfig-e2e"
-docker compose up -d postgres redis
-make compose-migrate
-docker compose up -d app celery-worker
-
 make e2e-golden
 ```
 
-The Golden Path intentionally uses CPU as a fake accelerator so Phase 0 validates
-control-plane admission and convergence without requiring a GPU node. HAMi/DRA
-are Phase 1 concerns.
+This creates a kind cluster, installs Kueue and Fake GPU Operator, configures a stable H100 profile, and validates Control Plane -> Agent -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete.
 
-The scheduler is disabled by default. To use Kueue:
-
-```bash
-export CONTROL_PLANE_SCHEDULER_PROVIDER=kueue
-export CONTROL_PLANE_KUEUE_NAMESPACE=team-a
-export CONTROL_PLANE_KUEUE_LOCAL_QUEUE=training
-export CONTROL_PLANE_ACCELERATOR_RESOURCE=nvidia.com/gpu
-```
-
-## Project direction
-
-The repository is a clean-break control-plane implementation. Legacy GPU job APIs, DAG APIs, multi-cloud job providers, and their task-state model are not part of the application surface and will be removed as the v1 control plane reaches feature parity with the new architecture.
-
-
-### Fake GPU Golden Path
-
-After the CPU Golden Path is healthy, a CPU-only kind node can advertise synthetic
-`nvidia.com/gpu` resources through the Run:ai Fake GPU Operator:
-
-```bash
-make install-fake-gpu
-kubectl get nodes -o custom-columns=NAME:.metadata.name,GPU:.status.allocatable.nvidia\\.com/gpu
-make e2e-gpu-golden
-```
-
-This acceptance path keeps the public intent portable (`a100-80g`) while the
-ComputePool binding maps it to the provider-private Kubernetes resource
-`nvidia.com/gpu`. It validates Kueue admission, the materialized Job GPU request,
-and terminal ObservedState without requiring physical GPU hardware.
-
-The fake GPU path is a scheduler/control-plane test. CUDA/NVML fidelity, HAMi and
-DRA remain separate later-stage acceptance profiles.
+See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract.
