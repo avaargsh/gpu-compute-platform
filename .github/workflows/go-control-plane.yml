@@ -22,7 +22,13 @@ jobs:
       - name: Dependencies
         run: go mod tidy
       - name: Format check
-        run: test -z "$(gofmt -l .)"
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "gofmt required for:"
+            echo "$files"
+            exit 1
+          fi
       - name: Vet
         run: go vet ./...
       - name: Test
