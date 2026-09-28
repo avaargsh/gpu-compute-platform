@@ -126,9 +126,13 @@ make kind-up
 make install-kueue
 make migrate
 
-# Start PostgreSQL/Redis, the API and Celery worker with:
-# CONTROL_PLANE_SCHEDULER_PROVIDER=kueue
-# CONTROL_PLANE_KUBECONFIG=<path to the kind kubeconfig>
+# Export a real kubeconfig file path (not ~/.kube/config if it contains
+# relative certificate paths), then start the API/worker:
+kind get kubeconfig --name ai-compute > .kubeconfig-e2e
+export CONTROL_PLANE_SCHEDULER_PROVIDER=kueue
+export CONTROL_PLANE_KUBECONFIG="$PWD/.kubeconfig-e2e"
+docker compose up -d postgres redis app celery-worker
+
 make e2e-golden
 ```
 
