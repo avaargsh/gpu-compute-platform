@@ -8,19 +8,23 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 )
 
 func TestDiscoverFindsKueueAndAccelerators(t *testing.T) {
 	scheme := runtime.NewScheme()
-	dynamicClient := dynamicfake.NewSimpleDynamicClient(scheme, &unstructured.Unstructured{
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		scheme,
+		map[schema.GroupVersionResource]string{clusterQueueGVR: "ClusterQueueList"},
+		&unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "kueue.x-k8s.io/v1beta1",
 			"kind":       "ClusterQueue",
 			"metadata":   map[string]any{"name": "existing"},
 		},
-	})
+	)
 	coreClient := kubefake.NewSimpleClientset(
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name:   "gpu-1",
