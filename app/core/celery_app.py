@@ -100,6 +100,12 @@ def setup_periodic_tasks(sender, **kwargs):
     
     # 每小时清理过期任务
     sender.add_periodic_task(
+        60.0,
+        "app.tasks.control_plane.sweep_reconcile_candidates",
+        name="control-plane-convergence-sweep",
+    )
+
+    sender.add_periodic_task(
         3600.0,
         "app.tasks.gpu_tasks.cleanup_expired_tasks", 
         name="cleanup-expired-tasks"
