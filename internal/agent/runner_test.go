@@ -54,7 +54,6 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 					"projectID": "project-1",
 					"poolID":    "pool-1",
 					"namespace": "project-1",
-					"queueName": "lq-pool-1",
 					"image":     "example/train:latest",
 					"accelerator": map[string]any{
 						"class": "h100-80g",
