@@ -57,7 +57,7 @@ class SQLAlchemyResourceStore:
 
     async def mark_deleting(self, key: str, deletion_timestamp: datetime) -> None:
         row = await self.session.get(ControlPlaneResource, key)
-        if row is None:
+        if row is None or (self.owner_id is not None and row.owner_id != self.owner_id):
             return
         lifecycle = dict(row.lifecycle or {})
         lifecycle["deletion_timestamp"] = deletion_timestamp.isoformat()
@@ -66,6 +66,6 @@ class SQLAlchemyResourceStore:
 
     async def delete(self, key: str) -> None:
         row = await self.session.get(ControlPlaneResource, key)
-        if row is not None:
+        if row is not None and (self.owner_id is None or row.owner_id == self.owner_id):
             await self.session.delete(row)
             await self.session.commit()
