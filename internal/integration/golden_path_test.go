@@ -1,7 +1,9 @@
 package integration
 
 import (
+	"bytes"
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -22,38 +24,36 @@ import (
 func TestGoldenPathDesiredToObserved(t *testing.T) {
 	ctx := context.Background()
 	store := agentstore.NewMemory()
-	store.SetDesired("cluster-a", []agent.DesiredResource{
-		{
-			Kind:       "ComputePool",
-			ID:         "pool-h100",
-			Generation: 1,
-			Spec: map[string]any{
-				"projectID": "project-1",
-				"namespace": "project-1",
-				"accelerators": []any{
-					map[string]any{"class": "h100-80g", "quota": float64(8)},
-				},
-			},
-		},
-		{
-			Kind:       "Workload",
-			ID:         "train-1",
-			Generation: 1,
-			Spec: map[string]any{
-				"projectID": "project-1",
-				"poolID":    "pool-h100",
-				"namespace": "project-1",
-				"image":     "example/train:latest",
-				"accelerator": map[string]any{
-					"class": "h100-80g",
-					"quota": float64(2),
-				},
-			},
-		},
-	})
 
 	server := httptest.NewServer(httpapi.NewRouterWithAgentStore(store))
 	defer server.Close()
+
+	putJSON := func(path, body string) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, server.URL+path, bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("PUT %s status=%d", path, resp.StatusCode)
+		}
+	}
+	putJSON("/api/v1/compute-pools/pool-h100", `{
+		"clusterId":"cluster-a","namespace":"project-1",
+		"resource":{"metadata":{"id":"pool-h100","generation":1},"projectId":"project-1",
+		"spec":{"accelerators":[{"class":"h100-80g","quota":8}],"scheduling":{"mode":"default"}},"status":{"observedGeneration":0}}
+	}`)
+	putJSON("/api/v1/workloads/train-1", `{
+		"clusterId":"cluster-a","namespace":"project-1",
+		"resource":{"metadata":{"id":"train-1","generation":1},"projectId":"project-1","poolId":"pool-h100",
+		"spec":{"image":"example/train:latest","accelerator":{"class":"h100-80g","quota":2}},"status":{"observedGeneration":0}}
+	}`)
 
 	coreClient := kubefake.NewSimpleClientset()
 	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
