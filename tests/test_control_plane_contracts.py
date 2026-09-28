@@ -15,7 +15,7 @@ def test_workload_intent_contains_no_physical_gpu_identity():
         name="train-qwen",
         kind=WorkloadKind.TRAINING,
         compute_pool=ComputePoolRef(name="training"),
-        accelerator=AcceleratorClass(name="h100-80g", family="H100", count=8),
+        accelerator=AcceleratorRequest(class_name="h100-80g", count=8),
         image="trainer:v1",
     )
     payload = spec.model_dump()
@@ -31,7 +31,7 @@ def test_serving_contract_separates_model_runtime_and_capacity():
         compute_pool=ComputePoolRef(name="inference"),
         serving=ServingConfig(
             runtime=RuntimeKind.VLLM,
-            accelerator=AcceleratorClass(name="h100-80g", count=2),
+            accelerator=AcceleratorRequest(class_name="h100-80g", count=2),
             tensor_parallelism=2,
         ),
     )
