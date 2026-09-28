@@ -33,9 +33,9 @@ func TestProviderAppliesPoolResourcesInDependencyOrder(t *testing.T) {
 
 	got, err := p.ReconcilePool(context.Background(), baseprovider.PoolProjection{
 		PoolID:       "pool-1",
-		ProjectID:   "project-1",
+		ProjectID:    "project-1",
 		ClusterID:    "cluster-a",
-		Namespace:   "project-1",
+		Namespace:    "project-1",
 		Generation:   7,
 		Accelerators: []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 8}},
 	})
