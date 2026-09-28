@@ -73,7 +73,6 @@ ORDER BY kind, resource_id
 	return out, rows.Err()
 }
 
-
 func (s *Store) UpsertDesired(ctx context.Context, clusterID domain.ID, in agent.DesiredResource) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
