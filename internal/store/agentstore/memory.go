@@ -51,6 +51,9 @@ func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.
 	items := m.desired[clusterID]
 	for i := range items {
 		if items[i].Kind == in.Kind && items[i].ID == in.ID {
+			if in.Generation < items[i].Generation {
+				return ErrStaleGeneration
+			}
 			items[i] = in
 			m.desired[clusterID] = items
 			return nil
