@@ -12,7 +12,7 @@ class FakeBatchClient:
         self.created = None
         self.exists = False
         self.deleted = None
-        self.job = SimpleNamespace(
+        self.pods = []\n        self.job = SimpleNamespace(
             metadata=SimpleNamespace(resource_version="42", uid="job-uid-1"),
             status=SimpleNamespace(active=0, succeeded=0, failed=0),
         )
@@ -125,3 +125,15 @@ async def test_submit_is_idempotent_when_job_already_exists():
     binding_id = await provider(client=client).submit(workload())
     assert binding_id == "team-a/train-qwen"
     assert client.created is None
+
+
+@pytest.mark.asyncio
+async def test_status_reports_ready_pods():
+    client = FakeBatchClient()
+    client.job.status = SimpleNamespace(active=1, succeeded=0, failed=0)
+    client.pods = [
+        SimpleNamespace(status=SimpleNamespace(conditions=[SimpleNamespace(type="Ready", status="True")])),
+        SimpleNamespace(status=SimpleNamespace(conditions=[SimpleNamespace(type="Ready", status="False")])),
+    ]
+    status = await provider(client=client).status("team-a/train-qwen")
+    assert status["pods_ready"] == 1
