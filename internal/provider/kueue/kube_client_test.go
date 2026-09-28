@@ -76,6 +76,7 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 		},
 		"status": map[string]any{
 			"conditions": []any{
+				map[string]any{"type": "QuotaReserved", "status": "True"},
 				map[string]any{"type": "Admitted", "status": "True"},
 			},
 		},
@@ -104,7 +105,7 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !observed.Admitted || !observed.PodsReady || observed.Phase != "Running" {
+	if !observed.QuotaReserved || !observed.Admitted || !observed.PodsReady || observed.Phase != "Running" {
 		t.Fatalf("unexpected observation: %#v", observed)
 	}
 
@@ -158,8 +159,8 @@ func TestObserveJobDoesNotInferAdmissionFromRunningReadyPod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observed.Admitted {
-		t.Fatalf("running ready pod must not imply Kueue admission: %#v", observed)
+	if observed.QuotaReserved || observed.Admitted {
+		t.Fatalf("running ready pod must not imply Kueue quota or admission: %#v", observed)
 	}
 	if !observed.PodsReady || observed.Phase != "Running" {
 		t.Fatalf("expected running ready workload: %#v", observed)
