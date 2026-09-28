@@ -285,3 +285,31 @@ func TestFinalizeDesiredRejectsActiveResource(t *testing.T) {
 		t.Fatalf("active desired must survive invalid finalize: ok=%t err=%v", ok, getErr)
 	}
 }
+
+func TestMemoryUpsertCannotCancelDeletionLifecycle(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	clusterID := domain.ID("cluster-a")
+	store.SetDesired(clusterID, []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-1", Generation: 3, Spec: map[string]any{"image": "old"},
+	}})
+	at := time.Date(2026, 9, 29, 2, 0, 0, 0, time.UTC)
+	if err := store.MarkDesiredDeleting(ctx, clusterID, "Workload", "train-1", at); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: "train-1", Generation: 3, Spec: map[string]any{"image": "new"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := store.GetDesired(ctx, clusterID, "Workload", "train-1")
+	if err != nil || !ok {
+		t.Fatalf("desired missing: ok=%t err=%v", ok, err)
+	}
+	if got.DeletionTimestamp == nil || !got.DeletionTimestamp.Equal(at) {
+		t.Fatalf("upsert must preserve deletion timestamp: %#v", got.DeletionTimestamp)
+	}
+	if !containsFinalizer(got.Finalizers, ProviderCleanupFinalizer) {
+		t.Fatalf("upsert must preserve cleanup finalizer: %#v", got.Finalizers)
+	}
+}
