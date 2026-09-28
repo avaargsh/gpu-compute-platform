@@ -56,6 +56,30 @@ func (m *Memory) GetDesired(_ context.Context, clusterID domain.ID, kind string,
 	return agent.DesiredResource{}, false, nil
 }
 
+func (m *Memory) LocateDesired(_ context.Context, kind string, resourceID domain.ID) (domain.ID, agent.DesiredResource, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var clusterID domain.ID
+	var found agent.DesiredResource
+	matches := 0
+	for candidateClusterID, items := range m.desired {
+		for _, item := range items {
+			if item.Kind == kind && item.ID == resourceID {
+				clusterID = candidateClusterID
+				found = item
+				matches++
+				if matches > 1 {
+					return "", agent.DesiredResource{}, false, ErrIdentityConflict
+				}
+			}
+		}
+	}
+	if matches == 0 {
+		return "", agent.DesiredResource{}, false, nil
+	}
+	return clusterID, found, true, nil
+}
+
 func (m *Memory) GetObservation(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (agent.Observation, bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

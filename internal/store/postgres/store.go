@@ -94,6 +94,46 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	return item, true, nil
 }
 
+func (s *Store) LocateDesired(ctx context.Context, kind string, resourceID domain.ID) (domain.ID, agent.DesiredResource, bool, error) {
+	if s.db == nil {
+		return "", agent.DesiredResource{}, false, fmt.Errorf("postgres database is required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT cluster_id, kind, resource_id, generation, spec
+FROM desired_resources
+WHERE kind = $1 AND resource_id = $2
+ORDER BY cluster_id
+LIMIT 2
+`, kind, resourceID)
+	if err != nil {
+		return "", agent.DesiredResource{}, false, err
+	}
+	defer rows.Close()
+	var clusterID domain.ID
+	var item agent.DesiredResource
+	matches := 0
+	for rows.Next() {
+		var spec []byte
+		if err := rows.Scan(&clusterID, &item.Kind, &item.ID, &item.Generation, &spec); err != nil {
+			return "", agent.DesiredResource{}, false, err
+		}
+		if err := json.Unmarshal(spec, &item.Spec); err != nil {
+			return "", agent.DesiredResource{}, false, err
+		}
+		matches++
+	}
+	if err := rows.Err(); err != nil {
+		return "", agent.DesiredResource{}, false, err
+	}
+	if matches > 1 {
+		return "", agent.DesiredResource{}, false, agentstore.ErrIdentityConflict
+	}
+	if matches == 0 {
+		return "", agent.DesiredResource{}, false, nil
+	}
+	return clusterID, item, true, nil
+}
+
 func (s *Store) GetObservation(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (agent.Observation, bool, error) {
 	var item agent.Observation
 	var conditions, evidence []byte
