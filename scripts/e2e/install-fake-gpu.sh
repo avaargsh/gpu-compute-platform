@@ -19,9 +19,11 @@ kubectl label namespace "$FAKE_GPU_NAMESPACE" pod-security.kubernetes.io/enforce
 
 helm upgrade --install "$FAKE_GPU_RELEASE" "$FAKE_GPU_CHART" \
   --namespace "$FAKE_GPU_NAMESPACE" \
-  --set "topology.nodePools.default.gpuCount=$FAKE_GPU_COUNT" \
-  --set "topology.nodePools.default.gpuProduct=$FAKE_GPU_PRODUCT" \
   --wait --timeout "${TIMEOUT_SECONDS}s"
+
+# Keep the acceptance contract independent of chart-internal topology value
+# names: FGO's default node-pool is selected by the node label above. The
+# observable contract we require is nvidia.com/gpu becoming allocatable.
 
 deadline=$((SECONDS + TIMEOUT_SECONDS))
 while (( SECONDS < deadline )); do
