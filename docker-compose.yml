@@ -79,7 +79,6 @@ services:
       - POSTGRES_PASSWORD=postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     ports:
       - "5432:5432"
     restart: unless-stopped
@@ -109,6 +108,8 @@ services:
 
   # MLflow for experiment tracking
   mlflow:
+    profiles:
+      - mlops
     image: python:3.12-slim
     working_dir: /mlflow
     command: >
