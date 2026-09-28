@@ -382,4 +382,7 @@ func TestRunnerDeletionReplaysAfterFinalizeFailure(t *testing.T) {
 	if len(control.reported) != 2 {
 		t.Fatalf("final evidence replay must remain safe: %#v", control.reported)
 	}
+	if control.releaseCalls != 1 {
+		t.Fatalf("failed finalize must release its lease before replay, releases=%d", control.releaseCalls)
+	}
 }
