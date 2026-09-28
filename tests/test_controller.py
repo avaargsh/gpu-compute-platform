@@ -8,7 +8,7 @@ from app.control_plane.status import Phase
 
 
 class FakeProvider:
-    async def apply(self, desired):
+    async def apply(self, desired, generation=None):
         return f"jobs/{desired['name']}"
 
     async def observe(self, provider_ref):
