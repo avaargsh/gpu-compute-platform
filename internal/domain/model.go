@@ -38,6 +38,15 @@ type AcceleratorRequest struct {
 	Quota int64  `json:"quota"`
 }
 
+// AcceleratorBinding resolves a portable accelerator class into the concrete
+// resource and Kueue flavor exposed by a specific compute pool.
+type AcceleratorBinding struct {
+	Class        string            `json:"class"`
+	ResourceName string            `json:"resourceName"`
+	Flavor       string            `json:"flavor"`
+	NodeLabels   map[string]string `json:"nodeLabels,omitempty"`
+}
+
 type SchedulingPolicy struct {
 	Mode string `json:"mode"`
 }
