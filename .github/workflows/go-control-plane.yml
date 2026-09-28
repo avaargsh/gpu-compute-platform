@@ -37,14 +37,7 @@ jobs:
             exit 1
           fi
       - name: Format check
-        run: |
-          files="$(find cmd internal -name '*.go' -type f -print0 | xargs -0 gofmt -l)"
-          if [ -n "$files" ]; then
-            echo "gofmt required for:"
-            echo "$files"
-            gofmt -d $files
-            exit 1
-          fi
+        run: make fmt-check
       - name: Vet
         run: go vet ./...
       - name: Test
