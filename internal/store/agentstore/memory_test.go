@@ -24,7 +24,7 @@ func TestMemoryReportStateMachine(t *testing.T) {
 		},
 		{
 			Kind: "ComputePool", ID: "pool-h100", ObservedGeneration: 3,
-			Conditions:   []domain.Condition{{Type: "Ready", Status: "True", LastTransitionTime: t0}},
+			Conditions: []domain.Condition{{Type: "Ready", Status: "True", LastTransitionTime: t0}},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -32,7 +32,7 @@ func TestMemoryReportStateMachine(t *testing.T) {
 
 	if err := store.Report(ctx, "cluster-a", []agent.Observation{{
 		Kind: "Workload", ID: "train-1", ObservedGeneration: 8,
-		Conditions:   []domain.Condition{{Type: "Ready", Status: "False", Reason: "AwaitingPods", LastTransitionTime: t1}},
+		Conditions: []domain.Condition{{Type: "Ready", Status: "False", Reason: "AwaitingPods", LastTransitionTime: t1}},
 		EvidenceRefs: []string{"evidence-v8-b"},
 	}}); err != nil {
 		t.Fatal(err)
@@ -83,11 +83,11 @@ func TestMemoryReportUsesNewTransitionTimeWhenStatusChanges(t *testing.T) {
 
 	_ = store.Report(ctx, "cluster-a", []agent.Observation{{
 		Kind: "Workload", ID: "train-1", ObservedGeneration: 8,
-		Conditions:   []domain.Condition{{Type: "Ready", Status: "False", LastTransitionTime: t0}},
+		Conditions: []domain.Condition{{Type: "Ready", Status: "False", LastTransitionTime: t0}},
 	}})
 	_ = store.Report(ctx, "cluster-a", []agent.Observation{{
 		Kind: "Workload", ID: "train-1", ObservedGeneration: 8,
-		Conditions:   []domain.Condition{{Type: "Ready", Status: "True", LastTransitionTime: t1}},
+		Conditions: []domain.Condition{{Type: "Ready", Status: "True", LastTransitionTime: t1}},
 	}})
 
 	got := observationsByKey(store.Observations("cluster-a"))["Workload/train-1"]
