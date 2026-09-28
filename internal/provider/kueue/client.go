@@ -8,6 +8,7 @@ type JobObservation struct {
 	QuotaReserved bool
 	Admitted      bool
 	PodsReady     bool
+	Succeeded     bool
 	Failed        bool
 	Message       string
 }
