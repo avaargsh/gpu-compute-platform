@@ -42,7 +42,6 @@ func (r *WorkloadReconciler) Reconcile(
 		PoolID:      workload.PoolID,
 		ClusterID:   clusterBinding.ClusterID,
 		Namespace:   projectBinding.Namespace,
-		QueueName:   "lq-" + string(pool.Metadata.ID),
 		Generation:  workload.Metadata.Generation,
 		Image:       workload.Spec.Image,
 		Command:     workload.Spec.Command,
