@@ -70,6 +70,9 @@ PY
   echo "timeout waiting for Go golden workload" >&2
   kubectl get resourceflavors,clusterqueues -o wide >&2 || true
   kubectl get localqueues,workloads,jobs,pods -n "$NAMESPACE" -o wide >&2 || true
+  pod="$(kubectl get pods -n "$NAMESPACE" -l "ai.compute/workload=job-$WORKLOAD_ID" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  [[ -z "$pod" ]] || kubectl describe pod "$pod" -n "$NAMESPACE" >&2 || true
+  kubectl describe node "$node" >&2 || true
   [[ -z "${CONTROL_PID:-}" ]] || { echo "--- control-plane ---" >&2; cat /tmp/go-control-plane.log >&2 || true; }
   [[ -z "${AGENT_PID:-}" ]] || { echo "--- cluster-agent ---" >&2; cat /tmp/go-cluster-agent.log >&2 || true; }
   return 1
