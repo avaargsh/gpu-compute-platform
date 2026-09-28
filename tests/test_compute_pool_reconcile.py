@@ -21,7 +21,7 @@ class FakeCustomObjectsClient:
 
     def create_cluster_custom_object(self, group, version, plural, body):
         key = (plural, body["metadata"]["name"])
-        self.cluster[key] = body
+        body = dict(body)\n        if plural == "clusterqueues":\n            body["status"] = {"conditions": [{"type": "Active", "status": "True"}]}\n        self.cluster[key] = body
         return body
 
     def get_namespaced_custom_object(self, group, version, namespace, plural, name):
@@ -32,7 +32,7 @@ class FakeCustomObjectsClient:
 
     def create_namespaced_custom_object(self, group, version, namespace, plural, body):
         key = (namespace, plural, body["metadata"]["name"])
-        self.namespaced[key] = body
+        body = dict(body)\n        if plural == "localqueues":\n            body["status"] = {"conditions": [{"type": "Active", "status": "True"}]}\n        self.namespaced[key] = body
         return body
 
 
@@ -66,3 +66,6 @@ async def test_compute_pool_reconcile_is_idempotent_and_ready():
     assert ("resourceflavors", "h100") in client.cluster
     assert ("clusterqueues", "gpu-training") in client.cluster
     assert ("team-a", "localqueues", "training") in client.namespaced
+
+
+@pytest.mark.asyncio\nasync def test_compute_pool_waits_until_queues_are_active():\n    client = FakeCustomObjectsClient()\n    reconciler = ComputePoolReconciler(client)\n    state = await reconciler.reconcile(pool(), generation=1)\n    client.cluster[("clusterqueues", "gpu-training")]["status"]["conditions"] = [{"type": "Active", "status": "False"}]\n    state = await reconciler.reconcile(pool(), generation=2)\n    assert state.phase.value == "progressing"\n    assert state.conditions[0].reason == "WaitingForQueues"\n
