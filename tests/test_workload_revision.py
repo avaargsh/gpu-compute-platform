@@ -1,7 +1,7 @@
 import pytest
 
 from app.control_plane.adapters.kueue import KueueBinding, KueueManifestBuilder
-from app.control_plane.domain import AcceleratorClass, ComputePoolRef, WorkloadKind, WorkloadSpec
+from app.control_plane.domain import AcceleratorRequest, ComputePoolRef, WorkloadKind, WorkloadSpec
 from app.control_plane.resource_store import InMemoryResourceStore
 from app.control_plane.status import ObservedState, Phase
 
@@ -11,14 +11,14 @@ def workload(image="trainer:v1"):
         name="train-qwen",
         kind=WorkloadKind.TRAINING,
         compute_pool=ComputePoolRef(name="training"),
-        accelerator=AcceleratorClass(name="h100", count=2),
+        accelerator=AcceleratorRequest(class_name="h100", count=2),
         image=image,
     )
 
 
 def test_kueue_job_name_and_labels_are_generation_scoped():
     manifest = KueueManifestBuilder(
-        KueueBinding(namespace="team-a", local_queue="training")
+        KueueBinding(namespace="team-a", local_queue="training", accelerator_resources={"h100": "nvidia.com/gpu"})
     ).build_job(workload(), generation=7)
     assert manifest["metadata"]["name"] == "train-qwen-g7"
     assert manifest["metadata"]["labels"]["compute.platform/workload"] == "train-qwen"
