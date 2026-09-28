@@ -7,6 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 )
@@ -58,7 +59,26 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	job.Status.Active = 1
-	if _, err := coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{}); err != nil {
+	job, err = coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	workload := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "kueue.x-k8s.io/v1beta1",
+		"kind":       "Workload",
+		"metadata": map[string]any{
+			"name":      "job-train-1-workload",
+			"namespace": "project-1",
+		},
+		"status": map[string]any{
+			"conditions": []any{
+				map[string]any{"type": "Admitted", "status": "True"},
+			},
+		},
+	}}
+	workload.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Job", UID: job.UID}})
+	if _, err := dynamicClient.Resource(workloadGVR).Namespace("project-1").Create(ctx, workload, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -100,5 +120,42 @@ func TestPodReady(t *testing.T) {
 	}
 	if podReady([]corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionFalse}}) {
 		t.Fatal("expected non-ready pod")
+	}
+}
+
+func TestObserveJobDoesNotInferAdmissionFromRunningReadyPod(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	client := NewKubeClient(coreClient, fake.NewSimpleDynamicClient(runtime.NewScheme()))
+
+	if err := client.ApplyJob(ctx, Job{
+		Name: "job-no-admission", Namespace: "project-1", QueueName: "lq-pool",
+		Image: "example/train:latest", Resources: map[string]int64{gpuResourceName: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, "job-no-admission", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Status.Active = 1
+	if _, err := coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coreClient.CoreV1().Pods("project-1").Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "ready-pod", Labels: map[string]string{"ai.compute/workload": "job-no-admission"}},
+		Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := client.ObserveJob(ctx, "project-1", "job-no-admission")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.Admitted {
+		t.Fatalf("running ready pod must not imply Kueue admission: %#v", observed)
+	}
+	if !observed.PodsReady || observed.Phase != "Running" {
+		t.Fatalf("expected running ready workload: %#v", observed)
 	}
 }
