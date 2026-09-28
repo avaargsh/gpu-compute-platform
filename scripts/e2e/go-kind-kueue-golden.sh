@@ -128,7 +128,12 @@ PY
 
 # An unbound portable class must fail closed before any Kubernetes Job is created.
 put "/api/v1/workloads/$INVALID_WORKLOAD_ID" "{\"metadata\":{\"id\":\"$INVALID_WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"exit 0\"],\"accelerator\":{\"class\":\"a100-invalid\",\"quota\":1}}}"
-sleep 3
+invalid_deadline=$((SECONDS + 30))
+while (( SECONDS < invalid_deadline )); do
+  invalid="$(curl -fsS "$BASE_URL/api/v1/workloads/$INVALID_WORKLOAD_ID")"
+  [[ "$invalid" == *"ReconcileFailed"* ]] && break
+  sleep 1
+done
 invalid="$(curl -fsS "$BASE_URL/api/v1/workloads/$INVALID_WORKLOAD_ID")"
 PAYLOAD="$invalid" python - <<'PY'
 import json, os
