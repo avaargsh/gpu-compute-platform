@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any
 import uuid
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.control_plane.lifecycle import ResourceLifecycle
@@ -56,13 +57,23 @@ class SQLAlchemyResourceStore:
         await self.session.commit()
         return await self.get(key)
 
-    async def put_observed(self, key: str, generation: int, observed: ObservedState) -> None:
-        row = await self.session.get(ControlPlaneResource, key)
-        if row is None or row.generation != generation:
-            return
-        row.observed = observed.model_dump(mode="json")
-        row.observed_generation = generation
+    async def put_observed(self, key: str, generation: int, observed: ObservedState) -> bool:
+        stmt = (
+            update(ControlPlaneResource)
+            .where(
+                ControlPlaneResource.key == key,
+                ControlPlaneResource.generation == generation,
+            )
+            .values(
+                observed=observed.model_dump(mode="json"),
+                observed_generation=generation,
+            )
+        )
+        if self.project_id is not None:
+            stmt = stmt.where(ControlPlaneResource.project_id == self.project_id)
+        result = await self.session.execute(stmt)
         await self.session.commit()
+        return result.rowcount == 1
 
     async def mark_deleting(self, key: str, deletion_timestamp: datetime) -> None:
         row = await self.session.get(ControlPlaneResource, key)
