@@ -17,6 +17,7 @@ var (
 	resourceFlavorGVR = schema.GroupVersionResource{Group: "kueue.x-k8s.io", Version: "v1beta1", Resource: "resourceflavors"}
 	clusterQueueGVR   = schema.GroupVersionResource{Group: "kueue.x-k8s.io", Version: "v1beta1", Resource: "clusterqueues"}
 	localQueueGVR     = schema.GroupVersionResource{Group: "kueue.x-k8s.io", Version: "v1beta1", Resource: "localqueues"}
+	workloadGVR       = schema.GroupVersionResource{Group: "kueue.x-k8s.io", Version: "v1beta1", Resource: "workloads"}
 )
 
 type KubeClient struct {
@@ -86,7 +87,25 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 	}
 	if job.Status.Active > 0 {
 		out.Phase = "Running"
-		out.Admitted = true
+	}
+
+	if c.dynamic != nil {
+		workloads, err := c.dynamic.Resource(workloadGVR).Namespace(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "kueue.x-k8s.io/job-uid=" + string(job.UID),
+		})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return JobObservation{}, err
+		}
+		for _, workload := range workloads.Items {
+			conditions, found, err := unstructured.NestedSlice(workload.Object, "status", "conditions")
+			if err != nil {
+				return JobObservation{}, err
+			}
+			if found && conditionTrue(conditions, "Admitted") {
+				out.Admitted = true
+				break
+			}
+		}
 	}
 
 	pods, err := c.core.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
@@ -98,7 +117,6 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 	for _, pod := range pods.Items {
 		if podReady(pod.Status.Conditions) {
 			out.PodsReady = true
-			out.Admitted = true
 			out.Phase = "Running"
 			break
 		}
@@ -136,6 +154,19 @@ func (c *KubeClient) apply(ctx context.Context, gvr schema.GroupVersionResource,
 	}
 	_, err = resource.Create(ctx, obj, metav1.CreateOptions{})
 	return err
+}
+
+func conditionTrue(conditions []any, conditionType string) bool {
+	for _, raw := range conditions {
+		condition, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if condition["type"] == conditionType && condition["status"] == "True" {
+			return true
+		}
+	}
+	return false
 }
 
 func podReady(conditions []corev1.PodCondition) bool {
