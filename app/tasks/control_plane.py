@@ -26,38 +26,41 @@ async def _reconcile_resource(resource_key: str) -> None:
             logger.info("reconcile lease busy key=%s", resource_key)
             return
         store = SQLAlchemyResourceStore(session)
-        record = await store.get(resource_key)
-        if record is None:
-            return
+        try:
+            record = await store.get(resource_key)
+            if record is None:
+                return
 
-        kind = resource_key.split("/", 1)[0]
-        if kind != "workload":
-            logger.info("no reconcile provider registered for kind=%s key=%s", kind, resource_key)
-            return
-        if control_plane_settings.scheduler_provider == "disabled":
-            logger.info("control-plane scheduler disabled; retaining desired state key=%s", resource_key)
-            return
+            kind = resource_key.split("/")[-2]
+            if kind != "workload":
+                logger.info("no reconcile provider registered for kind=%s key=%s", kind, resource_key)
+                return
+            if control_plane_settings.scheduler_provider == "disabled":
+                logger.info("control-plane scheduler disabled; retaining desired state key=%s", resource_key)
+                return
 
-        from app.control_plane.domain import WorkloadSpec
-        provider = build_scheduler_reconcile_provider(control_plane_settings)
-        reconciler = Reconciler(provider)
-        result = await reconciler.reconcile(
-            WorkloadSpec.model_validate(record.desired),
-            generation=record.generation,
-        )
-        await store.put_observed(resource_key, record.generation, result.state)
-        revisions = SQLAlchemyRevisionStore(session)
-        await revisions.upsert(resource_key, record.generation, result.state)
+            from app.control_plane.domain import WorkloadSpec
+            provider = build_scheduler_reconcile_provider(control_plane_settings)
+            reconciler = Reconciler(provider)
+            result = await reconciler.reconcile(
+                WorkloadSpec.model_validate(record.desired),
+                generation=record.generation,
+            )
+            await store.put_observed(resource_key, record.generation, result.state)
+            revisions = SQLAlchemyRevisionStore(session)
+            await revisions.upsert(resource_key, record.generation, result.state)
 
-        for revision in await revisions.gc_candidates(resource_key, record.generation, RevisionRetentionPolicy()):
-            await provider.delete(revision.provider_ref)
-            await revisions.mark_garbage_collected(resource_key, revision.generation)
+            for revision in await revisions.gc_candidates(resource_key, record.generation, RevisionRetentionPolicy()):
+                await provider.delete(revision.provider_ref)
+                await revisions.mark_garbage_collected(resource_key, revision.generation)
 
-        logger.info(
-            "reconciled key=%s generation=%s phase=%s provider_ref=%s",
-            resource_key, record.generation, result.state.phase.value, result.provider_ref,
-        )
-        await leases.release(resource_key, owner)
+            logger.info(
+                "reconciled key=%s generation=%s phase=%s provider_ref=%s",
+                resource_key, record.generation, result.state.phase.value, result.provider_ref,
+            )
+            await leases.release(resource_key, owner)
+        finally:
+            await leases.release(resource_key, owner)
 
 
 @celery_app.task(
