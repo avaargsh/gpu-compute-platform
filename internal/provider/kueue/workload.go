@@ -37,7 +37,7 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 			gpuResourceName: in.Accelerator.Quota,
 		},
 		Annotations: map[string]string{
-			"kueue.x-k8s.io/queue-name": in.QueueName,
+			"kueue.x-k8s.io/queue-name":    in.QueueName,
 			"ai.compute/accelerator-class": in.Accelerator.Class,
 		},
 	}, nil
