@@ -16,12 +16,12 @@ import (
 )
 
 func main() {
-	store, cleanup := buildStore()
+	store, placement, cleanup := buildStore()
 	defer cleanup()
 
 	server := &http.Server{
 		Addr:    ":8080",
-		Handler: httpapi.NewRouterWithAgentStore(store),
+		Handler: httpapi.NewRouterWithDependencies(store, placement),
 	}
 
 	log.Printf("control-plane listening on %s", server.Addr)
@@ -30,11 +30,11 @@ func main() {
 	}
 }
 
-func buildStore() (agentstore.Store, func()) {
+func buildStore() (agentstore.Store, httpapi.PlacementResolver, func()) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		log.Print("DATABASE_URL is empty; using in-memory agent store")
-		return agentstore.NewMemory(), func() {}
+		return agentstore.NewMemory(), httpapi.NewMemoryPlacementResolver(), func() {}
 	}
 
 	db, err := sql.Open("pgx", dsn)
@@ -47,7 +47,8 @@ func buildStore() (agentstore.Store, func()) {
 		_ = db.Close()
 		log.Fatalf("ping postgres: %v", err)
 	}
-	return postgresstore.New(db), func() {
+	store := postgresstore.New(db)
+	return store, store, func() {
 		_ = db.Close()
 	}
 }
