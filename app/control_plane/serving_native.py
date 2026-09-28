@@ -17,9 +17,9 @@ from app.control_plane.serving_topology import ServingTopologyResolver
 @dataclass(frozen=True)
 class NativeKubernetesServingBinding:
     namespace: str
-    accelerator_resource: str = "nvidia.com/gpu"
     image_vllm: str
     image_sglang: str
+    accelerator_resource: str = "nvidia.com/gpu"
 
 
 class NativeKubernetesManifestBuilder:
