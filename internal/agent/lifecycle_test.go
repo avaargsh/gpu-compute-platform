@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 	"time"
-
 )
 
 type lifecycleControl struct {
@@ -41,4 +40,3 @@ func TestLifecycleRegistersAndTicksImmediately(t *testing.T) {
 		t.Fatalf("heartbeats=%d, want 1", control.heartbeats)
 	}
 }
-
