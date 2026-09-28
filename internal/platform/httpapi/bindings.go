@@ -33,7 +33,7 @@ func (a *BindingAPI) UpsertProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.store.UpsertProjectBinding(r.Context(), in); err != nil {
-		if errors.Is(err, agentstore.ErrStaleGeneration) {
+		if errors.Is(err, agentstore.ErrStaleGeneration) || errors.Is(err, agentstore.ErrPlacementMigrationRequired) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -59,7 +59,7 @@ func (a *BindingAPI) UpsertPool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.store.UpsertClusterBinding(r.Context(), in); err != nil {
-		if errors.Is(err, agentstore.ErrStaleGeneration) {
+		if errors.Is(err, agentstore.ErrStaleGeneration) || errors.Is(err, agentstore.ErrPlacementMigrationRequired) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}

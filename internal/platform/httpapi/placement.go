@@ -69,6 +69,9 @@ func (r *MemoryPlacementResolver) UpsertClusterBinding(_ context.Context, in dom
 		return agentstore.ErrStaleGeneration
 	}
 	current := r.pools[in.PoolID]
+	if current.ClusterID != "" && current.ClusterID != in.ClusterID {
+		return agentstore.ErrPlacementMigrationRequired
+	}
 	current.ClusterID = in.ClusterID
 	current.Provider = in.Provider
 	r.pools[in.PoolID] = current

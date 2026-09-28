@@ -73,25 +73,31 @@ func (s *Store) UpsertClusterBinding(ctx context.Context, in domain.ClusterBindi
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	result, err := s.db.ExecContext(ctx, `
+	var currentCluster domain.ID
+	var currentGeneration int64
+	err := s.db.QueryRowContext(ctx, `
+SELECT cluster_id, generation
+FROM cluster_bindings
+WHERE pool_id = $1
+`, in.PoolID).Scan(&currentCluster, &currentGeneration)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if err == nil {
+		if in.Metadata.Generation < currentGeneration {
+			return agentstore.ErrStaleGeneration
+		}
+		if currentCluster != in.ClusterID {
+			return agentstore.ErrPlacementMigrationRequired
+		}
+	}
+	_, err = s.db.ExecContext(ctx, `
 INSERT INTO cluster_bindings (pool_id, cluster_id, provider, generation)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (pool_id) DO UPDATE SET
-    cluster_id = EXCLUDED.cluster_id,
     provider = EXCLUDED.provider,
     generation = EXCLUDED.generation,
     updated_at = now()
-WHERE cluster_bindings.generation <= EXCLUDED.generation
 `, in.PoolID, in.ClusterID, in.Provider, in.Metadata.Generation)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return agentstore.ErrStaleGeneration
-	}
-	return nil
+	return err
 }

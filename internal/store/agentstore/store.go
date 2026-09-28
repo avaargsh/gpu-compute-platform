@@ -10,6 +10,7 @@ import (
 
 var ErrStaleGeneration = errors.New("stale generation")
 var ErrIdentityConflict = errors.New("resource identity conflict")
+var ErrPlacementMigrationRequired = errors.New("placement migration required")
 
 type Store interface {
 	Register(context.Context, agent.Registration) error
