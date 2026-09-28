@@ -17,8 +17,8 @@ type Job struct {
 }
 
 func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
-	if in.WorkloadID == "" || in.Namespace == "" || in.QueueName == "" {
-		return Job{}, fmt.Errorf("workload, namespace and queue are required")
+	if in.WorkloadID == "" || in.PoolID == "" || in.Namespace == "" {
+		return Job{}, fmt.Errorf("workload, pool and namespace are required")
 	}
 	if in.Image == "" {
 		return Job{}, fmt.Errorf("workload image is required")
@@ -30,14 +30,14 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 	return Job{
 		Name:      resourceName("job", string(in.WorkloadID)),
 		Namespace: in.Namespace,
-		QueueName: in.QueueName,
+		QueueName: resourceName("lq", string(in.PoolID)),
 		Image:     in.Image,
 		Command:   append([]string(nil), in.Command...),
 		Resources: map[string]int64{
 			gpuResourceName: in.Accelerator.Quota,
 		},
 		Annotations: map[string]string{
-			"kueue.x-k8s.io/queue-name":    in.QueueName,
+			"kueue.x-k8s.io/queue-name":    resourceName("lq", string(in.PoolID)),
 			"ai.compute/accelerator-class": in.Accelerator.Class,
 		},
 	}, nil
