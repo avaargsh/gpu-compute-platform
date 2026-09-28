@@ -35,6 +35,9 @@ class FakeBatchClient:
     def delete_namespaced_job(self, name, namespace, **kwargs):
         self.deleted = (namespace, name, kwargs)
 
+    def list_namespaced_pod(self, namespace, **kwargs):
+        return SimpleNamespace(items=self.pods)
+
 
 class FakeCustomObjectsClient:
     def __init__(self):
