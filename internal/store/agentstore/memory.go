@@ -134,6 +134,16 @@ func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Obser
 	out := append([]agent.Observation(nil), in...)
 	filtered := out[:0]
 	for i := range out {
+		currentGeneration := int64(0)
+		for _, desired := range m.desired[clusterID] {
+			if desired.Kind == out[i].Kind && desired.ID == out[i].ID {
+				currentGeneration = desired.Generation
+				break
+			}
+		}
+		if currentGeneration != 0 && out[i].ObservedGeneration != currentGeneration {
+			continue
+		}
 		if old, ok := previous[out[i].Kind+"/"+string(out[i].ID)]; ok {
 			if out[i].ObservedGeneration < old.ObservedGeneration {
 				continue
