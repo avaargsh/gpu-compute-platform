@@ -8,6 +8,7 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
 type Store struct {
@@ -81,15 +82,26 @@ func (s *Store) UpsertDesired(ctx context.Context, clusterID domain.ID, in agent
 	if err != nil {
 		return fmt.Errorf("marshal desired spec: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, `
 INSERT INTO desired_resources (cluster_id, kind, resource_id, generation, spec)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
     generation = EXCLUDED.generation,
     spec = EXCLUDED.spec,
     updated_at = now()
+WHERE desired_resources.generation <= EXCLUDED.generation
 `, clusterID, in.Kind, in.ID, in.Generation, spec)
-	return err
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return agentstore.ErrStaleGeneration
+	}
+	return nil
 }
 
 func (s *Store) DeleteDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) error {
