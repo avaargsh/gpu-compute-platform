@@ -106,7 +106,7 @@ services:
       timeout: 3s
       retries: 5
 
-  # MLflow for experiment tracking
+  # MLflow is optional and intentionally outside the Phase 0 control-plane path.
   mlflow:
     profiles:
       - mlops
