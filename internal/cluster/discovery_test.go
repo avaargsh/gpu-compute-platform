@@ -15,16 +15,18 @@ import (
 
 func TestDiscoverFindsKueueAndAccelerators(t *testing.T) {
 	scheme := runtime.NewScheme()
+	listKinds := map[schema.GroupVersionResource]string{
+		clusterQueueGVR: "ClusterQueueList",
+	}
+	clusterQueue := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "kueue.x-k8s.io/v1beta1",
+		"kind":       "ClusterQueue",
+		"metadata":   map[string]any{"name": "existing"},
+	}}
 	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		scheme,
-		map[schema.GroupVersionResource]string{clusterQueueGVR: "ClusterQueueList"},
-		&unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "kueue.x-k8s.io/v1beta1",
-			"kind":       "ClusterQueue",
-			"metadata":   map[string]any{"name": "existing"},
-		},
-	)
+		listKinds,
+		clusterQueue,
 	)
 	coreClient := kubefake.NewSimpleClientset(
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{
