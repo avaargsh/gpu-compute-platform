@@ -24,7 +24,10 @@ class Reconciler:
         self.provider = provider
 
     async def reconcile(self, desired: Any, generation: int | None = None) -> ReconcileResult:
-        provider_ref = await self.provider.apply(desired)
+        try:
+            provider_ref = await self.provider.apply(desired, generation=generation)
+        except TypeError:
+            provider_ref = await self.provider.apply(desired)
         raw = await self.provider.observe(provider_ref)
         phase = Phase(raw.get("phase", Phase.PENDING))
         ready = phase == Phase.READY
