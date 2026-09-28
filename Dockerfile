@@ -1,21 +1,9 @@
 # GPU Compute Platform Dockerfile
 # Multi-stage build for optimized image size
 
-# Stage 1: Build frontend
-FROM node:20-alpine AS frontend-builder
-
-WORKDIR /app/frontend
-
-# Copy frontend package files
-COPY frontend/package*.json ./
-RUN npm ci --omit=dev
-
-# Copy frontend source and build
-COPY frontend/ ./
-RUN npm run build
-
-# Stage 2: Python base with GPU support
-FROM nvidia/cuda:12.1-runtime-ubuntu22.04 AS python-base
+# Phase 0 control-plane image intentionally has no frontend or GPU runtime
+# dependency. GPU device/runtime integration belongs to provider/node images.
+FROM ubuntu:22.04 AS python-base
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -66,9 +54,6 @@ COPY --chown=appuser:appuser scripts/ ./scripts/
 COPY --chown=appuser:appuser examples/ ./examples/
 COPY --chown=appuser:appuser tests/ ./tests/
 COPY --chown=appuser:appuser pytest.ini ./
-
-# Copy built frontend from frontend-builder
-COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/dist ./frontend/dist
 
 # Make scripts executable
 RUN chmod +x scripts/*.sh
