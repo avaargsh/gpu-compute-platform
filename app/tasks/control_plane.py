@@ -6,6 +6,9 @@ import logging
 from app.core.celery_app import celery_app
 from app.core.database import async_session_maker
 from app.control_plane.resource_store_sqlalchemy import SQLAlchemyResourceStore
+from app.control_plane.config import control_plane_settings
+from app.control_plane.provider_factory import build_scheduler_reconcile_provider
+from app.control_plane.reconcile import Reconciler
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +20,25 @@ async def _reconcile_resource(resource_key: str) -> None:
         if record is None:
             return
 
-        # Provider wiring is intentionally explicit per resource kind. The first
-        # production binding (Kueue Workload) is installed by deployment config.
-        # Until configured, retain desired state rather than executing implicitly.
+        kind = resource_key.split("/", 1)[0]
+        if kind != "workload":
+            logger.info("no reconcile provider registered for kind=%s key=%s", kind, resource_key)
+            return
+        if control_plane_settings.scheduler_provider == "disabled":
+            logger.info("control-plane scheduler disabled; retaining desired state key=%s", resource_key)
+            return
+
+        from app.control_plane.domain import WorkloadSpec
+        provider = build_scheduler_reconcile_provider(control_plane_settings)
+        reconciler = Reconciler(provider)
+        result = await reconciler.reconcile(
+            WorkloadSpec.model_validate(record.desired),
+            generation=record.generation,
+        )
+        await store.put_observed(resource_key, record.generation, result.state)
         logger.info(
-            "reconcile wake-up key=%s generation=%s kind=%s",
-            resource_key,
-            record.generation,
-            resource_key.split("/", 1)[0],
+            "reconciled key=%s generation=%s phase=%s provider_ref=%s",
+            resource_key, record.generation, result.state.phase.value, result.provider_ref,
         )
 
 
