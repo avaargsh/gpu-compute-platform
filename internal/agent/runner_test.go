@@ -14,7 +14,7 @@ type fakeControlPlane struct {
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }
-func (f *fakeControlPlane) Heartbeat(context.Context, Heartbeat) error   { return nil }
+func (f *fakeControlPlane) Heartbeat(context.Context, Heartbeat) error  { return nil }
 func (f *fakeControlPlane) PullDesired(context.Context, domain.ID) ([]DesiredResource, error) {
 	return f.desired, nil
 }
@@ -41,8 +41,8 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 				ID:         "pool-1",
 				Generation: 3,
 				Spec: map[string]any{
-					"projectID":  "project-1",
-					"namespace":  "project-1",
+					"projectID":   "project-1",
+					"namespace":   "project-1",
 					"accelerators": []any{map[string]any{"class": "h100-80g", "quota": float64(8)}},
 				},
 			},
@@ -56,7 +56,10 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 					"namespace": "project-1",
 					"queueName": "lq-pool-1",
 					"image":     "example/train:latest",
-					"accelerator": map[string]any{"class": "h100-80g", "quota": float64(2)},
+					"accelerator": map[string]any{
+						"class": "h100-80g",
+						"quota": float64(2),
+					},
 				},
 			},
 		},
