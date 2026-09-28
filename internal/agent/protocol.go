@@ -19,10 +19,12 @@ type Heartbeat struct {
 }
 
 type DesiredResource struct {
-	Kind       string         `json:"kind"`
-	ID         domain.ID      `json:"id"`
-	Generation int64          `json:"generation"`
-	Spec       map[string]any `json:"spec"`
+	Kind              string         `json:"kind"`
+	ID                domain.ID      `json:"id"`
+	Generation        int64          `json:"generation"`
+	Spec              map[string]any `json:"spec"`
+	DeletionTimestamp *time.Time     `json:"deletionTimestamp,omitempty"`
+	Finalizers        []string       `json:"finalizers,omitempty"`
 }
 
 type ReconcileLeaseRequest struct {
