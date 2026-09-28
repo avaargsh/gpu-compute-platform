@@ -25,6 +25,8 @@ jobs:
           cache: true
       - name: Dependencies
         run: go mod tidy
+      - name: Module files clean
+        run: git diff --exit-code -- go.mod go.sum
       - name: Format check
         run: |
           files="$(find cmd internal -name '*.go' -type f -print0 | xargs -0 gofmt -l)"
