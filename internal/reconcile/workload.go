@@ -9,10 +9,10 @@ import (
 )
 
 type WorkloadReconciler struct {
-	provider provider.ComputeProvider
+	provider provider.WorkloadProvider
 }
 
-func NewWorkloadReconciler(p provider.ComputeProvider) *WorkloadReconciler {
+func NewWorkloadReconciler(p provider.WorkloadProvider) *WorkloadReconciler {
 	return &WorkloadReconciler{provider: p}
 }
 
