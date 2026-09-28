@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
@@ -42,6 +43,10 @@ func (a *DesiredAPI) Upsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.store.UpsertDesired(r.Context(), clusterID, in); err != nil {
+		if errors.Is(err, agentstore.ErrStaleGeneration) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
