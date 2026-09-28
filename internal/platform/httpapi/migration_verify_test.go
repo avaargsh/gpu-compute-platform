@@ -16,12 +16,12 @@ func TestVerifyTargetAdvancesCutoverToRetiring(t *testing.T) {
 	bindings.pools["pool-1"] = Placement{ClusterID: "cluster-b", Provider: "kueue"}
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
 		"migration-1": {
-			Metadata:     domain.Metadata{ID: "migration-1", Generation: 1},
-			PoolID:       "pool-1",
+			Metadata:        domain.Metadata{ID: "migration-1", Generation: 1},
+			PoolID:          "pool-1",
 			SourceClusterID: "cluster-a",
 			TargetClusterID: "cluster-b",
-			Phase:        domain.PlacementMigrationCutover,
-			EvidenceRefs: []string{"cutover://pool-1"},
+			Phase:           domain.PlacementMigrationCutover,
+			EvidenceRefs:    []string{"cutover://pool-1"},
 		},
 	}
 	resources := agentstore.NewMemory()
