@@ -84,7 +84,6 @@ func TestPlacementMigrationCutoverRejectsSourceDrift(t *testing.T) {
 }
 
 func TestPlacementMigrationCutoverRequiresReadyPhase(t *testing.T) {
-	ctx := t.Context()
 	bindings := NewMemoryPlacementResolver()
 	bindings.pools["pool-1"] = Placement{ClusterID: "cluster-a", Provider: "kueue"}
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
