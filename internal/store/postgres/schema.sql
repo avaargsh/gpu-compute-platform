@@ -72,3 +72,16 @@ CREATE TABLE IF NOT EXISTS placement_migrations (
 
 CREATE INDEX IF NOT EXISTS placement_migrations_pool_idx
     ON placement_migrations (pool_id, created_at);
+
+CREATE TABLE IF NOT EXISTS reconcile_leases (
+    cluster_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    lease_until TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (cluster_id, kind, resource_id)
+);
+
+CREATE INDEX IF NOT EXISTS reconcile_leases_expiry_idx
+    ON reconcile_leases (lease_until);
