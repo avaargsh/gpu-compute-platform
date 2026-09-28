@@ -29,14 +29,14 @@ func (p *Provider) ReconcilePool(ctx context.Context, projection baseprovider.Po
 
 	for _, flavor := range resources.Flavors {
 		if err := p.client.ApplyResourceFlavor(ctx, flavor); err != nil {
-			return baseprovider.PoolObservation{}, fmt.Errorf("apply resource flavor %s: %w", flavor.Name, err)
+			return baseprovider.PoolObservation{}, fmt.Errorf("apply resource flavor %s: %w", flavor.Name, classifyProviderError(err))
 		}
 	}
 	if err := p.client.ApplyClusterQueue(ctx, resources.ClusterQueue); err != nil {
-		return baseprovider.PoolObservation{}, fmt.Errorf("apply cluster queue: %w", err)
+		return baseprovider.PoolObservation{}, fmt.Errorf("apply cluster queue: %w", classifyProviderError(err))
 	}
 	if err := p.client.ApplyLocalQueue(ctx, resources.LocalQueue); err != nil {
-		return baseprovider.PoolObservation{}, fmt.Errorf("apply local queue: %w", err)
+		return baseprovider.PoolObservation{}, fmt.Errorf("apply local queue: %w", classifyProviderError(err))
 	}
 
 	return baseprovider.PoolObservation{
