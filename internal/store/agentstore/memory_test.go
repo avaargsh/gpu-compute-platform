@@ -327,6 +327,9 @@ func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.MarkDesiredDeleting(ctx, clusterID, "Workload", "train-1", time.Date(2026, 9, 29, 3, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
 	claimed, err := store.ClaimReconcileLease(ctx, clusterID, "Workload", "train-1", "worker-a", 120)
 	if err != nil || !claimed {
 		t.Fatalf("claim before finalize: claimed=%t err=%v", claimed, err)
