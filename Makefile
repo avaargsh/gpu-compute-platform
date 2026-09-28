@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: migrate compose-migrate test contract-test kind-up install-kueue e2e-golden
+.PHONY: migrate compose-migrate test contract-test kind-up install-kueue e2e-golden e2e-up
 
 migrate:
 	uv run alembic upgrade head
@@ -23,3 +23,6 @@ install-kueue:
 
 e2e-golden:
 	./scripts/e2e/golden-path.sh
+
+e2e-up:
+	./scripts/e2e/up.sh
