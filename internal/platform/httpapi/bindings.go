@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
 type BindingAPI struct {
@@ -31,6 +33,10 @@ func (a *BindingAPI) UpsertProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.store.UpsertProjectBinding(r.Context(), in); err != nil {
+		if errors.Is(err, agentstore.ErrStaleGeneration) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -53,6 +59,10 @@ func (a *BindingAPI) UpsertPool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.store.UpsertClusterBinding(r.Context(), in); err != nil {
+		if errors.Is(err, agentstore.ErrStaleGeneration) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
