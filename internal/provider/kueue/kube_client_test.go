@@ -28,7 +28,7 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 
 	if err := client.ApplyResourceFlavor(ctx, ResourceFlavor{
 		Name:         "accel-h100-80g",
-		ResourceName: gpuResourceName,
+		ResourceName: "vendor.example/gpu",
 		NodeLabels:   map[string]string{"ai.compute/accelerator-class": "h100-80g"},
 	}); err != nil {
 		t.Fatal(err)
@@ -36,7 +36,7 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 	if err := client.ApplyClusterQueue(ctx, ClusterQueue{
 		Name: "cq-pool-h100",
 		Quotas: []ResourceQuota{
-			{Flavor: "accel-h100-80g", Resource: gpuResourceName, Nominal: 8},
+			{Flavor: "accel-h100-80g", Resource: "vendor.example/gpu", Nominal: 8},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 		Namespace: "project-1",
 		QueueName: "lq-pool-h100",
 		Image:     "example/train:latest",
-		Resources: map[string]int64{gpuResourceName: 2},
+		Resources: map[string]int64{"vendor.example/gpu": 2},
 		Annotations: map[string]string{
 			"kueue.x-k8s.io/queue-name": "lq-pool-h100",
 		},
@@ -141,7 +141,7 @@ func TestObserveJobDoesNotInferAdmissionFromRunningReadyPod(t *testing.T) {
 
 	if err := client.ApplyJob(ctx, Job{
 		Name: "job-no-admission", Namespace: "project-1", QueueName: "lq-pool",
-		Image: "example/train:latest", Resources: map[string]int64{gpuResourceName: 1},
+		Image: "example/train:latest", Resources: map[string]int64{"vendor.example/gpu": 1},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestJobObjectKeepsQueueLabelOffPodTemplate(t *testing.T) {
 		Name:      "job-train-1",
 		Namespace: "project-1",
 		Image:     "example/train:latest",
-		Resources: map[string]int64{gpuResourceName: 1},
+		Resources: map[string]int64{"vendor.example/gpu": 1},
 		Labels:    map[string]string{"kueue.x-k8s.io/queue-name": "lq-pool"},
 	})
 	if err != nil {
@@ -210,7 +210,7 @@ func TestApplyJobForbiddenGetDoesNotCreate(t *testing.T) {
 		Name:      "job-denied",
 		Namespace: "project-1",
 		Image:     "example/train:latest",
-		Resources: map[string]int64{gpuResourceName: 1},
+		Resources: map[string]int64{"vendor.example/gpu": 1},
 	})
 	if err == nil || !apierrors.IsForbidden(err) {
 		t.Fatalf("expected forbidden error, got %v", err)
@@ -231,7 +231,7 @@ func TestObserveSucceededJobPreservesKueueEvidenceWithoutInferringPodsReady(t *t
 
 	if err := client.ApplyJob(ctx, Job{
 		Name: "job-success", Namespace: "project-1", QueueName: "lq-pool",
-		Image: "example/train:latest", Resources: map[string]int64{gpuResourceName: 1},
+		Image: "example/train:latest", Resources: map[string]int64{"vendor.example/gpu": 1},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestObserveFailedJobPreservesKueueEvidence(t *testing.T) {
 
 	if err := client.ApplyJob(ctx, Job{
 		Name: "job-failed", Namespace: "project-1", QueueName: "lq-pool",
-		Image: "example/train:latest", Resources: map[string]int64{gpuResourceName: 1},
+		Image: "example/train:latest", Resources: map[string]int64{"vendor.example/gpu": 1},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestApplyExistingJobPreservesControllerStatus(t *testing.T) {
 	client := NewKubeClient(coreClient, nil)
 	in := Job{
 		Name: "job-preserve-status", Namespace: "project-1", QueueName: "lq-pool",
-		Image: "busybox:1.36", Resources: map[string]int64{gpuResourceName: 1},
+		Image: "busybox:1.36", Resources: map[string]int64{"vendor.example/gpu": 1},
 	}
 	if err := client.ApplyJob(ctx, in); err != nil {
 		t.Fatal(err)
