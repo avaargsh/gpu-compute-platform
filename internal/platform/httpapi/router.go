@@ -12,6 +12,10 @@ func NewRouter() http.Handler {
 }
 
 func NewRouterWithAgentStore(store agentstore.Store) http.Handler {
+	return NewRouterWithDependencies(store, NewMemoryPlacementResolver())
+}
+
+func NewRouterWithDependencies(store agentstore.Store, placement PlacementResolver) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -24,7 +28,7 @@ func NewRouterWithAgentStore(store agentstore.Store) http.Handler {
 	mux.HandleFunc("GET /api/v1/agent/desired", agentAPI.Desired)
 	mux.HandleFunc("POST /api/v1/agent/report", agentAPI.Report)
 
-	resourceAPI := NewResourceAPI(store)
+	resourceAPI := NewResourceAPI(store, placement)
 	mux.HandleFunc("PUT /api/v1/compute-pools/{resourceID}", resourceAPI.UpsertComputePool)
 	mux.HandleFunc("PUT /api/v1/workloads/{resourceID}", resourceAPI.UpsertWorkload)
 
