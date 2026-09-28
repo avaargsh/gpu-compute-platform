@@ -8,7 +8,7 @@ set -euo pipefail
 : "${RUN_ID:=$(date +%s)}"
 
 need() { command -v "$1" >/dev/null || { echo "missing required command: $1" >&2; exit 2; }; }
-for cmd in curl python kubectl; do need "$cmd"; done
+for cmd in curl python kubectl docker; do need "$cmd"; done
 
 json() { python -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"; }
 request() {
@@ -42,6 +42,13 @@ PY
     sleep 2
   done
   echo "timeout waiting for $expression: $path" >&2
+  echo "--- app ---" >&2
+  docker compose logs --tail=100 app >&2 2>/dev/null || true
+  echo "--- celery-worker ---" >&2
+  docker compose logs --tail=150 celery-worker >&2 2>/dev/null || true
+  echo "--- kueue ---" >&2
+  kubectl get clusterqueues,resourceflavors -o wide >&2 2>/dev/null || true
+  kubectl get localqueues,workloads,jobs,pods -n golden-path -o wide >&2 2>/dev/null || true
   return 1
 }
 
@@ -54,6 +61,7 @@ TENANT_ID="$(printf '%s' "$tenant" | json id)"
 PROJECT_ID="$(printf '%s' "$tenant" | python -c 'import json,sys; print(json.load(sys.stdin)["default_project"]["id"])')"
 
 kubectl create namespace golden-path --dry-run=client -o yaml | kubectl apply -f -
+kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout="${TIMEOUT_SECONDS}s"
 
 pool_path="/api/v1/tenants/$TENANT_ID/projects/$PROJECT_ID/compute-pools"
 pool_payload="$(cat <<JSON
