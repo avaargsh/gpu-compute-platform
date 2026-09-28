@@ -15,17 +15,17 @@ import (
 func TestMemoryPlacementRejectsCrossClusterRebind(t *testing.T) {
 	store := NewMemoryPlacementResolver()
 	if err := store.UpsertClusterBinding(context.Background(), domain.ClusterBinding{
-		Metadata: domain.Metadata{Generation: 1}, PoolID: "pool-1", ClusterID: "cluster-a", Provider: "kueue",
+		Metadata:  domain.Metadata{Generation: 1}, PoolID: "pool-1", ClusterID: "cluster-a", Provider: "kueue",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpsertClusterBinding(context.Background(), domain.ClusterBinding{
-		Metadata: domain.Metadata{Generation: 2}, PoolID: "pool-1", ClusterID: "cluster-a", Provider: "volcano",
+		Metadata:  domain.Metadata{Generation: 2}, PoolID: "pool-1", ClusterID: "cluster-a", Provider: "volcano",
 	}); err != nil {
 		t.Fatalf("same-cluster update: %v", err)
 	}
 	err := store.UpsertClusterBinding(context.Background(), domain.ClusterBinding{
-		Metadata: domain.Metadata{Generation: 3}, PoolID: "pool-1", ClusterID: "cluster-b", Provider: "volcano",
+		Metadata:  domain.Metadata{Generation: 3}, PoolID: "pool-1", ClusterID: "cluster-b", Provider: "volcano",
 	})
 	if !errors.Is(err, agentstore.ErrPlacementMigrationRequired) {
 		t.Fatalf("error=%v, want placement migration required", err)
@@ -67,19 +67,19 @@ func TestMemoryPlacementRejectsProjectCrossClusterRebind(t *testing.T) {
 	ctx := context.Background()
 
 	if err := resolver.UpsertProjectBinding(ctx, domain.ProjectBinding{
-		Metadata: domain.Metadata{Generation: 1},
+		Metadata:  domain.Metadata{Generation: 1},
 		ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "team-a",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := resolver.UpsertProjectBinding(ctx, domain.ProjectBinding{
-		Metadata: domain.Metadata{Generation: 2},
+		Metadata:  domain.Metadata{Generation: 2},
 		ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "team-b",
 	}); err != nil {
 		t.Fatalf("same-cluster namespace update failed: %v", err)
 	}
 	err := resolver.UpsertProjectBinding(ctx, domain.ProjectBinding{
-		Metadata: domain.Metadata{Generation: 3},
+		Metadata:  domain.Metadata{Generation: 3},
 		ProjectID: "project-1", ClusterID: "cluster-b", Namespace: "team-b",
 	})
 	if !errors.Is(err, agentstore.ErrPlacementMigrationRequired) {
