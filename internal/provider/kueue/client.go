@@ -3,11 +3,11 @@ package kueue
 import "context"
 
 type JobObservation struct {
-	Phase      string
-	Admitted   bool
-	PodsReady  bool
-	Failed     bool
-	Message    string
+	Phase     string
+	Admitted  bool
+	PodsReady bool
+	Failed    bool
+	Message   string
 }
 
 type Client interface {
