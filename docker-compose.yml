@@ -18,6 +18,10 @@ services:
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - SECRET_KEY=dev-secret-key-change-in-production
       - DEBUG=true
+      - CONTROL_PLANE_SCHEDULER_PROVIDER=${CONTROL_PLANE_SCHEDULER_PROVIDER:-disabled}
+      - CONTROL_PLANE_KUEUE_NAMESPACE=${CONTROL_PLANE_KUEUE_NAMESPACE:-default}
+      - CONTROL_PLANE_KUEUE_LOCAL_QUEUE=${CONTROL_PLANE_KUEUE_LOCAL_QUEUE:-default}
+      - CONTROL_PLANE_KUBECONFIG=${CONTROL_PLANE_KUBECONFIG:-}
     volumes:
       - ./app:/app/app:ro
       - ./scripts:/app/scripts:ro
@@ -54,6 +58,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - SECRET_KEY=dev-secret-key-change-in-production
+      - CONTROL_PLANE_SCHEDULER_PROVIDER=${CONTROL_PLANE_SCHEDULER_PROVIDER:-disabled}
+      - CONTROL_PLANE_KUEUE_NAMESPACE=${CONTROL_PLANE_KUEUE_NAMESPACE:-default}
+      - CONTROL_PLANE_KUEUE_LOCAL_QUEUE=${CONTROL_PLANE_KUEUE_LOCAL_QUEUE:-default}
+      - CONTROL_PLANE_KUBECONFIG=${CONTROL_PLANE_KUBECONFIG:-}
     volumes:
       - ./app:/app/app:ro
       - gpu_data:/app/data
