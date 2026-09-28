@@ -16,7 +16,8 @@ class FakeProvider:
     async def observe(self, provider_ref):
         return {
             "phase": self.phase,
-            "replicas_ready": 2,\n            "admitted": True,
+            "replicas_ready": 2,
+            "admitted": True,
             "endpoint": "https://example.test/v1",
             "evidence_refs": [
                 {"kind": "manifest", "uri": "s3://evidence/qwen.json", "digest": "sha256:abc"}
@@ -32,9 +33,12 @@ async def test_reconcile_applies_observes_and_normalizes_status():
     assert provider.applied == {"name": "qwen"}
     assert result.provider_ref == "team-a/qwen"
     assert result.state.phase == Phase.READY
-    assert result.state.conditions[0].type == "Ready"\n    assert result.state.observed_generation == 3\n    assert result.state.conditions[0].observed_generation == 3
+    assert result.state.conditions[0].type == "Ready"
+    assert result.state.observed_generation == 3
+    assert result.state.conditions[0].observed_generation == 3
     assert result.state.conditions[0].status is True
-    assert result.state.replicas_ready == 2\n    assert {condition.type for condition in result.state.conditions} == {"Ready", "Admitted", "PodsReady"}
+    assert result.state.replicas_ready == 2
+    assert {condition.type for condition in result.state.conditions} == {"Ready", "Admitted", "PodsReady"}
     assert result.state.evidence_refs[0].digest == "sha256:abc"
     assert result.state.provider_status == {"resourceVersion": "42"}
 
