@@ -20,7 +20,7 @@ func TestPlacementMigrationStatusRejectsSkippedTransition(t *testing.T) {
 	}
 	_, _, err := bindings.CreatePlacementMigration(t.Context(), domain.PlacementMigration{
 		Metadata: MetadataForMigration("migration-1"),
-		PoolID: "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
+		PoolID:   "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
 		Phase: domain.PlacementMigrationRequested,
 	})
 	if err != nil {
