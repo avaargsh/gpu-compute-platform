@@ -2,6 +2,7 @@ package agentstore
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -222,5 +223,49 @@ func TestMemoryReconcileLeaseValidatesIdentityAndTTL(t *testing.T) {
 	}
 	if err := store.ReleaseReconcileLease(ctx, "cluster-a", "Workload", "train-1", ""); err == nil {
 		t.Fatal("missing owner must fail")
+	}
+}
+
+
+func TestMemoryDesiredDeletionLifecycle(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	clusterID := domain.ID("cluster-a")
+	store.SetDesired(clusterID, []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-1", Generation: 4, Spec: map[string]any{"image": "example/train:latest"},
+	}})
+	at := time.Date(2026, 9, 29, 1, 2, 3, 0, time.UTC)
+
+	if err := store.MarkDesiredDeleting(ctx, clusterID, "Workload", "train-1", at); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := store.GetDesired(ctx, clusterID, "Workload", "train-1")
+	if err != nil || !ok {
+		t.Fatalf("desired missing after mark-delete: ok=%t err=%v", ok, err)
+	}
+	if got.DeletionTimestamp == nil || !got.DeletionTimestamp.Equal(at) {
+		t.Fatalf("unexpected deletion timestamp: %#v", got.DeletionTimestamp)
+	}
+	if len(got.Finalizers) != 1 || got.Finalizers[0] != ProviderCleanupFinalizer {
+		t.Fatalf("unexpected finalizers: %#v", got.Finalizers)
+	}
+
+	later := at.Add(time.Minute)
+	if err := store.MarkDesiredDeleting(ctx, clusterID, "Workload", "train-1", later); err != nil {
+		t.Fatal(err)
+	}
+	got, _, _ = store.GetDesired(ctx, clusterID, "Workload", "train-1")
+	if got.DeletionTimestamp == nil || !got.DeletionTimestamp.Equal(at) || len(got.Finalizers) != 1 {
+		t.Fatalf("mark-delete must be idempotent: %#v", got)
+	}
+
+	if err := store.FinalizeDesired(ctx, clusterID, "Workload", "train-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.GetDesired(ctx, clusterID, "Workload", "train-1"); err != nil || ok {
+		t.Fatalf("desired must be gone after finalize: ok=%t err=%v", ok, err)
+	}
+	if err := store.FinalizeDesired(ctx, clusterID, "Workload", "train-1"); !errors.Is(err, ErrDesiredNotFound) {
+		t.Fatalf("second finalize err=%v, want ErrDesiredNotFound", err)
 	}
 }
