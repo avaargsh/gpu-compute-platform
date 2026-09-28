@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS desired_resources (
     resource_id TEXT NOT NULL,
     generation BIGINT NOT NULL,
     spec JSONB NOT NULL,
+    deletion_timestamp TIMESTAMPTZ,
+    finalizers JSONB NOT NULL DEFAULT '[]'::jsonb,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (cluster_id, kind, resource_id)
 );
@@ -26,6 +28,12 @@ CREATE TABLE IF NOT EXISTS resource_observations (
     observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (cluster_id, kind, resource_id)
 );
+
+ALTER TABLE desired_resources
+    ADD COLUMN IF NOT EXISTS deletion_timestamp TIMESTAMPTZ;
+
+ALTER TABLE desired_resources
+    ADD COLUMN IF NOT EXISTS finalizers JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE INDEX IF NOT EXISTS desired_resources_cluster_generation_idx
     ON desired_resources (cluster_id, generation);
