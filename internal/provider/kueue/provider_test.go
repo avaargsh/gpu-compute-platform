@@ -85,3 +85,37 @@ func TestProviderAppliesPoolResourcesInDependencyOrder(t *testing.T) {
 		t.Fatalf("expected evidence refs, got %#v", got.EvidenceRefs)
 	}
 }
+
+func TestDeletePoolPreservesSharedResourceFlavor(t *testing.T) {
+	client := &fakeClient{}
+	p := NewProvider(client)
+
+	got, err := p.DeletePool(context.Background(), baseprovider.PoolProjection{
+		PoolID:     "pool-1",
+		ProjectID:  "project-1",
+		ClusterID:  "cluster-a",
+		Namespace:  "project-1",
+		Generation: 7,
+		Accelerators: []domain.AcceleratorRequest{{
+			Class: "h100-80g", Quota: 8,
+		}},
+		AcceleratorBindings: []domain.AcceleratorBinding{{
+			Class: "h100-80g", ResourceName: "nvidia.com/gpu", Flavor: "h100-80g",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Gone {
+		t.Fatalf("pool-owned resources should be gone: %#v", got)
+	}
+	want := []string{"delete-lq:project-1/lq-pool-1", "delete-cq:cq-pool-1"}
+	if len(client.order) != len(want) {
+		t.Fatalf("pool deletion must not delete shared flavor: %#v", client.order)
+	}
+	for i := range want {
+		if client.order[i] != want[i] {
+			t.Fatalf("delete[%d]=%q, want %q", i, client.order[i], want[i])
+		}
+	}
+}
