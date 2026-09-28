@@ -94,3 +94,71 @@ func TestResourceAPIRejectsCrossClusterBindings(t *testing.T) {
 		t.Fatalf("expected 409 for cross-cluster bindings, got %d", resp.StatusCode)
 	}
 }
+
+
+func TestResourceAPIRejectsStaleWorkloadGenerationWithoutRollback(t *testing.T) {
+	store := agentstore.NewMemory()
+	server := httptest.NewServer(boundRouter(store, "cluster-a", "cluster-a"))
+	defer server.Close()
+
+	put := func(body string) int {
+		req, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/workloads/train-1", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := put(`{"metadata":{"id":"train-1","generation":8},"projectId":"project-1","poolId":"pool-h100","spec":{"image":"example/v8","accelerator":{"class":"h100-80g","quota":2}}}`); got != http.StatusNoContent {
+		t.Fatalf("generation 8 status=%d", got)
+	}
+	if got := put(`{"metadata":{"id":"train-1","generation":7},"projectId":"project-1","poolId":"pool-h100","spec":{"image":"example/v7","accelerator":{"class":"h100-80g","quota":1}}}`); got != http.StatusConflict {
+		t.Fatalf("stale generation status=%d, want 409", got)
+	}
+
+	desired, err := store.Desired(context.Background(), "cluster-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(desired) != 1 || desired[0].Generation != 8 || desired[0].Spec["image"] != "example/v8" {
+		t.Fatalf("stale write rolled desired state back: %#v", desired)
+	}
+}
+
+func TestBindingAPIRejectsStaleGenerationWithoutRollback(t *testing.T) {
+	store := agentstore.NewMemory()
+	bindings := NewMemoryPlacementResolver()
+	server := httptest.NewServer(NewRouterWithDependencies(store, bindings))
+	defer server.Close()
+
+	put := func(body string) int {
+		req, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/projects/project-1/binding", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := put(`{"metadata":{"id":"binding","generation":8},"projectId":"project-1","clusterId":"cluster-a","namespace":"project-v8"}`); got != http.StatusNoContent {
+		t.Fatalf("generation 8 status=%d", got)
+	}
+	if got := put(`{"metadata":{"id":"binding","generation":7},"projectId":"project-1","clusterId":"cluster-b","namespace":"project-v7"}`); got != http.StatusConflict {
+		t.Fatalf("stale generation status=%d, want 409", got)
+	}
+
+	placement, err := bindings.ResolveProject(context.Background(), "project-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if placement.ClusterID != "cluster-a" || placement.Namespace != "project-v8" {
+		t.Fatalf("stale binding rolled placement back: %#v", placement)
+	}
+}
