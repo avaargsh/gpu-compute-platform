@@ -14,6 +14,7 @@ type fakeControlPlane struct {
 	desired       []DesiredResource
 	reported      []Observation
 	leaseClaimed  bool
+	denyLease     bool
 	claimCalls    int
 	releaseCalls  int
 }
@@ -29,10 +30,10 @@ func (f *fakeControlPlane) Report(_ context.Context, _ domain.ID, observations [
 }
 func (f *fakeControlPlane) ClaimReconcileLease(_ context.Context, _ ReconcileLeaseRequest) (bool, error) {
 	f.claimCalls++
-	if !f.leaseClaimed {
-		return true, nil
+	if f.denyLease {
+		return false, nil
 	}
-	return f.leaseClaimed, nil
+	return true, nil
 }
 func (f *fakeControlPlane) ReleaseReconcileLease(_ context.Context, _ ReconcileLeaseRequest) error {
 	f.releaseCalls++
@@ -166,5 +167,30 @@ func TestRetryBackoffIsDeterministicAndCapped(t *testing.T) {
 		if got := retryBackoff(i + 1); got != expected {
 			t.Fatalf("attempt %d: got %s want %s", i+1, got, expected)
 		}
+	}
+}
+
+func TestRunnerSkipsProviderWhenLeaseIsContended(t *testing.T) {
+	control := &fakeControlPlane{
+		denyLease: true,
+		desired: []DesiredResource{{
+			Kind: "ComputePool", ID: "pool-1", Generation: 1,
+			Spec: map[string]any{"acceleratorBindings": []any{}},
+		}},
+	}
+	runtime := &fakeRuntime{}
+	runner := NewRunner("cluster-a", control, runtime)
+
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if control.claimCalls != 1 {
+		t.Fatalf("claim calls=%d, want 1", control.claimCalls)
+	}
+	if control.releaseCalls != 0 {
+		t.Fatalf("contended lease must not be released by non-owner, releases=%d", control.releaseCalls)
+	}
+	if len(control.reported) != 0 {
+		t.Fatalf("contended reconcile must not report terminal state: %#v", control.reported)
 	}
 }
