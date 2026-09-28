@@ -45,6 +45,36 @@ func (m *Memory) Desired(_ context.Context, clusterID domain.ID) ([]agent.Desire
 	return append([]agent.DesiredResource(nil), m.desired[clusterID]...), nil
 }
 
+
+func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.DesiredResource) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	items := m.desired[clusterID]
+	for i := range items {
+		if items[i].Kind == in.Kind && items[i].ID == in.ID {
+			items[i] = in
+			m.desired[clusterID] = items
+			return nil
+		}
+	}
+	m.desired[clusterID] = append(items, in)
+	return nil
+}
+
+func (m *Memory) DeleteDesired(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	items := m.desired[clusterID]
+	out := items[:0]
+	for _, item := range items {
+		if item.Kind != kind || item.ID != resourceID {
+			out = append(out, item)
+		}
+	}
+	m.desired[clusterID] = append([]agent.DesiredResource(nil), out...)
+	return nil
+}
+
 func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Observation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
