@@ -17,7 +17,8 @@ KUEUE_QUEUE_LABEL = "kueue.x-k8s.io/queue-name"
 class KueueBinding:
     namespace: str
     local_queue: str
-    accelerator_resources: dict[str, str]\n    priority_class: str | None = None
+    accelerator_resources: dict[str, str]
+    priority_class: str | None = None
 
 
 class KueueManifestBuilder:
