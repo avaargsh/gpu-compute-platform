@@ -144,7 +144,7 @@ func TestObserveJobDoesNotInferAdmissionFromRunningReadyPod(t *testing.T) {
 	}
 	if _, err := coreClient.CoreV1().Pods("project-1").Create(ctx, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "ready-pod", Labels: map[string]string{"ai.compute/workload": "job-no-admission"}},
-		Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+		Status:     corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
 	}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
