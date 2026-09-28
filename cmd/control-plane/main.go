@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
@@ -38,6 +40,12 @@ func buildStore() (agentstore.Store, func()) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		log.Fatalf("open postgres: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		log.Fatalf("ping postgres: %v", err)
 	}
 	return postgresstore.New(db), func() {
 		_ = db.Close()
