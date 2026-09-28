@@ -11,7 +11,7 @@ func TestProjectPool(t *testing.T) {
 	got, err := ProjectPool(provider.PoolProjection{
 		PoolID:     "pool-h100",
 		ProjectID:  "project-1",
-		ClusterID:    "cluster-a",
+		ClusterID:  "cluster-a",
 		Namespace:  "project-1",
 		Generation: 3,
 		Accelerators: []domain.AcceleratorRequest{
@@ -40,7 +40,7 @@ func TestProjectPoolRejectsInvalidQuota(t *testing.T) {
 	_, err := ProjectPool(provider.PoolProjection{
 		PoolID:       "pool-a",
 		ClusterID:    "cluster-a",
-		Namespace:   "project-a",
+		Namespace:    "project-a",
 		Accelerators: []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 0}},
 	})
 	if err == nil {
