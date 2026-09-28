@@ -12,7 +12,8 @@ class FakeBatchClient:
         self.created = None
         self.exists = False
         self.deleted = None
-        self.pods = []\n        self.job = SimpleNamespace(
+        self.pods = []
+        self.job = SimpleNamespace(
             metadata=SimpleNamespace(resource_version="42", uid="job-uid-1"),
             status=SimpleNamespace(active=0, succeeded=0, failed=0),
         )
