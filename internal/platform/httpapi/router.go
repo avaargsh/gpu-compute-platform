@@ -27,6 +27,8 @@ func NewRouterWithDependencies(store agentstore.Store, bindings BindingStore) ht
 	mux.HandleFunc("POST /api/v1/agent/heartbeat", agentAPI.Heartbeat)
 	mux.HandleFunc("GET /api/v1/agent/desired", agentAPI.Desired)
 	mux.HandleFunc("POST /api/v1/agent/report", agentAPI.Report)
+	mux.HandleFunc("POST /api/v1/agent/reconcile-lease/claim", agentAPI.ClaimReconcileLease)
+	mux.HandleFunc("POST /api/v1/agent/reconcile-lease/release", agentAPI.ReleaseReconcileLease)
 
 	bindingAPI := NewBindingAPI(bindings)
 	mux.HandleFunc("PUT /api/v1/projects/{projectID}/binding", bindingAPI.UpsertProject)
