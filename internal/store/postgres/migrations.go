@@ -42,7 +42,8 @@ ON CONFLICT (migration_id) DO NOTHING
 		return domain.PlacementMigration{}, false, err
 	}
 	if affected > 0 {
-		return s.GetPlacementMigration(ctx, in.PoolID, in.Metadata.ID, true)
+		created, err := s.GetPlacementMigration(ctx, in.PoolID, in.Metadata.ID)
+		return created, true, err
 	}
 
 	var currentCluster domain.ID
