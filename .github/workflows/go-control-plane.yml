@@ -1,5 +1,9 @@
 name: Go Control Plane
 
+concurrency:
+  group: go-control-plane-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
