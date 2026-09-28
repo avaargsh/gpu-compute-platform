@@ -6,6 +6,7 @@ PendingAdmission -> Admitted -> PodsReady -> Completed/Ready.
 
 import pytest
 
+from app.control_plane.domain import AcceleratorRequest, ComputePoolRef, WorkloadKind, WorkloadSpec
 from app.control_plane.providers import ProviderStatus
 from app.control_plane.reconcile import Reconciler
 from app.control_plane.scheduler_reconcile import SchedulerReconcileProvider
@@ -40,9 +41,18 @@ async def test_phase0_workload_lifecycle_projection_is_generation_scoped():
     ])
     reconciler = Reconciler(SchedulerReconcileProvider(scheduler))
 
+    desired = WorkloadSpec(
+        name="hello",
+        kind=WorkloadKind.BATCH,
+        compute_pool=ComputePoolRef(name="cpu-golden"),
+        accelerator=AcceleratorRequest(class_name="cpu", count=1),
+        image="busybox:1.36",
+        command=["sh", "-c", "echo golden-path"],
+    )
+
     states = []
     for _ in range(4):
-        result = await reconciler.reconcile({"name": "hello"}, generation=7)
+        result = await reconciler.reconcile(desired, generation=7)
         states.append(result.state)
 
     pending, admitted, pods_ready, completed = states
