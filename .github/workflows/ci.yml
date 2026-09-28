@@ -21,4 +21,4 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
       - name: Run control-plane contract tests
-        run: uv run pytest -q tests/test_control_plane_contracts.py tests/test_kueue_adapter.py tests/test_kueue_scheduler_provider.py
+        run: uv run pytest -q tests/test_control_plane_contracts.py tests/test_kueue_adapter.py tests/test_kueue_scheduler_provider.py tests/test_compute_pool.py
