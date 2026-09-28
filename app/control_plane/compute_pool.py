@@ -14,6 +14,8 @@ class ResourceQuota(BaseModel):
 
 class ResourceFlavorBinding(BaseModel):
     name: str
+    accelerator_class: str
+    resource_name: str = "nvidia.com/gpu"
     node_labels: dict[str, str] = Field(default_factory=dict)
 
 
