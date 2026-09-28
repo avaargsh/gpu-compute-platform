@@ -43,6 +43,17 @@ func (f *fakeControlPlane) ReleaseReconcileLease(_ context.Context, _ ReconcileL
 	f.releaseCalls++
 	return nil
 }
+func (f *fakeControlPlane) FinalizeDesired(_ context.Context, in FinalizeDesiredRequest) error {
+	out := f.desired[:0]
+	for _, item := range f.desired {
+		if item.Kind == in.Kind && item.ID == in.ResourceID && item.Generation == in.Generation {
+			continue
+		}
+		out = append(out, item)
+	}
+	f.desired = append([]DesiredResource(nil), out...)
+	return nil
+}
 
 type fakeRuntime struct {
 	poolCalls     int
@@ -54,6 +65,14 @@ type fakeRuntime struct {
 func (f *fakeRuntime) ReconcilePool(_ context.Context, p provider.PoolProjection) (provider.PoolObservation, error) {
 	f.poolCalls++
 	return provider.PoolObservation{ObservedGeneration: p.Generation, EvidenceRefs: []string{"pool-evidence"}}, nil
+}
+
+func (f *fakeRuntime) DeletePool(_ context.Context, _ provider.PoolProjection) (provider.DeletionObservation, error) {
+	return provider.DeletionObservation{Gone: true, EvidenceRefs: []string{"pool-delete-evidence"}}, nil
+}
+
+func (f *fakeRuntime) DeleteWorkload(_ context.Context, _ provider.WorkloadProjection) (provider.DeletionObservation, error) {
+	return provider.DeletionObservation{Gone: true, EvidenceRefs: []string{"job-delete-evidence"}}, nil
 }
 
 func (f *fakeRuntime) ReconcileWorkload(_ context.Context, p provider.WorkloadProjection) (provider.WorkloadObservation, error) {
