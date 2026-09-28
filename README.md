@@ -119,6 +119,23 @@ uv run alembic upgrade head
 uv run pytest -q
 ```
 
+Phase 0 acceptance path:
+
+```bash
+make kind-up
+make install-kueue
+make migrate
+
+# Start PostgreSQL/Redis, the API and Celery worker with:
+# CONTROL_PLANE_SCHEDULER_PROVIDER=kueue
+# CONTROL_PLANE_KUBECONFIG=<path to the kind kubeconfig>
+make e2e-golden
+```
+
+The Golden Path intentionally uses CPU as a fake accelerator so Phase 0 validates
+control-plane admission and convergence without requiring a GPU node. HAMi/DRA
+are Phase 1 concerns.
+
 The scheduler is disabled by default. To use Kueue:
 
 ```bash
