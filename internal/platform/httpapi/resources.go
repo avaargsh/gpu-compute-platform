@@ -20,9 +20,9 @@ type placedComputePool struct {
 }
 
 type placedWorkload struct {
-	ClusterID domain.ID        `json:"clusterId"`
-	Namespace string           `json:"namespace"`
-	Resource  domain.Workload  `json:"resource"`
+	ClusterID domain.ID       `json:"clusterId"`
+	Namespace string          `json:"namespace"`
+	Resource  domain.Workload `json:"resource"`
 }
 
 func NewResourceAPI(store agentstore.Store) *ResourceAPI {
@@ -30,13 +30,18 @@ func NewResourceAPI(store agentstore.Store) *ResourceAPI {
 }
 
 func (a *ResourceAPI) UpsertComputePool(w http.ResponseWriter, r *http.Request) {
+	resourceID := domain.ID(r.PathValue("resourceID"))
 	var in placedComputePool
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid compute pool", http.StatusBadRequest)
 		return
 	}
-	if in.ClusterID == "" || in.Namespace == "" || in.Resource.Metadata.ID == "" || in.Resource.Metadata.Generation <= 0 || in.Resource.ProjectID == "" {
+	if resourceID == "" || in.ClusterID == "" || in.Namespace == "" || in.Resource.Metadata.ID == "" || in.Resource.Metadata.Generation <= 0 || in.Resource.ProjectID == "" {
 		http.Error(w, "clusterId, namespace, resource id, projectId and positive generation are required", http.StatusBadRequest)
+		return
+	}
+	if in.Resource.Metadata.ID != resourceID {
+		http.Error(w, "resource id must match path", http.StatusBadRequest)
 		return
 	}
 	spec := map[string]any{
@@ -55,13 +60,18 @@ func (a *ResourceAPI) UpsertComputePool(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
+	resourceID := domain.ID(r.PathValue("resourceID"))
 	var in placedWorkload
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid workload", http.StatusBadRequest)
 		return
 	}
-	if in.ClusterID == "" || in.Namespace == "" || in.Resource.Metadata.ID == "" || in.Resource.Metadata.Generation <= 0 || in.Resource.ProjectID == "" || in.Resource.PoolID == "" {
+	if resourceID == "" || in.ClusterID == "" || in.Namespace == "" || in.Resource.Metadata.ID == "" || in.Resource.Metadata.Generation <= 0 || in.Resource.ProjectID == "" || in.Resource.PoolID == "" {
 		http.Error(w, "clusterId, namespace, resource id, projectId, poolId and positive generation are required", http.StatusBadRequest)
+		return
+	}
+	if in.Resource.Metadata.ID != resourceID {
+		http.Error(w, "resource id must match path", http.StatusBadRequest)
 		return
 	}
 	spec := map[string]any{
