@@ -3,6 +3,7 @@ package agentstore
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
@@ -16,6 +17,9 @@ var ErrPlacementMigrationConflict = errors.New("placement migration identity con
 var ErrPlacementMigrationNotFound = errors.New("placement migration not found")
 var ErrPlacementMigrationTransition = errors.New("invalid placement migration transition")
 var ErrPlacementTargetNotReady = errors.New("placement migration target is not ready")
+var ErrDesiredNotFound = errors.New("desired resource not found")
+
+const ProviderCleanupFinalizer = "gpu-compute-platform.io/provider-cleanup"
 
 type Store interface {
 	Register(context.Context, agent.Registration) error
@@ -25,7 +29,8 @@ type Store interface {
 	LocateDesired(context.Context, string, domain.ID) (domain.ID, agent.DesiredResource, bool, error)
 	GetObservation(context.Context, domain.ID, string, domain.ID) (agent.Observation, bool, error)
 	UpsertDesired(context.Context, domain.ID, agent.DesiredResource) error
-	DeleteDesired(context.Context, domain.ID, string, domain.ID) error
+	MarkDesiredDeleting(context.Context, domain.ID, string, domain.ID, time.Time) error
+	FinalizeDesired(context.Context, domain.ID, string, domain.ID) error
 	Report(context.Context, domain.ID, []agent.Observation) error
 	ClaimReconcileLease(context.Context, domain.ID, string, domain.ID, string, int64) (bool, error)
 	ReleaseReconcileLease(context.Context, domain.ID, string, domain.ID, string) error
