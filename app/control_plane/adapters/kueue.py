@@ -17,7 +17,7 @@ KUEUE_QUEUE_LABEL = "kueue.x-k8s.io/queue-name"
 class KueueBinding:
     namespace: str
     local_queue: str
-    accelerator_resources: dict[str, str]
+    accelerator_resources: dict[str, str]\n    priority_class: str | None = None
 
 
 class KueueManifestBuilder:
@@ -47,7 +47,7 @@ class KueueManifestBuilder:
                 for name, value in sorted(workload.env.items())
             ]
 
-        return {
+        manifest = {
             "apiVersion": "batch/v1",
             "kind": "Job",
             "metadata": {
