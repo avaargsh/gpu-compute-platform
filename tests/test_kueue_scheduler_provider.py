@@ -103,3 +103,20 @@ async def test_submit_is_idempotent_when_job_already_exists():
     binding_id = await provider.submit(workload())
     assert binding_id == "team-a/train-qwen"
     assert client.created is None
+
+
+@pytest.mark.asyncio
+async def test_status_surfaces_scheduler_admission_conditions():
+    client = FakeBatchClient()
+    client.job.status.conditions = [
+        SimpleNamespace(type="QuotaReserved", status="True"),
+        SimpleNamespace(type="Admitted", status="True"),
+        SimpleNamespace(type="Evicted", status="False"),
+    ]
+    provider = KueueSchedulerProvider(
+        client, KueueBinding(namespace="team-a", local_queue="training")
+    )
+    status = await provider.status("team-a/train-qwen")
+    assert status["admitted"] is True
+    assert status["evicted"] is False
+    assert status["conditions"]["QuotaReserved"] == "True"
