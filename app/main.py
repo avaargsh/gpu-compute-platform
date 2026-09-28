@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.v2_workloads import router as v2_workloads_router
+from app.api.v2_tenancy import router as v2_tenancy_router
+import app.models.tenancy
 import app.models.control_plane_resource  # register control-plane tables
 import app.models.control_plane_revision  # register revision history tables
 # 尝试导入增强的API，如果失败则跳过
@@ -78,6 +80,7 @@ app.add_middleware(
 )
 
 # Include routers
+app.include_router(v2_tenancy_router, prefix="/api/v2", tags=["tenancy-v2"])
 app.include_router(v2_workloads_router, prefix="/api/v2", tags=["control-plane-v2"])
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
 
