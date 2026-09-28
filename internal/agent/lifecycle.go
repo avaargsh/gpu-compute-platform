@@ -52,9 +52,9 @@ func (l *Lifecycle) Run(ctx context.Context) error {
 		return fmt.Errorf("register agent: %w", err)
 	}
 
-	if err := l.tick(ctx); err != nil {
-		return err
-	}
+	// Reconciliation is a durable control loop: transient heartbeat or sync
+	// failures must not terminate the cluster agent. The next tick retries.
+	_ = l.tick(ctx)
 
 	ticker := time.NewTicker(l.interval)
 	defer ticker.Stop()
@@ -63,9 +63,7 @@ func (l *Lifecycle) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if err := l.tick(ctx); err != nil {
-				return err
-			}
+			_ = l.tick(ctx)
 		}
 	}
 }
