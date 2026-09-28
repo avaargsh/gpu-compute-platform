@@ -19,6 +19,12 @@ type PlacementResolver interface {
 	ResolvePool(context.Context, domain.ID) (Placement, error)
 }
 
+type BindingStore interface {
+	PlacementResolver
+	UpsertProjectBinding(context.Context, domain.ProjectBinding) error
+	UpsertClusterBinding(context.Context, domain.ClusterBinding) error
+}
+
 type MemoryPlacementResolver struct {
 	mu       sync.RWMutex
 	projects map[domain.ID]Placement
@@ -33,18 +39,28 @@ func NewMemoryPlacementResolver() *MemoryPlacementResolver {
 }
 
 func (r *MemoryPlacementResolver) BindProject(in domain.ProjectBinding) {
+	_ = r.UpsertProjectBinding(context.Background(), in)
+}
+
+func (r *MemoryPlacementResolver) UpsertProjectBinding(_ context.Context, in domain.ProjectBinding) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.projects[in.ProjectID] = Placement{ClusterID: in.ClusterID, Namespace: in.Namespace}
+	return nil
 }
 
 func (r *MemoryPlacementResolver) BindPool(in domain.ClusterBinding) {
+	_ = r.UpsertClusterBinding(context.Background(), in)
+}
+
+func (r *MemoryPlacementResolver) UpsertClusterBinding(_ context.Context, in domain.ClusterBinding) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	current := r.pools[in.PoolID]
 	current.ClusterID = in.ClusterID
 	current.Provider = in.Provider
 	r.pools[in.PoolID] = current
+	return nil
 }
 
 func (r *MemoryPlacementResolver) ResolveProject(_ context.Context, projectID domain.ID) (Placement, error) {
