@@ -41,7 +41,13 @@ async def _reconcile_resource(resource_key: str) -> None:
                 pool = ComputePool.model_validate(record.desired)
                 reconciler = build_compute_pool_reconciler(control_plane_settings)
                 state = await reconciler.reconcile(pool, generation=record.generation)
-                await store.put_observed(resource_key, record.generation, state)
+                written = await store.put_observed(resource_key, record.generation, state)
+                if written and state.phase.value == "ready":
+                    import uuid
+                    project_id = uuid.UUID(resource_key.split("/")[1])
+                    for dependent in await store.list_project_kind(project_id, "workload"):
+                        if dependent.desired.get("compute_pool", {}).get("name") == pool.name:
+                            enqueue_reconcile(dependent.key)
                 logger.info(
                     "reconciled compute pool key=%s generation=%s phase=%s",
                     resource_key, record.generation, state.phase.value,
