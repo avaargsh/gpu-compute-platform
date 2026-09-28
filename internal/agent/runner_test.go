@@ -23,13 +23,16 @@ func (f *fakeControlPlane) Report(_ context.Context, _ domain.ID, observations [
 	return nil
 }
 
-type fakeRuntime struct{}
+type fakeRuntime struct {
+	workload provider.WorkloadProjection
+}
 
-func (fakeRuntime) ReconcilePool(_ context.Context, p provider.PoolProjection) (provider.PoolObservation, error) {
+func (*fakeRuntime) ReconcilePool(_ context.Context, p provider.PoolProjection) (provider.PoolObservation, error) {
 	return provider.PoolObservation{ObservedGeneration: p.Generation, EvidenceRefs: []string{"pool-evidence"}}, nil
 }
 
-func (fakeRuntime) ReconcileWorkload(_ context.Context, p provider.WorkloadProjection) (provider.WorkloadObservation, error) {
+func (f *fakeRuntime) ReconcileWorkload(_ context.Context, p provider.WorkloadProjection) (provider.WorkloadObservation, error) {
+	f.workload = p
 	return provider.WorkloadObservation{ObservedGeneration: p.Generation, Phase: "Running", EvidenceRefs: []string{"job-evidence"}}, nil
 }
 
@@ -47,6 +50,13 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 						map[string]any{
 							"class": "h100-80g",
 							"quota": float64(8),
+						},
+					},
+					"acceleratorBindings": []any{
+						map[string]any{
+							"class":        "h100-80g",
+							"resourceName": "vendor.example/gpu",
+							"flavor":       "h100",
 						},
 					},
 				},
@@ -69,7 +79,8 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 		},
 	}
 
-	runner := NewRunner("cluster-a", control, fakeRuntime{})
+	runtime := &fakeRuntime{}
+	runner := NewRunner("cluster-a", control, runtime)
 	if err := runner.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +89,9 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 	}
 	if control.reported[0].ObservedGeneration != 3 || control.reported[1].ObservedGeneration != 4 {
 		t.Fatalf("unexpected generations: %#v", control.reported)
+	}
+	if runtime.workload.AcceleratorBinding.ResourceName != "vendor.example/gpu" {
+		t.Fatalf("workload binding was not resolved: %#v", runtime.workload.AcceleratorBinding)
 	}
 	if control.reported[1].EvidenceRefs[0] != "job-evidence" {
 		t.Fatalf("missing workload evidence: %#v", control.reported[1])
