@@ -45,7 +45,6 @@ func (m *Memory) Desired(_ context.Context, clusterID domain.ID) ([]agent.Desire
 	return append([]agent.DesiredResource(nil), m.desired[clusterID]...), nil
 }
 
-
 func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.DesiredResource) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
