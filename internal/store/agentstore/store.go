@@ -27,4 +27,6 @@ type Store interface {
 	UpsertDesired(context.Context, domain.ID, agent.DesiredResource) error
 	DeleteDesired(context.Context, domain.ID, string, domain.ID) error
 	Report(context.Context, domain.ID, []agent.Observation) error
+	ClaimReconcileLease(context.Context, domain.ID, string, domain.ID, string, int64) (bool, error)
+	ReleaseReconcileLease(context.Context, domain.ID, string, domain.ID, string) error
 }
