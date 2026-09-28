@@ -154,3 +154,23 @@ export CONTROL_PLANE_ACCELERATOR_RESOURCE=nvidia.com/gpu
 ## Project direction
 
 The repository is a clean-break control-plane implementation. Legacy GPU job APIs, DAG APIs, multi-cloud job providers, and their task-state model are not part of the application surface and will be removed as the v1 control plane reaches feature parity with the new architecture.
+
+
+### Fake GPU Golden Path
+
+After the CPU Golden Path is healthy, a CPU-only kind node can advertise synthetic
+`nvidia.com/gpu` resources through the Run:ai Fake GPU Operator:
+
+```bash
+make install-fake-gpu
+kubectl get nodes -o custom-columns=NAME:.metadata.name,GPU:.status.allocatable.nvidia\\.com/gpu
+make e2e-gpu-golden
+```
+
+This acceptance path keeps the public intent portable (`a100-80g`) while the
+ComputePool binding maps it to the provider-private Kubernetes resource
+`nvidia.com/gpu`. It validates Kueue admission, the materialized Job GPU request,
+and terminal ObservedState without requiring physical GPU hardware.
+
+The fake GPU path is a scheduler/control-plane test. CUDA/NVML fidelity, HAMi and
+DRA remain separate later-stage acceptance profiles.
