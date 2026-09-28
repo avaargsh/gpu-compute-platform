@@ -12,12 +12,13 @@ from app.models.control_plane_resource import ControlPlaneResource
 
 
 class SQLAlchemyResourceStore:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, owner_id: str | None = None):
         self.session = session
+        self.owner_id = owner_id
 
     async def get(self, key: str) -> ResourceRecord | None:
         row = await self.session.get(ControlPlaneResource, key)
-        if row is None:
+        if row is None or (self.owner_id is not None and row.owner_id != self.owner_id):
             return None
         return ResourceRecord(
             key=row.key,
@@ -34,9 +35,13 @@ class SQLAlchemyResourceStore:
         payload = desired.model_dump(mode="json") if hasattr(desired, "model_dump") else desired
         row = await self.session.get(ControlPlaneResource, key)
         if row is None:
-            row = ControlPlaneResource(key=key, kind=key.split("/", 1)[0], generation=1, desired=payload, lifecycle={"finalizers": []})
+            if self.owner_id is None:
+                raise ValueError("owner_id is required when creating control-plane resources")
+            row = ControlPlaneResource(key=key, kind=key.split("/", 1)[0], owner_id=self.owner_id, generation=1, desired=payload, lifecycle={"finalizers": []})
             self.session.add(row)
         else:
+            if self.owner_id is not None and row.owner_id != self.owner_id:
+                raise PermissionError("resource belongs to another owner")
             row.generation += 1
             row.desired = payload
             row.observed = None
