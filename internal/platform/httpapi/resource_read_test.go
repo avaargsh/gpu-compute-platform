@@ -17,14 +17,20 @@ func TestGetWorkloadProjectsStatusWithoutExposingCluster(t *testing.T) {
 	bindings := NewMemoryPlacementResolver()
 	bindings.BindPool(domain.ClusterBinding{Metadata: domain.Metadata{Generation: 1}, PoolID: "pool-h100", ClusterID: "cluster-a", Provider: "kueue"})
 	if err := store.UpsertDesired(context.Background(), "cluster-a", agent.DesiredResource{
-		Kind: "Workload", ID: "train-1", Generation: 8,
-		Spec: map[string]any{"projectID": domain.ID("project-1"), "poolID": domain.ID("pool-h100"), "image": "example/train:v8"},
+		Kind: "Workload", ID: "train-1", Generation: 7,
+		Spec: map[string]any{"projectID": domain.ID("project-1"), "poolID": domain.ID("pool-h100"), "image": "example/train:v7"},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Report(context.Background(), "cluster-a", []agent.Observation{{
 		Kind: "Workload", ID: "train-1", ObservedGeneration: 7,
 	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertDesired(context.Background(), "cluster-a", agent.DesiredResource{
+		Kind: "Workload", ID: "train-1", Generation: 8,
+		Spec: map[string]any{"projectID": domain.ID("project-1"), "poolID": domain.ID("pool-h100"), "image": "example/train:v8"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
