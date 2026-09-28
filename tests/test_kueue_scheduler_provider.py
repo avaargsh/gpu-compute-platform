@@ -10,6 +10,7 @@ from app.control_plane.providers_kueue import KueueSchedulerProvider
 class FakeBatchClient:
     def __init__(self):
         self.created = None
+        self.exists = False
         self.deleted = None
         self.job = SimpleNamespace(
             metadata=SimpleNamespace(resource_version="42"),
@@ -18,6 +19,14 @@ class FakeBatchClient:
 
     def create_namespaced_job(self, namespace, body):
         self.created = (namespace, body)
+        self.exists = True
+
+    def read_namespaced_job(self, name, namespace):
+        if self.exists:
+            return self.job
+        exc = Exception("not found")
+        exc.status = 404
+        raise exc
 
     def read_namespaced_job_status(self, name, namespace):
         return self.job
@@ -82,3 +91,15 @@ async def test_invalid_binding_id_is_rejected():
     )
     with pytest.raises(ValueError):
         await provider.status("not-a-binding")
+
+
+@pytest.mark.asyncio
+async def test_submit_is_idempotent_when_job_already_exists():
+    client = FakeBatchClient()
+    client.exists = True
+    provider = KueueSchedulerProvider(
+        client, KueueBinding(namespace="team-a", local_queue="training")
+    )
+    binding_id = await provider.submit(workload())
+    assert binding_id == "team-a/train-qwen"
+    assert client.created is None
