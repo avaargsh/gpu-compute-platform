@@ -32,7 +32,7 @@ func TestMemoryReportStateMachine(t *testing.T) {
 
 	if err := store.Report(ctx, "cluster-a", []agent.Observation{{
 		Kind: "Workload", ID: "train-1", ObservedGeneration: 8,
-		Conditions: []domain.Condition{{Type: "Ready", Status: "False", Reason: "AwaitingPods", LastTransitionTime: t1}},
+		Conditions:   []domain.Condition{{Type: "Ready", Status: "False", Reason: "AwaitingPods", LastTransitionTime: t1}},
 		EvidenceRefs: []string{"evidence-v8-b"},
 	}}); err != nil {
 		t.Fatal(err)
