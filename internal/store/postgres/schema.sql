@@ -32,3 +32,26 @@ CREATE INDEX IF NOT EXISTS desired_resources_cluster_generation_idx
 
 CREATE INDEX IF NOT EXISTS resource_observations_cluster_generation_idx
     ON resource_observations (cluster_id, observed_generation);
+
+
+CREATE TABLE IF NOT EXISTS project_bindings (
+    project_id TEXT PRIMARY KEY,
+    cluster_id TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    generation BIGINT NOT NULL DEFAULT 1,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS cluster_bindings (
+    pool_id TEXT PRIMARY KEY,
+    cluster_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    generation BIGINT NOT NULL DEFAULT 1,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS project_bindings_cluster_idx
+    ON project_bindings (cluster_id);
+
+CREATE INDEX IF NOT EXISTS cluster_bindings_cluster_idx
+    ON cluster_bindings (cluster_id);
