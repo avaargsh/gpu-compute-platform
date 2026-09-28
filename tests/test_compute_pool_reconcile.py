@@ -21,7 +21,10 @@ class FakeCustomObjectsClient:
 
     def create_cluster_custom_object(self, group, version, plural, body):
         key = (plural, body["metadata"]["name"])
-        body = dict(body)\n        if plural == "clusterqueues":\n            body["status"] = {"conditions": [{"type": "Active", "status": "True"}]}\n        self.cluster[key] = body
+        body = dict(body)
+        if plural == "clusterqueues":
+            body["status"] = {"conditions": [{"type": "Active", "status": "True"}]}
+        self.cluster[key] = body
         return body
 
     def get_namespaced_custom_object(self, group, version, namespace, plural, name):
@@ -32,7 +35,10 @@ class FakeCustomObjectsClient:
 
     def create_namespaced_custom_object(self, group, version, namespace, plural, body):
         key = (namespace, plural, body["metadata"]["name"])
-        body = dict(body)\n        if plural == "localqueues":\n            body["status"] = {"conditions": [{"type": "Active", "status": "True"}]}\n        self.namespaced[key] = body
+        body = dict(body)
+        if plural == "localqueues":
+            body["status"] = {"conditions": [{"type": "Active", "status": "True"}]}
+        self.namespaced[key] = body
         return body
 
 
@@ -68,4 +74,12 @@ async def test_compute_pool_reconcile_is_idempotent_and_ready():
     assert ("team-a", "localqueues", "training") in client.namespaced
 
 
-@pytest.mark.asyncio\nasync def test_compute_pool_waits_until_queues_are_active():\n    client = FakeCustomObjectsClient()\n    reconciler = ComputePoolReconciler(client)\n    state = await reconciler.reconcile(pool(), generation=1)\n    client.cluster[("clusterqueues", "gpu-training")]["status"]["conditions"] = [{"type": "Active", "status": "False"}]\n    state = await reconciler.reconcile(pool(), generation=2)\n    assert state.phase.value == "progressing"\n    assert state.conditions[0].reason == "WaitingForQueues"\n
+@pytest.mark.asyncio
+async def test_compute_pool_waits_until_queues_are_active():
+    client = FakeCustomObjectsClient()
+    reconciler = ComputePoolReconciler(client)
+    state = await reconciler.reconcile(pool(), generation=1)
+    client.cluster[("clusterqueues", "gpu-training")]["status"]["conditions"] = [{"type": "Active", "status": "False"}]
+    state = await reconciler.reconcile(pool(), generation=2)
+    assert state.phase.value == "progressing"
+    assert state.conditions[0].reason == "WaitingForQueues"
