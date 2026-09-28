@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
 type Placement struct {
@@ -29,12 +30,16 @@ type MemoryPlacementResolver struct {
 	mu       sync.RWMutex
 	projects map[domain.ID]Placement
 	pools    map[domain.ID]Placement
+	projectGenerations map[domain.ID]int64
+	poolGenerations    map[domain.ID]int64
 }
 
 func NewMemoryPlacementResolver() *MemoryPlacementResolver {
 	return &MemoryPlacementResolver{
 		projects: make(map[domain.ID]Placement),
 		pools:    make(map[domain.ID]Placement),
+		projectGenerations: make(map[domain.ID]int64),
+		poolGenerations:    make(map[domain.ID]int64),
 	}
 }
 
@@ -45,7 +50,11 @@ func (r *MemoryPlacementResolver) BindProject(in domain.ProjectBinding) {
 func (r *MemoryPlacementResolver) UpsertProjectBinding(_ context.Context, in domain.ProjectBinding) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if in.Metadata.Generation < r.projectGenerations[in.ProjectID] {
+		return agentstore.ErrStaleGeneration
+	}
 	r.projects[in.ProjectID] = Placement{ClusterID: in.ClusterID, Namespace: in.Namespace}
+	r.projectGenerations[in.ProjectID] = in.Metadata.Generation
 	return nil
 }
 
@@ -56,10 +65,14 @@ func (r *MemoryPlacementResolver) BindPool(in domain.ClusterBinding) {
 func (r *MemoryPlacementResolver) UpsertClusterBinding(_ context.Context, in domain.ClusterBinding) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if in.Metadata.Generation < r.poolGenerations[in.PoolID] {
+		return agentstore.ErrStaleGeneration
+	}
 	current := r.pools[in.PoolID]
 	current.ClusterID = in.ClusterID
 	current.Provider = in.Provider
 	r.pools[in.PoolID] = current
+	r.poolGenerations[in.PoolID] = in.Metadata.Generation
 	return nil
 }
 
