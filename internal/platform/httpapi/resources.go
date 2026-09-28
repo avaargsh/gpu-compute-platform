@@ -119,8 +119,34 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 }
 
 type workloadView struct {
-	Spec   map[string]any `json:"spec"`
-	Status resourceState  `json:"status"`
+	Metadata  domain.Metadata     `json:"metadata"`
+	ProjectID domain.ID           `json:"projectId"`
+	PoolID    domain.ID           `json:"poolId"`
+	Spec      domain.WorkloadSpec `json:"spec"`
+	Status    resourceState       `json:"status"`
+}
+
+func projectWorkload(desired agent.DesiredResource) (workloadView, error) {
+	raw, err := json.Marshal(desired.Spec)
+	if err != nil {
+		return workloadView{}, err
+	}
+	var projected struct {
+		ProjectID domain.ID           `json:"projectID"`
+		PoolID    domain.ID           `json:"poolID"`
+		Image     string              `json:"image"`
+		Command   []string            `json:"command"`
+		Accelerator domain.AcceleratorRequest `json:"accelerator"`
+	}
+	if err := json.Unmarshal(raw, &projected); err != nil {
+		return workloadView{}, err
+	}
+	return workloadView{
+		Metadata: domain.Metadata{ID: desired.ID, Generation: desired.Generation},
+		ProjectID: projected.ProjectID,
+		PoolID: projected.PoolID,
+		Spec: domain.WorkloadSpec{Image: projected.Image, Command: projected.Command, Accelerator: projected.Accelerator},
+	}, nil
 }
 
 func (a *ResourceAPI) GetWorkload(w http.ResponseWriter, r *http.Request) {
@@ -149,15 +175,42 @@ func (a *ResourceAPI) GetWorkload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	status := projectResourceState(desired.Generation, observed, observation.ObservedGeneration, observation.Conditions, observation.EvidenceRefs)
-	status.Kind = desired.Kind
-	status.ID = desired.ID
-	writeJSON(w, http.StatusOK, workloadView{Spec: desired.Spec, Status: status})
+	out, err := projectWorkload(desired)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out.Status = projectResourceState(desired.Generation, observed, observation.ObservedGeneration, observation.Conditions, observation.EvidenceRefs)
+	out.Status.Kind = desired.Kind
+	out.Status.ID = desired.ID
+	writeJSON(w, http.StatusOK, out)
 }
 
 type computePoolView struct {
-	Spec   map[string]any `json:"spec"`
-	Status resourceState  `json:"status"`
+	Metadata  domain.Metadata      `json:"metadata"`
+	ProjectID domain.ID            `json:"projectId"`
+	Spec      domain.ComputePoolSpec `json:"spec"`
+	Status    resourceState        `json:"status"`
+}
+
+func projectComputePool(desired agent.DesiredResource) (computePoolView, error) {
+	raw, err := json.Marshal(desired.Spec)
+	if err != nil {
+		return computePoolView{}, err
+	}
+	var projected struct {
+		ProjectID    domain.ID                    `json:"projectID"`
+		Accelerators []domain.AcceleratorRequest `json:"accelerators"`
+		Scheduling   domain.SchedulingPolicy     `json:"scheduling"`
+	}
+	if err := json.Unmarshal(raw, &projected); err != nil {
+		return computePoolView{}, err
+	}
+	return computePoolView{
+		Metadata: domain.Metadata{ID: desired.ID, Generation: desired.Generation},
+		ProjectID: projected.ProjectID,
+		Spec: domain.ComputePoolSpec{Accelerators: projected.Accelerators, Scheduling: projected.Scheduling},
+	}, nil
 }
 
 func (a *ResourceAPI) GetComputePool(w http.ResponseWriter, r *http.Request) {
@@ -185,8 +238,13 @@ func (a *ResourceAPI) GetComputePool(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	status := projectResourceState(desired.Generation, observed, observation.ObservedGeneration, observation.Conditions, observation.EvidenceRefs)
-	status.Kind = desired.Kind
-	status.ID = desired.ID
-	writeJSON(w, http.StatusOK, computePoolView{Spec: desired.Spec, Status: status})
+	out, err := projectComputePool(desired)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out.Status = projectResourceState(desired.Generation, observed, observation.ObservedGeneration, observation.Conditions, observation.EvidenceRefs)
+	out.Status.Kind = desired.Kind
+	out.Status.ID = desired.ID
+	writeJSON(w, http.StatusOK, out)
 }

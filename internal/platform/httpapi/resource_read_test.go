@@ -45,7 +45,10 @@ func TestGetWorkloadProjectsStatusWithoutExposingCluster(t *testing.T) {
 	if got.Status.SyncState != "Reconciling" || got.Status.DesiredGeneration != 8 || got.Status.ObservedGeneration != 7 {
 		t.Fatalf("status=%#v", got.Status)
 	}
-	if got.Spec["image"] != "example/train:v8" {
+	if got.Metadata.ID != "train-1" || got.Metadata.Generation != 8 || got.ProjectID != "project-1" || got.PoolID != "pool-h100" {
+		t.Fatalf("identity=%#v", got)
+	}
+	if got.Spec.Image != "example/train:v8" {
 		t.Fatalf("spec=%#v", got.Spec)
 	}
 }
@@ -80,7 +83,11 @@ func TestGetComputePoolProjectsStatus(t *testing.T) {
 	bindings.BindPool(domain.ClusterBinding{Metadata: domain.Metadata{Generation: 1}, PoolID: "pool-h100", ClusterID: "cluster-a", Provider: "kueue"})
 	if err := store.UpsertDesired(context.Background(), "cluster-a", agent.DesiredResource{
 		Kind: "ComputePool", ID: "pool-h100", Generation: 4,
-		Spec: map[string]any{"projectID": domain.ID("project-1"), "scheduling": map[string]any{"mode": "default"}},
+		Spec: map[string]any{
+			"projectID": domain.ID("project-1"),
+			"accelerators": []domain.AcceleratorRequest{{Class: "h100", Quota: 8}},
+			"scheduling": domain.SchedulingPolicy{Mode: "default"},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +114,9 @@ func TestGetComputePoolProjectsStatus(t *testing.T) {
 	}
 	if got.Status.SyncState != "Synced" || got.Status.DesiredGeneration != 4 || got.Status.ObservedGeneration != 4 {
 		t.Fatalf("status=%#v", got.Status)
+	}
+	if got.Metadata.ID != "pool-h100" || got.Metadata.Generation != 4 || got.ProjectID != "project-1" || got.Spec.Scheduling.Mode != "default" || len(got.Spec.Accelerators) != 1 || got.Spec.Accelerators[0].Class != "h100" {
+		t.Fatalf("pool=%#v", got)
 	}
 	if len(got.Status.EvidenceRefs) != 1 || got.Status.EvidenceRefs[0] != "localqueue/pool-h100" {
 		t.Fatalf("evidence=%#v", got.Status.EvidenceRefs)
