@@ -29,6 +29,7 @@ def upgrade() -> None:
         sa.Column("generation", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("desired", sa.JSON(), nullable=False),
         sa.Column("observed", sa.JSON(), nullable=True),
+        sa.Column("observed_generation", sa.Integer(), nullable=True),
         sa.Column("lifecycle", sa.JSON(), nullable=False),
         sa.Column("lease_owner", sa.String(length=128), nullable=True),
         sa.Column("lease_until", sa.DateTime(timezone=True), nullable=True),
@@ -37,6 +38,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_control_plane_resources_kind", "control_plane_resources", ["kind"])
     op.create_index("ix_control_plane_resources_project_id", "control_plane_resources", ["project_id"])
+    op.create_index("ix_control_plane_resources_observed_generation", "control_plane_resources", ["observed_generation"])
     op.create_index("ix_control_plane_resources_lease_owner", "control_plane_resources", ["lease_owner"])
     op.create_index("ix_control_plane_resources_lease_until", "control_plane_resources", ["lease_until"])
     op.create_table(
@@ -60,6 +62,7 @@ def downgrade() -> None:
     op.drop_table("control_plane_resource_revisions")
     op.drop_index("ix_control_plane_resources_lease_until", table_name="control_plane_resources")
     op.drop_index("ix_control_plane_resources_lease_owner", table_name="control_plane_resources")
+    op.drop_index("ix_control_plane_resources_observed_generation", table_name="control_plane_resources")
     op.drop_index("ix_control_plane_resources_project_id", table_name="control_plane_resources")
     op.drop_index("ix_control_plane_resources_kind", table_name="control_plane_resources")
     op.drop_table("control_plane_resources")
