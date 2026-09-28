@@ -24,7 +24,8 @@ class KueueManifestBuilder:
     def __init__(self, binding: KueueBinding):
         self.binding = binding
 
-    def build_job(self, workload: WorkloadSpec) -> dict[str, Any]:
+    def build_job(self, workload: WorkloadSpec, generation: int | None = None) -> dict[str, Any]:
+        job_name = workload.name if generation is None else f"{workload.name}-g{generation}"
         resources = {
             "requests": {
                 self.binding.accelerator_resource: str(workload.accelerator.count),
@@ -50,12 +51,14 @@ class KueueManifestBuilder:
             "apiVersion": "batch/v1",
             "kind": "Job",
             "metadata": {
-                "name": workload.name,
+                "name": job_name,
                 "namespace": self.binding.namespace,
                 "labels": {
                     KUEUE_QUEUE_LABEL: self.binding.local_queue,
                     "compute.platform/workload-kind": workload.kind.value,
                     "compute.platform/compute-pool": workload.compute_pool.name,
+                    "compute.platform/workload": workload.name,
+                    **({"compute.platform/generation": str(generation)} if generation is not None else {}),
                 },
             },
             "spec": {
