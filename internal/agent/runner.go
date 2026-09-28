@@ -58,7 +58,6 @@ func (r *Runner) Sync(ctx context.Context) error {
 		return fmt.Errorf("index accelerator bindings: %w", err)
 	}
 
-	observations := make([]Observation, 0, len(desired))
 	for _, item := range desired {
 		key := item.Kind + "/" + string(item.ID)
 		state, retrying := r.retries[key]
@@ -81,36 +80,38 @@ func (r *Runner) Sync(ctx context.Context) error {
 		if !claimed {
 			continue
 		}
+
 		observation, reconcileErr := r.reconcile(ctx, item, bindings)
-		releaseErr := r.control.ReleaseReconcileLease(ctx, lease)
-		if releaseErr != nil {
-			return fmt.Errorf("release reconcile lease for %s: %w", key, releaseErr)
-		}
-		err = reconcileErr
-		if err != nil && provider.IsRetryable(err) {
+		if reconcileErr != nil && provider.IsRetryable(reconcileErr) {
 			r.scheduleRetry(key, item.Generation)
+			if err := r.control.ReleaseReconcileLease(ctx, lease); err != nil {
+				return fmt.Errorf("release reconcile lease for %s: %w", key, err)
+			}
 			continue
 		}
+
 		delete(r.retries, key)
-		if err != nil {
+		if reconcileErr != nil {
 			observation = Observation{
 				Kind:               item.Kind,
 				ID:                 item.ID,
 				ObservedGeneration: item.Generation,
 				Conditions: []domain.Condition{
-					{Type: "Ready", Status: "False", Reason: "ReconcileFailed", Message: err.Error()},
+					{Type: "Ready", Status: "False", Reason: "ReconcileFailed", Message: reconcileErr.Error()},
 				},
 			}
 		}
-		observations = append(observations, observation)
+
+		reportErr := r.control.Report(ctx, r.clusterID, []Observation{observation})
+		releaseErr := r.control.ReleaseReconcileLease(ctx, lease)
+		if reportErr != nil {
+			return fmt.Errorf("report observation for %s: %w", key, reportErr)
+		}
+		if releaseErr != nil {
+			return fmt.Errorf("release reconcile lease for %s: %w", key, releaseErr)
+		}
 	}
 
-	if len(observations) == 0 {
-		return nil
-	}
-	if err := r.control.Report(ctx, r.clusterID, observations); err != nil {
-		return fmt.Errorf("report observations: %w", err)
-	}
 	return nil
 }
 
