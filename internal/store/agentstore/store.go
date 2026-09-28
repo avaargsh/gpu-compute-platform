@@ -30,7 +30,7 @@ type Store interface {
 	GetObservation(context.Context, domain.ID, string, domain.ID) (agent.Observation, bool, error)
 	UpsertDesired(context.Context, domain.ID, agent.DesiredResource) error
 	MarkDesiredDeleting(context.Context, domain.ID, string, domain.ID, time.Time) error
-	FinalizeDesired(context.Context, domain.ID, string, domain.ID) error
+	FinalizeDesired(context.Context, domain.ID, string, domain.ID, int64) error
 	Report(context.Context, domain.ID, []agent.Observation) error
 	ClaimReconcileLease(context.Context, domain.ID, string, domain.ID, string, int64) (bool, error)
 	ReleaseReconcileLease(context.Context, domain.ID, string, domain.ID, string) error
