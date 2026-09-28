@@ -1,6 +1,7 @@
 package kueue
 
 import (
+	"context"
 	"testing"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
@@ -55,5 +56,26 @@ func TestProjectWorkloadFailsClosedWithoutBinding(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected missing accelerator binding to fail")
+	}
+}
+
+func TestDeleteWorkloadDoesNotRequireAcceleratorBinding(t *testing.T) {
+	client := &fakeClient{}
+	p := NewProvider(client)
+
+	got, err := p.DeleteWorkload(context.Background(), baseprovider.WorkloadProjection{
+		WorkloadID: "train-invalid",
+		ClusterID:  "cluster-a",
+		Namespace:  "project-1",
+		Generation: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Gone {
+		t.Fatal("workload cleanup must observe job gone")
+	}
+	if len(client.order) != 1 || client.order[0] != "delete-job:project-1/job-train-invalid" {
+		t.Fatalf("unexpected cleanup identity: %#v", client.order)
 	}
 }
