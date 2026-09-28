@@ -54,6 +54,10 @@ func (c *Client) ReleaseReconcileLease(ctx context.Context, in agent.ReconcileLe
 	return c.post(ctx, "/api/v1/agent/reconcile-lease/release", in)
 }
 
+func (c *Client) FinalizeDesired(ctx context.Context, in agent.FinalizeDesiredRequest) error {
+	return c.post(ctx, "/api/v1/agent/finalize-desired", in)
+}
+
 func (c *Client) Report(ctx context.Context, clusterID domain.ID, observations []agent.Observation) error {
 	payload := struct {
 		ClusterID    domain.ID           `json:"clusterId"`
