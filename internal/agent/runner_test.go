@@ -41,12 +41,14 @@ func (f *fakeControlPlane) ReleaseReconcileLease(_ context.Context, _ ReconcileL
 }
 
 type fakeRuntime struct {
+	poolCalls     int
 	workload      provider.WorkloadProjection
 	workloadErr   error
 	workloadCalls int
 }
 
-func (*fakeRuntime) ReconcilePool(_ context.Context, p provider.PoolProjection) (provider.PoolObservation, error) {
+func (f *fakeRuntime) ReconcilePool(_ context.Context, p provider.PoolProjection) (provider.PoolObservation, error) {
+	f.poolCalls++
 	return provider.PoolObservation{ObservedGeneration: p.Generation, EvidenceRefs: []string{"pool-evidence"}}, nil
 }
 
@@ -186,6 +188,9 @@ func TestRunnerSkipsProviderWhenLeaseIsContended(t *testing.T) {
 	}
 	if control.claimCalls != 1 {
 		t.Fatalf("claim calls=%d, want 1", control.claimCalls)
+	}
+	if runtime.poolCalls != 0 {
+		t.Fatalf("contended lease must suppress provider side effects, pool calls=%d", runtime.poolCalls)
 	}
 	if control.releaseCalls != 0 {
 		t.Fatalf("contended lease must not be released by non-owner, releases=%d", control.releaseCalls)
