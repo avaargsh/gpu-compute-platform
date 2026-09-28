@@ -52,7 +52,8 @@ func (a *ResourceAPI) UpsertComputePool(w http.ResponseWriter, r *http.Request) 
 	spec := map[string]any{
 		"projectID":    in.ProjectID,
 		"namespace":    projectPlacement.Namespace,
-		"accelerators": in.Spec.Accelerators,
+		"accelerators":        in.Spec.Accelerators,
+		"acceleratorBindings": in.Spec.AcceleratorBindings,
 		"scheduling":   in.Spec.Scheduling,
 	}
 	if err := a.store.UpsertDesired(r.Context(), poolPlacement.ClusterID, agent.DesiredResource{
@@ -212,7 +213,8 @@ func projectComputePool(desired agent.DesiredResource) (computePoolView, error) 
 	}
 	var projected struct {
 		ProjectID    domain.ID                   `json:"projectID"`
-		Accelerators []domain.AcceleratorRequest `json:"accelerators"`
+		Accelerators        []domain.AcceleratorRequest `json:"accelerators"`
+		AcceleratorBindings []domain.AcceleratorBinding `json:"acceleratorBindings"`
 		Scheduling   domain.SchedulingPolicy     `json:"scheduling"`
 	}
 	if err := json.Unmarshal(raw, &projected); err != nil {
@@ -221,7 +223,9 @@ func projectComputePool(desired agent.DesiredResource) (computePoolView, error) 
 	return computePoolView{
 		Metadata:  domain.Metadata{ID: desired.ID, Generation: desired.Generation},
 		ProjectID: projected.ProjectID,
-		Spec:      domain.ComputePoolSpec{Accelerators: projected.Accelerators, Scheduling: projected.Scheduling},
+		Spec: domain.ComputePoolSpec{
+			Accelerators: projected.Accelerators, AcceleratorBindings: projected.AcceleratorBindings, Scheduling: projected.Scheduling,
+		},
 	}, nil
 }
 
