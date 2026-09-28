@@ -22,7 +22,7 @@ class SQLAlchemyResourceStore:
         return row is not None and (self.project_id is None or row.project_id == self.project_id)
 
     async def get(self, key: str) -> ResourceRecord | None:
-        row = await self.session.get(ControlPlaneResource, key)
+        stmt = select(ControlPlaneResource).where(ControlPlaneResource.key == key).with_for_update()\n        row = (await self.session.execute(stmt)).scalar_one_or_none()
         if not self._owned(row):
             return None
         return ResourceRecord(
