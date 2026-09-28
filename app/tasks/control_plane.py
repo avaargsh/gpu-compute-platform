@@ -42,6 +42,8 @@ async def _reconcile_resource(resource_key: str) -> None:
                 reconciler = build_compute_pool_reconciler(control_plane_settings)
                 state = await reconciler.reconcile(pool, generation=record.generation)
                 written = await store.put_observed(resource_key, record.generation, state)
+                if written and state.phase.value not in {"ready", "failed"}:
+                    enqueue_reconcile(resource_key, countdown=2)
                 if written and state.phase.value == "ready":
                     import uuid
                     project_id = uuid.UUID(resource_key.split("/")[1])
@@ -83,7 +85,9 @@ async def _reconcile_resource(resource_key: str) -> None:
             provider = build_scheduler_reconcile_provider(control_plane_settings, pool)
             reconciler = Reconciler(provider)
             result = await reconciler.reconcile(workload, generation=record.generation)
-            await store.put_observed(resource_key, record.generation, result.state)
+            written = await store.put_observed(resource_key, record.generation, result.state)
+            if written and result.state.phase.value not in {"ready", "failed"}:
+                enqueue_reconcile(resource_key, countdown=2)
             revisions = SQLAlchemyRevisionStore(session)
             await revisions.upsert(resource_key, record.generation, result.state)
 
