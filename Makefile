@@ -1,9 +1,12 @@
 SHELL := /bin/bash
 
-.PHONY: migrate test contract-test kind-up install-kueue e2e-golden
+.PHONY: migrate compose-migrate test contract-test kind-up install-kueue e2e-golden
 
 migrate:
 	uv run alembic upgrade head
+
+compose-migrate:
+	docker compose run --rm app alembic upgrade head
 
 test:
 	uv run pytest -q
