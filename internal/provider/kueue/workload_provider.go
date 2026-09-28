@@ -31,7 +31,7 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 	conditions := []domain.Condition{
 		{
 			Type:               "Ready",
-			Status:             boolStatus(state.PodsReady && !state.Failed),
+			Status:             boolStatus((state.PodsReady || state.Succeeded) && !state.Failed),
 			Reason:             readyReason(state),
 			Message:            state.Message,
 			LastTransitionTime: now,
@@ -54,6 +54,14 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 			Reason:             conditionReason(state.PodsReady, "PodsReady", "AwaitingPods"),
 			LastTransitionTime: now,
 		},
+	}
+	if state.Succeeded {
+		conditions = append(conditions, domain.Condition{
+			Type:               "Succeeded",
+			Status:             "True",
+			Reason:             "JobSucceeded",
+			LastTransitionTime: now,
+		})
 	}
 	if state.Failed {
 		conditions = append(conditions, domain.Condition{
@@ -100,6 +108,8 @@ func readyReason(state JobObservation) string {
 	switch {
 	case state.Failed:
 		return "JobFailed"
+	case state.Succeeded:
+		return "JobSucceeded"
 	case state.PodsReady:
 		return "PodsReady"
 	case state.Admitted:
