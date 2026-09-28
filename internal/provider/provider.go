@@ -42,7 +42,10 @@ type WorkloadObservation struct {
 	EvidenceRefs       []string
 }
 
-type ComputeProvider interface {
+type PoolProvider interface {
 	ReconcilePool(context.Context, PoolProjection) (PoolObservation, error)
+}
+
+type WorkloadProvider interface {
 	ReconcileWorkload(context.Context, WorkloadProjection) (WorkloadObservation, error)
 }
