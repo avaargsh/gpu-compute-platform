@@ -14,6 +14,10 @@ on:
       - "go.mod"
       - "go.sum"
       - "Dockerfile.control-plane"
+      - "Makefile"
+      - "scripts/go-format.sh"
+      - "scripts/e2e/go-kind-kueue-golden.sh"
+      - "scripts/e2e/install-fake-gpu.sh"
       - "internal/**/*.sql"
       - ".github/workflows/go-control-plane.yml"
 
