@@ -36,14 +36,14 @@ func (r *PoolReconciler) Reconcile(
 	}
 
 	observed, err := r.provider.ReconcilePool(ctx, provider.PoolProjection{
-		PoolID:       pool.Metadata.ID,
-		ProjectID:    pool.ProjectID,
-		ClusterID:    clusterBinding.ClusterID,
-		Namespace:    projectBinding.Namespace,
-		Generation:   pool.Metadata.Generation,
+		PoolID:              pool.Metadata.ID,
+		ProjectID:           pool.ProjectID,
+		ClusterID:           clusterBinding.ClusterID,
+		Namespace:           projectBinding.Namespace,
+		Generation:          pool.Metadata.Generation,
 		Accelerators:        pool.Spec.Accelerators,
 		AcceleratorBindings: pool.Spec.AcceleratorBindings,
-		Scheduling:   pool.Spec.Scheduling,
+		Scheduling:          pool.Spec.Scheduling,
 	})
 	if err != nil {
 		return domain.ResourceStatus{}, nil, err
