@@ -18,8 +18,8 @@ from app.control_plane.runtime_openai import OpenAICompatibleRuntimeProvider
 class NativeKubernetesServingBinding:
     namespace: str
     accelerator_resource: str = "nvidia.com/gpu"
-    image_vllm: str = "vllm/vllm-openai"
-    image_sglang: str = "lmsysorg/sglang"
+    image_vllm: str
+    image_sglang: str
 
 
 class NativeKubernetesManifestBuilder:
