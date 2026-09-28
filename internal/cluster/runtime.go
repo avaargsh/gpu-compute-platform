@@ -1,8 +1,10 @@
 package cluster
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/provider"
 	"github.com/avaargsh/gpu-compute-platform/internal/provider/kueue"
 )
 
@@ -18,4 +20,18 @@ func NewRuntime(clients *Clients) (*Runtime, error) {
 	return &Runtime{
 		Kueue: kueue.NewProvider(kubeClient),
 	}, nil
+}
+
+func (r *Runtime) ReconcilePool(ctx context.Context, in provider.PoolProjection) (provider.PoolObservation, error) {
+	if r == nil || r.Kueue == nil {
+		return provider.PoolObservation{}, fmt.Errorf("kueue provider is unavailable")
+	}
+	return r.Kueue.ReconcilePool(ctx, in)
+}
+
+func (r *Runtime) ReconcileWorkload(ctx context.Context, in provider.WorkloadProjection) (provider.WorkloadObservation, error) {
+	if r == nil || r.Kueue == nil {
+		return provider.WorkloadObservation{}, fmt.Errorf("kueue provider is unavailable")
+	}
+	return r.Kueue.ReconcileWorkload(ctx, in)
 }
