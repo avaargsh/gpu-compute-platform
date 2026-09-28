@@ -32,7 +32,7 @@ def test_serving_contract_separates_model_runtime_and_capacity():
         compute_pool=ComputePoolRef(name="inference"),
         serving=ServingConfig(
             runtime=RuntimeKind.VLLM,
-            accelerator=AcceleratorRequest(class_name="h100-80g", count=2),
+            accelerator=AcceleratorClass(name="h100-80g", count=2),
             tensor_parallelism=2,
         ),
     )
