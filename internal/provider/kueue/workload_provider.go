@@ -110,4 +110,3 @@ func readyReason(state JobObservation) string {
 		return "Pending"
 	}
 }
-}
