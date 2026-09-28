@@ -1,5 +1,6 @@
 from app.control_plane.domain import (
-    AcceleratorClass,\n    AcceleratorRequest,
+    AcceleratorClass,
+    AcceleratorRequest,
     ComputePoolRef,
     DeploymentSpec,
     ModelRevisionRef,
