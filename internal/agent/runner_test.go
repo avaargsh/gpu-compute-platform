@@ -17,6 +17,7 @@ type fakeControlPlane struct {
 	denyLease     bool
 	claimCalls    int
 	releaseCalls  int
+	reportBeforeRelease bool
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }
@@ -25,6 +26,9 @@ func (f *fakeControlPlane) PullDesired(context.Context, domain.ID) ([]DesiredRes
 	return f.desired, nil
 }
 func (f *fakeControlPlane) Report(_ context.Context, _ domain.ID, observations []Observation) error {
+	if f.releaseCalls == 0 {
+		f.reportBeforeRelease = true
+	}
 	f.reported = append(f.reported, observations...)
 	return nil
 }
@@ -108,6 +112,9 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 	runner := NewRunner("cluster-a", control, runtime)
 	if err := runner.Sync(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if !control.reportBeforeRelease {
+		t.Fatal("observation must be reported before reconcile lease release")
 	}
 	if len(control.reported) != 2 {
 		t.Fatalf("reported=%d, want 2", len(control.reported))
