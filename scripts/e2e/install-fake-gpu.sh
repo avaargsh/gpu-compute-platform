@@ -32,7 +32,11 @@ deadline=$((SECONDS + TIMEOUT_SECONDS))
 while (( SECONDS < deadline )); do
   allocatable="$(kubectl get node "$node" -o jsonpath='{.status.allocatable.nvidia\.com/gpu}' 2>/dev/null || true)"
   if [[ -n "$allocatable" && "$allocatable" != "0" ]]; then
-    echo "Fake GPU ready: node=$node nvidia.com/gpu=$allocatable"
+    # fake-gpu-operator publishes its own simulated product label (for example
+    # Tesla-K80). Override it only after the operator is ready so the kind node
+    # represents the H100 flavor exercised by this acceptance test.
+    kubectl label node "$node" nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3 --overwrite
+    echo "Fake GPU ready: node=$node nvidia.com/gpu=$allocatable product=NVIDIA-H100-80GB-HBM3"
     exit 0
   fi
   sleep 2
