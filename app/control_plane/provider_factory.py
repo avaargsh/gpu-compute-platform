@@ -4,6 +4,7 @@ from kubernetes import client, config
 
 from app.control_plane.adapters.kueue import KueueBinding
 from app.control_plane.compute_pool import ComputePool
+from app.control_plane.compute_pool_reconcile import ComputePoolReconciler
 from app.control_plane.config import ControlPlaneSettings
 from app.control_plane.providers_kueue import KueueSchedulerProvider
 from app.control_plane.scheduler_reconcile import SchedulerReconcileProvider
@@ -35,3 +36,10 @@ def build_scheduler_reconcile_provider(settings: ControlPlaneSettings, pool: Com
         ),
     )
     return SchedulerReconcileProvider(scheduler)
+
+
+def build_compute_pool_reconciler(settings: ControlPlaneSettings) -> ComputePoolReconciler:
+    if settings.scheduler_provider != "kueue":
+        raise RuntimeError("Kueue is not enabled")
+    _load_kubernetes(settings)
+    return ComputePoolReconciler(client.CustomObjectsApi())
