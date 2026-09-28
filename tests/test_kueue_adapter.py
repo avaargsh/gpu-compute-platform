@@ -1,4 +1,4 @@
-from app.control_plane.domain import AcceleratorClass, ComputePoolRef, WorkloadKind, WorkloadSpec
+from app.control_plane.domain import AcceleratorRequest, ComputePoolRef, WorkloadKind, WorkloadSpec
 from app.control_plane.adapters.kueue import KUEUE_QUEUE_LABEL, KueueBinding, KueueManifestBuilder
 
 
@@ -7,12 +7,16 @@ def test_kueue_job_uses_local_queue_and_gpu_request():
         name="train-qwen",
         kind=WorkloadKind.TRAINING,
         compute_pool=ComputePoolRef(name="training"),
-        accelerator=AcceleratorClass(name="h100-80g", family="H100", count=8),
+        accelerator=AcceleratorRequest(class_name="h100-80gb", count=8),
         image="trainer:v1",
         command=["python", "train.py"],
     )
     manifest = KueueManifestBuilder(
-        KueueBinding(namespace="team-a", local_queue="training")
+        KueueBinding(
+            namespace="team-a",
+            local_queue="training",
+            accelerator_resources={"h100-80gb": "nvidia.com/gpu"},
+        )
     ).build_job(workload)
 
     assert manifest["metadata"]["labels"][KUEUE_QUEUE_LABEL] == "training"
@@ -28,14 +32,14 @@ def test_accelerator_resource_is_provider_binding_not_domain_field():
         name="train-alt",
         kind=WorkloadKind.TRAINING,
         compute_pool=ComputePoolRef(name="training"),
-        accelerator=AcceleratorClass(name="accelerator", count=2),
+        accelerator=AcceleratorRequest(class_name="vendor-x", count=2),
         image="trainer:v1",
     )
     manifest = KueueManifestBuilder(
         KueueBinding(
             namespace="team-a",
             local_queue="training",
-            accelerator_resource="vendor.example/accelerator",
+            accelerator_resources={"vendor-x": "vendor.example/accelerator"},
         )
     ).build_job(workload)
 
