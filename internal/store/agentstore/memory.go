@@ -2,11 +2,18 @@ package agentstore
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 )
+
+type memoryLease struct {
+	owner string
+	until time.Time
+}
 
 type Memory struct {
 	mu            sync.RWMutex
@@ -14,6 +21,8 @@ type Memory struct {
 	heartbeats    map[domain.ID]agent.Heartbeat
 	desired       map[domain.ID][]agent.DesiredResource
 	observations  map[domain.ID][]agent.Observation
+	leases        map[string]memoryLease
+	now           func() time.Time
 }
 
 func NewMemory() *Memory {
@@ -22,6 +31,8 @@ func NewMemory() *Memory {
 		heartbeats:    make(map[domain.ID]agent.Heartbeat),
 		desired:       make(map[domain.ID][]agent.DesiredResource),
 		observations:  make(map[domain.ID][]agent.Observation),
+		leases:        make(map[string]memoryLease),
+		now:           time.Now,
 	}
 }
 
@@ -178,4 +189,53 @@ func (m *Memory) Observations(clusterID domain.ID) []agent.Observation {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return append([]agent.Observation(nil), m.observations[clusterID]...)
+}
+
+func (m *Memory) ClaimReconcileLease(
+	_ context.Context,
+	clusterID domain.ID,
+	kind string,
+	resourceID domain.ID,
+	owner string,
+	ttlSeconds int64,
+) (bool, error) {
+	if clusterID == "" || kind == "" || resourceID == "" || owner == "" {
+		return false, fmt.Errorf("reconcile lease identity is required")
+	}
+	if ttlSeconds <= 0 {
+		return false, fmt.Errorf("reconcile lease ttl must be positive")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
+	now := m.now().UTC()
+	current, ok := m.leases[key]
+	if ok && current.owner != owner && !current.until.Before(now) {
+		return false, nil
+	}
+	m.leases[key] = memoryLease{
+		owner: owner,
+		until: now.Add(time.Duration(ttlSeconds) * time.Second),
+	}
+	return true, nil
+}
+
+func (m *Memory) ReleaseReconcileLease(
+	_ context.Context,
+	clusterID domain.ID,
+	kind string,
+	resourceID domain.ID,
+	owner string,
+) error {
+	if owner == "" {
+		return fmt.Errorf("reconcile lease owner is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
+	if current, ok := m.leases[key]; ok && current.owner == owner {
+		delete(m.leases, key)
+	}
+	return nil
 }
