@@ -46,6 +46,8 @@ class KueueSchedulerProvider(SchedulerProvider):
         job = self._client.read_namespaced_job_status(name=name, namespace=namespace)
         status = getattr(job, "status", None)
         metadata = getattr(job, "metadata", None)
+        conditions = list(getattr(status, "conditions", None) or [])
+        condition_map = {getattr(item, "type", ""): getattr(item, "status", "") for item in conditions}
 
         active = int(getattr(status, "active", 0) or 0)
         succeeded = int(getattr(status, "succeeded", 0) or 0)
@@ -60,6 +62,9 @@ class KueueSchedulerProvider(SchedulerProvider):
         else:
             phase = "pending"
 
+        admitted = condition_map.get("QuotaReserved") == "True" or condition_map.get("Admitted") == "True"
+        evicted = condition_map.get("Evicted") == "True"
+
         return ProviderStatus(
             provider="kueue",
             binding_id=binding_id,
@@ -68,6 +73,9 @@ class KueueSchedulerProvider(SchedulerProvider):
             succeeded=succeeded,
             failed=failed,
             resource_version=getattr(metadata, "resource_version", None),
+            admitted=admitted,
+            evicted=evicted,
+            conditions=condition_map,
         )
 
     async def cancel(self, binding_id: str) -> None:
