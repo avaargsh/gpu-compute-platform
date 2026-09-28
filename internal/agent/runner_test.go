@@ -299,7 +299,6 @@ func TestRunnerDeletionCleansDependentsBeforePoolAndFinalizesAfterGone(t *testin
 	}
 }
 
-
 func TestRunnerDeletionReplaysAfterFinalObservationFailure(t *testing.T) {
 	now := time.Date(2026, 9, 29, 4, 0, 0, 0, time.UTC)
 	control := &fakeControlPlane{
@@ -309,7 +308,7 @@ func TestRunnerDeletionReplaysAfterFinalObservationFailure(t *testing.T) {
 			Finalizers: []string{"gpu-compute-platform.io/provider-cleanup"},
 			Spec: map[string]any{
 				"poolID": "pool-1", "namespace": "project-1",
-				"image": "example/train:latest",
+				"image":       "example/train:latest",
 				"accelerator": map[string]any{"class": "h100", "quota": float64(1)},
 			},
 		}},
@@ -350,7 +349,7 @@ func TestRunnerDeletionReplaysAfterFinalizeFailure(t *testing.T) {
 			Finalizers: []string{"gpu-compute-platform.io/provider-cleanup"},
 			Spec: map[string]any{
 				"poolID": "pool-1", "namespace": "project-1",
-				"image": "example/train:latest",
+				"image":       "example/train:latest",
 				"accelerator": map[string]any{"class": "h100", "quota": float64(1)},
 			},
 		}},
