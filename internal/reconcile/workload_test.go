@@ -21,16 +21,16 @@ func TestWorkloadReconcilerResolvesPoolAcceleratorBinding(t *testing.T) {
 	fp := &fakeWorkloadProvider{}
 	r := NewWorkloadReconciler(fp)
 	workload := domain.Workload{
-		Metadata: domain.Metadata{ID: "train-1", Generation: 3},
+		Metadata:  domain.Metadata{ID: "train-1", Generation: 3},
 		ProjectID: "project-1",
-		PoolID: "pool-1",
+		PoolID:    "pool-1",
 		Spec: domain.WorkloadSpec{
-			Image: "example/train:latest",
+			Image:       "example/train:latest",
 			Accelerator: domain.AcceleratorRequest{Class: "h100-80g", Quota: 2},
 		},
 	}
 	pool := domain.ComputePool{
-		Metadata: domain.Metadata{ID: "pool-1"},
+		Metadata:  domain.Metadata{ID: "pool-1"},
 		ProjectID: "project-1",
 		Spec: domain.ComputePoolSpec{AcceleratorBindings: []domain.AcceleratorBinding{{
 			Class: "h100-80g", ResourceName: "vendor.example/gpu", Flavor: "h100",
@@ -52,10 +52,10 @@ func TestWorkloadReconcilerFailsClosedWhenClassIsUnbound(t *testing.T) {
 	r := NewWorkloadReconciler(&fakeWorkloadProvider{})
 	_, err := r.Reconcile(context.Background(),
 		domain.Workload{
-			Metadata: domain.Metadata{ID: "train-1"},
+			Metadata:  domain.Metadata{ID: "train-1"},
 			ProjectID: "project-1",
-			PoolID: "pool-1",
-			Spec: domain.WorkloadSpec{Image: "example/train:latest", Accelerator: domain.AcceleratorRequest{Class: "h100-80g", Quota: 1}},
+			PoolID:    "pool-1",
+			Spec:      domain.WorkloadSpec{Image: "example/train:latest", Accelerator: domain.AcceleratorRequest{Class: "h100-80g", Quota: 1}},
 		},
 		domain.ComputePool{Metadata: domain.Metadata{ID: "pool-1"}, ProjectID: "project-1"},
 		domain.ProjectBinding{ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "project-1"},
