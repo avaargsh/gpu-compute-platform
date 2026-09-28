@@ -11,12 +11,12 @@ import (
 )
 
 type fakeControlPlane struct {
-	desired      []DesiredResource
-	reported     []Observation
-	leaseClaimed bool
-	denyLease    bool
-	claimCalls   int
-	releaseCalls int
+	desired             []DesiredResource
+	reported            []Observation
+	leaseClaimed        bool
+	denyLease           bool
+	claimCalls          int
+	releaseCalls        int
 	reportBeforeRelease bool
 }
 
