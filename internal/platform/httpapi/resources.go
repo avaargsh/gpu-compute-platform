@@ -33,12 +33,12 @@ func (a *ResourceAPI) UpsertComputePool(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "resource id must match path", http.StatusBadRequest)
 		return
 	}
-	projectPlacement, err := a.placement.ResolveProject(in.ProjectID)
+	projectPlacement, err := a.placement.ResolveProject(r.Context(), in.ProjectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	poolPlacement, err := a.placement.ResolvePool(in.Metadata.ID)
+	poolPlacement, err := a.placement.ResolvePool(r.Context(), in.Metadata.ID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
@@ -77,12 +77,12 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "resource id must match path", http.StatusBadRequest)
 		return
 	}
-	projectPlacement, err := a.placement.ResolveProject(in.ProjectID)
+	projectPlacement, err := a.placement.ResolveProject(r.Context(), in.ProjectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	poolPlacement, err := a.placement.ResolvePool(in.PoolID)
+	poolPlacement, err := a.placement.ResolvePool(r.Context(), in.PoolID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
