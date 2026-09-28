@@ -120,15 +120,48 @@ func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.
 	return nil
 }
 
-func (m *Memory) DeleteDesired(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID) error {
+func (m *Memory) MarkDesiredDeleting(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID, at time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	items := m.desired[clusterID]
+	for i := range items {
+		if items[i].Kind == kind && items[i].ID == resourceID {
+			if items[i].DeletionTimestamp == nil {
+				ts := at.UTC()
+				items[i].DeletionTimestamp = &ts
+			}
+			hasFinalizer := false
+			for _, finalizer := range items[i].Finalizers {
+				if finalizer == ProviderCleanupFinalizer {
+					hasFinalizer = true
+					break
+				}
+			}
+			if !hasFinalizer {
+				items[i].Finalizers = append(items[i].Finalizers, ProviderCleanupFinalizer)
+			}
+			m.desired[clusterID] = items
+			return nil
+		}
+	}
+	return ErrDesiredNotFound
+}
+
+func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	items := m.desired[clusterID]
 	out := items[:0]
+	found := false
 	for _, item := range items {
-		if item.Kind != kind || item.ID != resourceID {
-			out = append(out, item)
+		if item.Kind == kind && item.ID == resourceID {
+			found = true
+			continue
 		}
+		out = append(out, item)
+	}
+	if !found {
+		return ErrDesiredNotFound
 	}
 	m.desired[clusterID] = append([]agent.DesiredResource(nil), out...)
 	return nil
