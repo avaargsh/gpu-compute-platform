@@ -13,7 +13,7 @@ class Provider:
         self.fail = fail
         self.deleted = []
 
-    async def apply(self, desired):
+    async def apply(self, desired, generation=None):
         if self.fail:
             raise RuntimeError("temporary provider failure")
         return "ns/item"
