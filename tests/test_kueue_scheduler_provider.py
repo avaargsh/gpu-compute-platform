@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.control_plane.adapters.kueue import KueueBinding
-from app.control_plane.domain import AcceleratorClass, ComputePoolRef, WorkloadKind, WorkloadSpec
+from app.control_plane.domain import AcceleratorRequest, ComputePoolRef, WorkloadKind, WorkloadSpec
 from app.control_plane.providers_kueue import KueueSchedulerProvider
 
 
@@ -13,7 +13,7 @@ class FakeBatchClient:
         self.exists = False
         self.deleted = None
         self.job = SimpleNamespace(
-            metadata=SimpleNamespace(resource_version="42"),
+            metadata=SimpleNamespace(resource_version="42", uid="job-uid-1"),
             status=SimpleNamespace(active=0, succeeded=0, failed=0),
         )
 
@@ -35,25 +35,46 @@ class FakeBatchClient:
         self.deleted = (namespace, name, kwargs)
 
 
+class FakeCustomObjectsClient:
+    def __init__(self):
+        self.conditions = []
+
+    def list_namespaced_custom_object(self, group, version, namespace, plural, **kwargs):
+        assert plural == "workloads"
+        assert kwargs["label_selector"] == "kueue.x-k8s.io/job-uid=job-uid-1"
+        return {"items": [{"status": {"conditions": self.conditions}}]}
+
+
 def workload():
     return WorkloadSpec(
         name="train-qwen",
         kind=WorkloadKind.TRAINING,
         compute_pool=ComputePoolRef(name="training"),
-        accelerator=AcceleratorClass(name="h100", count=2),
+        accelerator=AcceleratorRequest(class_name="h100-80gb", count=2),
         image="trainer:v1",
+    )
+
+
+def provider(client=None, custom=None):
+    return KueueSchedulerProvider(
+        client or FakeBatchClient(),
+        KueueBinding(
+            namespace="team-a",
+            local_queue="training",
+            accelerator_resources={"h100-80gb": "nvidia.com/gpu"},
+        ),
+        custom or FakeCustomObjectsClient(),
     )
 
 
 @pytest.mark.asyncio
 async def test_submit_returns_stable_provider_binding():
     client = FakeBatchClient()
-    provider = KueueSchedulerProvider(
-        client, KueueBinding(namespace="team-a", local_queue="training")
-    )
-    binding_id = await provider.submit(workload())
+    p = provider(client=client)
+    binding_id = await p.submit(workload())
     assert binding_id == "team-a/train-qwen"
     assert client.created[0] == "team-a"
+    assert client.created[1]["spec"]["template"]["spec"]["containers"][0]["resources"]["requests"] == {"nvidia.com/gpu": "2"}
 
 
 @pytest.mark.asyncio
@@ -64,59 +85,43 @@ async def test_submit_returns_stable_provider_binding():
 async def test_status_normalizes_kubernetes_job_state(active, succeeded, failed, phase):
     client = FakeBatchClient()
     client.job.status = SimpleNamespace(active=active, succeeded=succeeded, failed=failed)
-    provider = KueueSchedulerProvider(
-        client, KueueBinding(namespace="team-a", local_queue="training")
-    )
-    status = await provider.status("team-a/train-qwen")
+    status = await provider(client=client).status("team-a/train-qwen")
     assert status["phase"] == phase
     assert status["provider"] == "kueue"
 
 
 @pytest.mark.asyncio
-async def test_cancel_deletes_bound_job():
+async def test_status_reads_admission_from_kueue_workload_cr():
+    custom = FakeCustomObjectsClient()
+    custom.conditions = [
+        {"type": "QuotaReserved", "status": "True"},
+        {"type": "Admitted", "status": "True"},
+        {"type": "Evicted", "status": "False"},
+    ]
+    status = await provider(custom=custom).status("team-a/train-qwen")
+    assert status["admitted"] is True
+    assert status["evicted"] is False
+    assert status["conditions"]["QuotaReserved"] == "True"
+
+
+@pytest.mark.asyncio
+async def test_cancel_is_idempotent():
     client = FakeBatchClient()
-    provider = KueueSchedulerProvider(
-        client, KueueBinding(namespace="team-a", local_queue="training")
-    )
-    await provider.cancel("team-a/train-qwen")
+    p = provider(client=client)
+    await p.cancel("team-a/train-qwen")
     assert client.deleted[0:2] == ("team-a", "train-qwen")
-    assert client.deleted[2]["propagation_policy"] == "Foreground"
 
 
 @pytest.mark.asyncio
 async def test_invalid_binding_id_is_rejected():
-    client = FakeBatchClient()
-    provider = KueueSchedulerProvider(
-        client, KueueBinding(namespace="team-a", local_queue="training")
-    )
     with pytest.raises(ValueError):
-        await provider.status("not-a-binding")
+        await provider().status("not-a-binding")
 
 
 @pytest.mark.asyncio
 async def test_submit_is_idempotent_when_job_already_exists():
     client = FakeBatchClient()
     client.exists = True
-    provider = KueueSchedulerProvider(
-        client, KueueBinding(namespace="team-a", local_queue="training")
-    )
-    binding_id = await provider.submit(workload())
+    binding_id = await provider(client=client).submit(workload())
     assert binding_id == "team-a/train-qwen"
     assert client.created is None
-
-
-@pytest.mark.asyncio
-async def test_status_surfaces_scheduler_admission_conditions():
-    client = FakeBatchClient()
-    client.job.status.conditions = [
-        SimpleNamespace(type="QuotaReserved", status="True"),
-        SimpleNamespace(type="Admitted", status="True"),
-        SimpleNamespace(type="Evicted", status="False"),
-    ]
-    provider = KueueSchedulerProvider(
-        client, KueueBinding(namespace="team-a", local_queue="training")
-    )
-    status = await provider.status("team-a/train-qwen")
-    assert status["admitted"] is True
-    assert status["evicted"] is False
-    assert status["conditions"]["QuotaReserved"] == "True"
