@@ -13,7 +13,7 @@ on:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
-      - "Dockerfile.go"
+      - "Dockerfile.control-plane"
       - "internal/**/*.sql"
       - ".github/workflows/go-control-plane.yml"
 
@@ -45,7 +45,7 @@ jobs:
             exit 1
           fi
       - name: Vet
-        run: go vet ./cmd/... ./internal/...
+        run: go vet ./...
       - name: Test
         run: go test ./...
       - name: Build binaries
@@ -54,5 +54,5 @@ jobs:
           go build ./cmd/cluster-agent
       - name: Build container targets
         run: |
-          docker build -f Dockerfile.go --target control-plane -t gpu-control-plane:test .
-          docker build -f Dockerfile.go --target cluster-agent -t gpu-cluster-agent:test .
+          docker build -f Dockerfile.control-plane --target control-plane -t gpu-control-plane:test .
+          docker build -f Dockerfile.control-plane --target cluster-agent -t gpu-cluster-agent:test .
