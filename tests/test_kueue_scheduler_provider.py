@@ -12,7 +12,6 @@ class FakeBatchClient:
         self.created = None
         self.exists = False
         self.deleted = None
-        self.pods = []
         self.job = SimpleNamespace(
             metadata=SimpleNamespace(resource_version="42", uid="job-uid-1"),
             status=SimpleNamespace(active=0, succeeded=0, failed=0),
@@ -34,6 +33,14 @@ class FakeBatchClient:
 
     def delete_namespaced_job(self, name, namespace, **kwargs):
         self.deleted = (namespace, name, kwargs)
+
+
+class FakeCoreClient:
+    def __init__(self):
+        self.pods = []
+
+    def list_namespaced_pod(self, namespace, **kwargs):
+        return SimpleNamespace(items=self.pods)
 
 
 class FakeCustomObjectsClient:
@@ -65,6 +72,7 @@ def provider(client=None, custom=None, core=None):
             accelerator_resources={"h100-80gb": "nvidia.com/gpu"},
         ),
         custom or FakeCustomObjectsClient(),
+        core or FakeCoreClient(),
     )
 
 
@@ -132,9 +140,10 @@ async def test_submit_is_idempotent_when_job_already_exists():
 async def test_status_reports_ready_pods():
     client = FakeBatchClient()
     client.job.status = SimpleNamespace(active=1, succeeded=0, failed=0)
-    core = FakeCoreClient()\n    core.pods = [
+    core = FakeCoreClient()
+    core.pods = [
         SimpleNamespace(status=SimpleNamespace(conditions=[SimpleNamespace(type="Ready", status="True")])),
         SimpleNamespace(status=SimpleNamespace(conditions=[SimpleNamespace(type="Ready", status="False")])),
     ]
-    status = await provider(client=client).status("team-a/train-qwen")
+    status = await provider(client=client, core=core).status("team-a/train-qwen")
     assert status["pods_ready"] == 1
