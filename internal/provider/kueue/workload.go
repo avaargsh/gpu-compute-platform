@@ -13,6 +13,7 @@ type Job struct {
 	Image       string
 	Command     []string
 	Resources   map[string]int64
+	Labels      map[string]string
 	Annotations map[string]string
 }
 
@@ -36,8 +37,10 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 		Resources: map[string]int64{
 			gpuResourceName: in.Accelerator.Quota,
 		},
+		Labels: map[string]string{
+			"kueue.x-k8s.io/queue-name": resourceName("lq", string(in.PoolID)),
+		},
 		Annotations: map[string]string{
-			"kueue.x-k8s.io/queue-name":    resourceName("lq", string(in.PoolID)),
 			"ai.compute/accelerator-class": in.Accelerator.Class,
 		},
 	}, nil
