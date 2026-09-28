@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/provider"
@@ -14,14 +15,28 @@ type Runtime interface {
 	ReconcileWorkload(context.Context, provider.WorkloadProjection) (provider.WorkloadObservation, error)
 }
 
+type retryState struct {
+	generation int64
+	attempt    int
+	nextAt     time.Time
+}
+
 type Runner struct {
 	clusterID domain.ID
 	control   ControlPlane
 	runtime   Runtime
+	now       func() time.Time
+	retries   map[string]retryState
 }
 
 func NewRunner(clusterID domain.ID, control ControlPlane, runtime Runtime) *Runner {
-	return &Runner{clusterID: clusterID, control: control, runtime: runtime}
+	return &Runner{
+		clusterID: clusterID,
+		control:   control,
+		runtime:   runtime,
+		now:       time.Now,
+		retries:   make(map[string]retryState),
+	}
 }
 
 func (r *Runner) Sync(ctx context.Context) error {
@@ -41,7 +56,22 @@ func (r *Runner) Sync(ctx context.Context) error {
 
 	observations := make([]Observation, 0, len(desired))
 	for _, item := range desired {
+		key := item.Kind + "/" + string(item.ID)
+		state, retrying := r.retries[key]
+		if retrying && state.generation != item.Generation {
+			delete(r.retries, key)
+			retrying = false
+		}
+		if retrying && r.now().Before(state.nextAt) {
+			continue
+		}
+
 		observation, err := r.reconcile(ctx, item, bindings)
+		if err != nil && provider.IsRetryable(err) {
+			r.scheduleRetry(key, item.Generation)
+			continue
+		}
+		delete(r.retries, key)
 		if err != nil {
 			observation = Observation{
 				Kind:               item.Kind,
@@ -154,4 +184,24 @@ func indexAcceleratorBindings(desired []DesiredResource) (map[domain.ID]map[stri
 		out[item.ID] = poolBindings
 	}
 	return out, nil
+}
+
+func (r *Runner) scheduleRetry(key string, generation int64) {
+	state := r.retries[key]
+	if state.generation != generation {
+		state = retryState{generation: generation}
+	}
+	state.attempt++
+	state.nextAt = r.now().Add(retryBackoff(state.attempt))
+	r.retries[key] = state
+}
+
+func retryBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > 6 {
+		attempt = 6
+	}
+	return time.Second * time.Duration(1<<(attempt-1))
 }
