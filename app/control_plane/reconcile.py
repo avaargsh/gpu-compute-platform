@@ -23,7 +23,7 @@ class Reconciler:
     def __init__(self, provider: ReconcileProvider):
         self.provider = provider
 
-    async def reconcile(self, desired: Any) -> ReconcileResult:
+    async def reconcile(self, desired: Any, generation: int | None = None) -> ReconcileResult:
         provider_ref = await self.provider.apply(desired)
         raw = await self.provider.observe(provider_ref)
         phase = Phase(raw.get("phase", Phase.PENDING))
@@ -33,6 +33,7 @@ class Reconciler:
             status=ready,
             reason=raw.get("reason", phase.value),
             message=raw.get("message", ""),
+            observed_generation=generation,
         )
         evidence = [
             EvidenceRef.model_validate(item)
