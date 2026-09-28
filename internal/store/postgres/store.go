@@ -126,16 +126,20 @@ func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []
 
 	for _, item := range observations {
 		var previousJSON []byte
+		var previousGeneration int64
 		err := tx.QueryRowContext(ctx, `
-SELECT conditions
+SELECT observed_generation, conditions
 FROM resource_observations
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 FOR UPDATE
-`, clusterID, item.Kind, item.ID).Scan(&previousJSON)
+`, clusterID, item.Kind, item.ID).Scan(&previousGeneration, &previousJSON)
 		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
 		if err == nil {
+			if item.ObservedGeneration < previousGeneration {
+				continue
+			}
 			var previous []domain.Condition
 			if err := json.Unmarshal(previousJSON, &previous); err != nil {
 				return err
