@@ -135,3 +135,35 @@ This is an incremental migration, not a rewrite.
 ## Compatibility rule
 
 Legacy providers are allowed to use provider-specific fields internally. New public APIs and domain objects must remain provider-neutral unless the field is explicitly namespaced as a provider extension.
+
+
+## Device allocation path
+
+The preferred modern device path is Kubernetes Dynamic Resource Allocation (DRA).
+
+```text
+AcceleratorClass
+      |
+ DeviceProvider binding
+      |
+  DeviceClass
+      |
+ ResourceClaim
+      |
+ kube-scheduler + DRA driver
+      |
+ ResourceSlice / CDI
+      |
+ physical or partitioned device
+```
+
+The portable API describes accelerator intent; DeviceClass names, extended-resource
+names and vendor-specific slicing controls remain provider bindings.
+
+For Kubernetes clusters that have not migrated to DRA, compatibility providers may
+translate the same intent to legacy extended resources or HAMi-specific resources.
+This is a migration mechanism, not a second public resource model.
+
+Kubernetes 1.37 also supports DRA-backed extended resources, allowing legacy Pod
+resource requests to migrate to DRA allocation without changing every workload at
+once.
