@@ -36,7 +36,7 @@ ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
     owner = EXCLUDED.owner,
     lease_until = EXCLUDED.lease_until,
     updated_at = now()
-WHERE reconcile_leases.lease_until < $6
+WHERE reconcile_leases.lease_until <= $6
    OR reconcile_leases.owner = EXCLUDED.owner
 `, clusterID, kind, resourceID, owner, until, now)
 	if err != nil {
