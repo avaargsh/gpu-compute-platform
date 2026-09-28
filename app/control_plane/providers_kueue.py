@@ -15,6 +15,7 @@ class BatchClient(Protocol):
     def read_namespaced_job_status(self, name: str, namespace: str) -> Any: ...
     def read_namespaced_job(self, name: str, namespace: str) -> Any: ...
     def delete_namespaced_job(self, name: str, namespace: str, **kwargs: Any) -> Any: ...
+class CoreClient(Protocol):
     def list_namespaced_pod(self, namespace: str, **kwargs: Any) -> Any: ...
 
 
@@ -29,6 +30,7 @@ class KueueSchedulerProvider(SchedulerProvider):
     def __init__(self, batch_client: BatchClient, binding: KueueBinding, custom_client: CustomObjectsClient, core_client: CoreClient):
         self._client = batch_client
         self._custom = custom_client
+        self._core = core_client
         self._binding = binding
         self._builder = KueueManifestBuilder(binding)
 
