@@ -43,10 +43,17 @@ type WorkloadObservation struct {
 	EvidenceRefs       []string
 }
 
+type DeletionObservation struct {
+	Gone         bool
+	EvidenceRefs []string
+}
+
 type PoolProvider interface {
 	ReconcilePool(context.Context, PoolProjection) (PoolObservation, error)
+	DeletePool(context.Context, PoolProjection) (DeletionObservation, error)
 }
 
 type WorkloadProvider interface {
 	ReconcileWorkload(context.Context, WorkloadProjection) (WorkloadObservation, error)
+	DeleteWorkload(context.Context, WorkloadProjection) (DeletionObservation, error)
 }
