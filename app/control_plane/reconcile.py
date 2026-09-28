@@ -28,7 +28,38 @@ class Reconciler:
             provider_ref = await self.provider.apply(desired, generation=generation)
         except TypeError:
             provider_ref = await self.provider.apply(desired)
-        raw = await self.provider.observe(provider_ref)
+        try:
+            raw = await self.provider.observe(provider_ref)
+        except Exception as exc:
+            state = ObservedState(
+                phase=Phase.FAILED,
+                observed_generation=generation,
+                conditions=[
+                    Condition(
+                        type="ReconcileFailed",
+                        status=True,
+                        reason=type(exc).__name__,
+                        message=str(exc),
+                        observed_generation=generation,
+                    ),
+                    Condition(
+                        type="Ready",
+                        status=False,
+                        reason="ReconcileFailed",
+                        observed_generation=generation,
+                    ),
+                ],
+                provider_ref=provider_ref,
+                evidence_refs=[
+                    EvidenceRef(
+                        kind="reconcile-error",
+                        uri=f"control-plane://reconcile/{provider_ref}",
+                    )
+                ],
+                provider_status={"error_type": type(exc).__name__},
+            )
+            return ReconcileResult(provider_ref=provider_ref, state=state)
+
         phase = Phase(raw.get("phase", Phase.PENDING))
         ready = phase == Phase.READY
         condition = Condition(
@@ -44,7 +75,7 @@ class Reconciler:
         ]
         state = ObservedState(
             phase=phase,
-            conditions=[condition],
+            conditions=conditions,
             provider_ref=provider_ref,
             endpoint=raw.get("endpoint"),
             replicas_ready=raw.get("replicas_ready"),
