@@ -74,7 +74,8 @@ func jobObject(in Job) (*batchv1.Job, error) {
 		return nil, fmt.Errorf("positive gpu resource is required")
 	}
 	qty := *resource.NewQuantity(gpu, resource.DecimalSI)
-	labels := map[string]string{"ai.compute/workload": in.Name}
+	labels := cloneStringMap(in.Labels)
+	labels["ai.compute/workload"] = in.Name
 
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
