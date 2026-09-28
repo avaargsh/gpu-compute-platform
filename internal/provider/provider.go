@@ -22,6 +22,27 @@ type PoolObservation struct {
 	EvidenceRefs       []string
 }
 
+type WorkloadProjection struct {
+	WorkloadID  domain.ID
+	ProjectID   domain.ID
+	PoolID      domain.ID
+	ClusterID   domain.ID
+	Namespace   string
+	QueueName   string
+	Generation  int64
+	Image       string
+	Command     []string
+	Accelerator domain.AcceleratorRequest
+}
+
+type WorkloadObservation struct {
+	ObservedGeneration int64
+	Phase              string
+	Conditions         []domain.Condition
+	EvidenceRefs       []string
+}
+
 type ComputeProvider interface {
 	ReconcilePool(context.Context, PoolProjection) (PoolObservation, error)
+	ReconcileWorkload(context.Context, WorkloadProjection) (WorkloadObservation, error)
 }
