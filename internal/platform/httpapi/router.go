@@ -39,6 +39,7 @@ func NewRouterWithDependencies(store agentstore.Store, bindings BindingStore) ht
 		mux.HandleFunc("PUT /api/v1/compute-pools/{poolID}/migrations/{migrationID}/status", migrationAPI.UpdateStatus)
 		mux.HandleFunc("POST /api/v1/compute-pools/{poolID}/migrations/{migrationID}/prepare-cutover", migrationAPI.PrepareCutover)
 		mux.HandleFunc("POST /api/v1/compute-pools/{poolID}/migrations/{migrationID}/cutover", migrationAPI.Cutover)
+		mux.HandleFunc("POST /api/v1/compute-pools/{poolID}/migrations/{migrationID}/verify-target", migrationAPI.VerifyTarget)
 	}
 
 	resourceAPI := NewResourceAPI(store, bindings)

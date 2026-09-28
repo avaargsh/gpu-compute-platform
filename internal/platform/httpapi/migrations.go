@@ -192,3 +192,68 @@ func (a *MigrationAPI) Cutover(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }
+
+func (a *MigrationAPI) VerifyTarget(w http.ResponseWriter, r *http.Request) {
+	poolID := domain.ID(r.PathValue("poolID"))
+	migrationID := domain.ID(r.PathValue("migrationID"))
+	migration, err := a.store.GetPlacementMigration(r.Context(), poolID, migrationID)
+	if err != nil {
+		if errors.Is(err, agentstore.ErrPlacementMigrationNotFound) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if migration.Phase != domain.PlacementMigrationCutover {
+		http.Error(w, agentstore.ErrPlacementMigrationTransition.Error(), http.StatusConflict)
+		return
+	}
+	placement, err := a.store.ResolvePool(r.Context(), poolID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if placement.ClusterID != migration.TargetClusterID {
+		http.Error(w, agentstore.ErrPlacementTargetNotReady.Error(), http.StatusConflict)
+		return
+	}
+	desired, found, err := a.resources.GetDesired(r.Context(), migration.TargetClusterID, "ComputePool", poolID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, agentstore.ErrPlacementTargetNotReady.Error(), http.StatusConflict)
+		return
+	}
+	observation, observed, err := a.resources.GetObservation(r.Context(), migration.TargetClusterID, "ComputePool", poolID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !observed || observation.ObservedGeneration != desired.Generation || !conditionTrue(observation.Conditions, "Ready") {
+		http.Error(w, agentstore.ErrPlacementTargetNotReady.Error(), http.StatusConflict)
+		return
+	}
+	evidence := append([]string(nil), migration.EvidenceRefs...)
+	evidence = append(evidence, observation.EvidenceRefs...)
+	out, err := a.store.UpdatePlacementMigration(
+		r.Context(),
+		poolID,
+		migrationID,
+		domain.PlacementMigrationRetiring,
+		migration.Conditions,
+		evidence,
+	)
+	if err != nil {
+		if errors.Is(err, agentstore.ErrPlacementMigrationTransition) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
