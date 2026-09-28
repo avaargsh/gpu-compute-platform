@@ -130,6 +130,72 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 	return out, nil
 }
 
+
+func (c *KubeClient) DeleteJob(ctx context.Context, namespace, name string) (bool, error) {
+	if c.core == nil {
+		return false, fmt.Errorf("kubernetes client is required")
+	}
+	jobs := c.core.BatchV1().Jobs(namespace)
+	err := jobs.Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	_, err = jobs.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func (c *KubeClient) DeleteResourceFlavor(ctx context.Context, name string) (bool, error) {
+	return c.deleteDynamic(ctx, resourceFlavorGVR, "", name)
+}
+
+func (c *KubeClient) DeleteClusterQueue(ctx context.Context, name string) (bool, error) {
+	return c.deleteDynamic(ctx, clusterQueueGVR, "", name)
+}
+
+func (c *KubeClient) DeleteLocalQueue(ctx context.Context, namespace, name string) (bool, error) {
+	return c.deleteDynamic(ctx, localQueueGVR, namespace, name)
+}
+
+func (c *KubeClient) deleteDynamic(ctx context.Context, gvr schema.GroupVersionResource, namespace, name string) (bool, error) {
+	if c.dynamic == nil {
+		return false, fmt.Errorf("dynamic kubernetes client is required")
+	}
+	resource := c.dynamic.Resource(gvr)
+	if namespace != "" {
+		ns := resource.Namespace(namespace)
+		err := ns.Delete(ctx, name, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return false, err
+		}
+		_, err = ns.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	err := resource.Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	_, err = resource.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 func (c *KubeClient) apply(ctx context.Context, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
 	if c.dynamic == nil {
 		return fmt.Errorf("dynamic kubernetes client is required")
