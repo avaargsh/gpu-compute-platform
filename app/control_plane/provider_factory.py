@@ -27,6 +27,7 @@ def build_scheduler_reconcile_provider(settings: ControlPlaneSettings, pool: Com
     }
     scheduler = KueueSchedulerProvider(
         batch_client=client.BatchV1Api(),
+        custom_client=client.CustomObjectsApi(),
         binding=KueueBinding(
             namespace=pool.binding.namespace,
             local_queue=pool.binding.local_queue,
