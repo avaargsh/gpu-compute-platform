@@ -24,11 +24,12 @@ class KueueSchedulerProvider(SchedulerProvider):
         self._binding = binding
         self._builder = KueueManifestBuilder(binding)
 
-    async def submit(self, workload: WorkloadSpec) -> str:
-        manifest = self._builder.build_job(workload)
+    async def submit(self, workload: WorkloadSpec, generation: int | None = None) -> str:
+        manifest = self._builder.build_job(workload, generation=generation)
+        job_name = manifest["metadata"]["name"]
         try:
             self._client.read_namespaced_job(
-                name=workload.name,
+                name=job_name,
                 namespace=self._binding.namespace,
             )
         except Exception as exc:
@@ -38,7 +39,7 @@ class KueueSchedulerProvider(SchedulerProvider):
                 namespace=self._binding.namespace,
                 body=manifest,
             )
-        return self._binding_id(workload.name)
+        return self._binding_id(job_name)
 
     async def status(self, binding_id: str) -> ProviderStatus:
         namespace, name = self._parse_binding_id(binding_id)
