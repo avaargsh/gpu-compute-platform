@@ -320,3 +320,34 @@ func TestObserveFailedJobPreservesKueueEvidence(t *testing.T) {
 		t.Fatalf("failed job lost kueue evidence: %#v", got)
 	}
 }
+
+func TestApplyExistingJobPreservesControllerStatus(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	client := NewKubeClient(coreClient, nil)
+	in := Job{
+		Name: "job-preserve-status", Namespace: "project-1", QueueName: "lq-pool",
+		Image: "busybox:1.36", Resources: map[string]int64{gpuResourceName: 1},
+	}
+	if err := client.ApplyJob(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	job, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, in.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job.Status.Succeeded = 1
+	if _, err := coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ApplyJob(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	got, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, in.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Succeeded != 1 {
+		t.Fatalf("reconcile erased controller-owned job status: %#v", got.Status)
+	}
+}

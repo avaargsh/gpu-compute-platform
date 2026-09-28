@@ -52,11 +52,12 @@ func (c *KubeClient) ApplyJob(ctx context.Context, in Job) error {
 	}
 
 	jobs := c.core.BatchV1().Jobs(in.Namespace)
-	current, err := jobs.Get(ctx, in.Name, metav1.GetOptions{})
+	_, err = jobs.Get(ctx, in.Name, metav1.GetOptions{})
 	if err == nil {
-		job.ResourceVersion = current.ResourceVersion
-		_, err = jobs.Update(ctx, job, metav1.UpdateOptions{})
-		return err
+		// Jobs are immutable execution objects. Re-applying an existing Job with
+		// Update would also overwrite controller-owned status on every agent tick.
+		// Desired generation changes must use an explicit replacement strategy.
+		return nil
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
