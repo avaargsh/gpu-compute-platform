@@ -15,11 +15,17 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.create_table("tenants", sa.Column("id", sa.String(length=36), primary_key=True), sa.Column("name", sa.String(length=128), nullable=False), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False))
+    op.create_table("projects", sa.Column("id", sa.String(length=36), primary_key=True), sa.Column("tenant_id", sa.String(length=36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False), sa.Column("name", sa.String(length=128), nullable=False), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False), sa.UniqueConstraint("tenant_id", "name", name="uq_project_tenant_name"))
+    op.create_index("ix_projects_tenant_id", "projects", ["tenant_id"])
+    op.create_table("project_members", sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True), sa.Column("project_id", sa.String(length=36), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False), sa.Column("user_id", sa.String(length=36), nullable=False), sa.Column("role", sa.String(length=32), nullable=False), sa.UniqueConstraint("project_id", "user_id", name="uq_project_member"))
+    op.create_index("ix_project_members_project_id", "project_members", ["project_id"])
+    op.create_index("ix_project_members_user_id", "project_members", ["user_id"])
     op.create_table(
         "control_plane_resources",
         sa.Column("key", sa.String(length=512), primary_key=True),
         sa.Column("kind", sa.String(length=64), nullable=False),
-        sa.Column("project_id", sa.String(length=36), nullable=False),
+        sa.Column("project_id", sa.String(length=36), sa.ForeignKey("projects.id", ondelete="CASCADE"), nullable=False),
         sa.Column("generation", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("desired", sa.JSON(), nullable=False),
         sa.Column("observed", sa.JSON(), nullable=True),
@@ -48,6 +54,12 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_control_plane_resource_revisions_resource_key", table_name="control_plane_resource_revisions")
     op.drop_table("control_plane_resource_revisions")
-    op.drop_index("ix_control_plane_resources_owner_id", table_name="control_plane_resources")
+    op.drop_index("ix_control_plane_resources_project_id", table_name="control_plane_resources")
     op.drop_index("ix_control_plane_resources_kind", table_name="control_plane_resources")
     op.drop_table("control_plane_resources")
+    op.drop_index("ix_project_members_user_id", table_name="project_members")
+    op.drop_index("ix_project_members_project_id", table_name="project_members")
+    op.drop_table("project_members")
+    op.drop_index("ix_projects_tenant_id", table_name="projects")
+    op.drop_table("projects")
+    op.drop_table("tenants")
