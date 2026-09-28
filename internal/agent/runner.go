@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -27,6 +29,7 @@ type Runner struct {
 	runtime   Runtime
 	now       func() time.Time
 	retries   map[string]retryState
+	leaseOwner string
 }
 
 func NewRunner(clusterID domain.ID, control ControlPlane, runtime Runtime) *Runner {
@@ -36,6 +39,7 @@ func NewRunner(clusterID domain.ID, control ControlPlane, runtime Runtime) *Runn
 		runtime:   runtime,
 		now:       time.Now,
 		retries:   make(map[string]retryState),
+		leaseOwner: newLeaseOwner(),
 	}
 }
 
@@ -66,7 +70,23 @@ func (r *Runner) Sync(ctx context.Context) error {
 			continue
 		}
 
-		observation, err := r.reconcile(ctx, item, bindings)
+		lease := ReconcileLeaseRequest{
+			ClusterID: r.clusterID, Kind: item.Kind, ResourceID: item.ID,
+			Owner: r.leaseOwner, TTLSeconds: 120,
+		}
+		claimed, err := r.control.ClaimReconcileLease(ctx, lease)
+		if err != nil {
+			return fmt.Errorf("claim reconcile lease for %s: %w", key, err)
+		}
+		if !claimed {
+			continue
+		}
+		observation, reconcileErr := r.reconcile(ctx, item, bindings)
+		releaseErr := r.control.ReleaseReconcileLease(ctx, lease)
+		if releaseErr != nil {
+			return fmt.Errorf("release reconcile lease for %s: %w", key, releaseErr)
+		}
+		err = reconcileErr
 		if err != nil && provider.IsRetryable(err) {
 			r.scheduleRetry(key, item.Generation)
 			continue
@@ -204,4 +224,12 @@ func retryBackoff(attempt int) time.Duration {
 		attempt = 6
 	}
 	return time.Second * time.Duration(1<<(attempt-1))
+}
+
+func newLeaseOwner() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return hex.EncodeToString(raw[:])
+	}
+	return fmt.Sprintf("agent-%d", time.Now().UnixNano())
 }
