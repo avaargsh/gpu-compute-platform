@@ -19,6 +19,7 @@ def upgrade() -> None:
         "control_plane_resources",
         sa.Column("key", sa.String(length=512), primary_key=True),
         sa.Column("kind", sa.String(length=64), nullable=False),
+        sa.Column("owner_id", sa.String(length=64), nullable=False),
         sa.Column("generation", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("desired", sa.JSON(), nullable=False),
         sa.Column("observed", sa.JSON(), nullable=True),
@@ -27,6 +28,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
     )
     op.create_index("ix_control_plane_resources_kind", "control_plane_resources", ["kind"])
+    op.create_index("ix_control_plane_resources_owner_id", "control_plane_resources", ["owner_id"])
     op.create_table(
         "control_plane_resource_revisions",
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
@@ -46,5 +48,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_control_plane_resource_revisions_resource_key", table_name="control_plane_resource_revisions")
     op.drop_table("control_plane_resource_revisions")
+    op.drop_index("ix_control_plane_resources_owner_id", table_name="control_plane_resources")
     op.drop_index("ix_control_plane_resources_kind", table_name="control_plane_resources")
     op.drop_table("control_plane_resources")
