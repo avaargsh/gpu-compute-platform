@@ -30,7 +30,7 @@ func TestGetWorkloadProjectsStatusWithoutExposingCluster(t *testing.T) {
 
 	server := httptest.NewServer(NewRouterWithDependencies(store, bindings))
 	defer server.Close()
-	resp, err := server.Client().Get(server.URL + "/api/v1/workloads/train-1?poolId=pool-h100")
+	resp, err := server.Client().Get(server.URL + "/api/v1/workloads/train-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,27 +53,32 @@ func TestGetWorkloadProjectsStatusWithoutExposingCluster(t *testing.T) {
 	}
 }
 
-func TestGetWorkloadRejectsWrongPool(t *testing.T) {
+func TestGetWorkloadRejectsDuplicateGlobalIdentity(t *testing.T) {
 	store := agentstore.NewMemory()
 	bindings := NewMemoryPlacementResolver()
 	bindings.BindPool(domain.ClusterBinding{Metadata: domain.Metadata{Generation: 1}, PoolID: "pool-h100", ClusterID: "cluster-a", Provider: "kueue"})
-	bindings.BindPool(domain.ClusterBinding{Metadata: domain.Metadata{Generation: 1}, PoolID: "pool-other", ClusterID: "cluster-a", Provider: "kueue"})
 	if err := store.UpsertDesired(context.Background(), "cluster-a", agent.DesiredResource{
 		Kind: "Workload", ID: "train-1", Generation: 1,
 		Spec: map[string]any{"poolID": domain.ID("pool-h100")},
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.UpsertDesired(context.Background(), "cluster-b", agent.DesiredResource{
+		Kind: "Workload", ID: "train-1", Generation: 1,
+		Spec: map[string]any{"poolID": domain.ID("pool-other")},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(NewRouterWithDependencies(store, bindings))
 	defer server.Close()
 
-	resp, err := server.Client().Get(server.URL + "/api/v1/workloads/train-1?poolId=pool-other")
+	resp, err := server.Client().Get(server.URL + "/api/v1/workloads/train-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNotFound {
-		t.Fatalf("status=%d, want 404", resp.StatusCode)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status=%d, want 409", resp.StatusCode)
 	}
 }
 

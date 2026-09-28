@@ -151,26 +151,38 @@ func projectWorkload(desired agent.DesiredResource) (workloadView, error) {
 
 func (a *ResourceAPI) GetWorkload(w http.ResponseWriter, r *http.Request) {
 	resourceID := domain.ID(r.PathValue("resourceID"))
-	poolID := domain.ID(r.URL.Query().Get("poolId"))
-	if resourceID == "" || poolID == "" {
-		http.Error(w, "resource id and poolId are required", http.StatusBadRequest)
+	if resourceID == "" {
+		http.Error(w, "resource id is required", http.StatusBadRequest)
+		return
+	}
+	clusterID, desired, found, err := a.store.LocateDesired(r.Context(), "Workload", resourceID)
+	if err != nil {
+		if errors.Is(err, agentstore.ErrIdentityConflict) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	poolID := domain.ID(fmt.Sprint(desired.Spec["poolID"]))
+	if poolID == "" {
+		http.Error(w, "workload pool identity is missing", http.StatusInternalServerError)
 		return
 	}
 	placement, err := a.placement.ResolvePool(r.Context(), poolID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-	desired, found, err := a.store.GetDesired(r.Context(), placement.ClusterID, "Workload", resourceID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if placement.ClusterID != clusterID {
+		http.Error(w, "workload desired state and pool binding target different clusters", http.StatusConflict)
 		return
 	}
-	if !found || domain.ID(fmt.Sprint(desired.Spec["poolID"])) != poolID {
-		http.NotFound(w, r)
-		return
-	}
-	observation, observed, err := a.store.GetObservation(r.Context(), placement.ClusterID, "Workload", resourceID)
+	observation, observed, err := a.store.GetObservation(r.Context(), clusterID, "Workload", resourceID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
