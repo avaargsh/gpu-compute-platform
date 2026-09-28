@@ -56,3 +56,42 @@ func (p *Provider) ReconcilePool(ctx context.Context, projection baseprovider.Po
 		},
 	}, nil
 }
+
+func (p *Provider) DeletePool(ctx context.Context, projection baseprovider.PoolProjection) (baseprovider.DeletionObservation, error) {
+	if p.client == nil {
+		return baseprovider.DeletionObservation{}, fmt.Errorf("kueue client is required")
+	}
+	resources, err := ProjectPool(projection)
+	if err != nil {
+		return baseprovider.DeletionObservation{}, err
+	}
+
+	evidence := []string{
+		fmt.Sprintf("k8s://%s/clusterqueue/%s", projection.ClusterID, resources.ClusterQueue.Name),
+		fmt.Sprintf("k8s://%s/namespaces/%s/localqueue/%s", projection.ClusterID, resources.LocalQueue.Namespace, resources.LocalQueue.Name),
+	}
+	allGone := true
+
+	gone, err := p.client.DeleteLocalQueue(ctx, resources.LocalQueue.Namespace, resources.LocalQueue.Name)
+	if err != nil {
+		return baseprovider.DeletionObservation{}, fmt.Errorf("delete local queue: %w", classifyProviderError(err))
+	}
+	allGone = allGone && gone
+
+	gone, err = p.client.DeleteClusterQueue(ctx, resources.ClusterQueue.Name)
+	if err != nil {
+		return baseprovider.DeletionObservation{}, fmt.Errorf("delete cluster queue: %w", classifyProviderError(err))
+	}
+	allGone = allGone && gone
+
+	for _, flavor := range resources.Flavors {
+		evidence = append(evidence, fmt.Sprintf("k8s://%s/resourceflavor/%s", projection.ClusterID, flavor.Name))
+		gone, err = p.client.DeleteResourceFlavor(ctx, flavor.Name)
+		if err != nil {
+			return baseprovider.DeletionObservation{}, fmt.Errorf("delete resource flavor %s: %w", flavor.Name, classifyProviderError(err))
+		}
+		allGone = allGone && gone
+	}
+
+	return baseprovider.DeletionObservation{Gone: allGone, EvidenceRefs: evidence}, nil
+}
