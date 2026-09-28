@@ -46,12 +46,29 @@ func clusterQueueObject(in ClusterQueue) *unstructured.Unstructured {
 			"namespaceSelector": map[string]any{},
 			"resourceGroups": []any{
 				map[string]any{
-					"coveredResources": []any{gpuResourceName},
+					"coveredResources": coveredResources(in.Quotas),
 					"flavors":          flavors,
 				},
 			},
 		},
 	}}
+}
+
+
+func coveredResources(quotas []ResourceQuota) []any {
+	seen := make(map[string]struct{}, len(quotas))
+	out := make([]any, 0, len(quotas))
+	for _, quota := range quotas {
+		if quota.Resource == "" {
+			continue
+		}
+		if _, ok := seen[quota.Resource]; ok {
+			continue
+		}
+		seen[quota.Resource] = struct{}{}
+		out = append(out, quota.Resource)
+	}
+	return out
 }
 
 func localQueueObject(in LocalQueue) *unstructured.Unstructured {
@@ -69,11 +86,19 @@ func localQueueObject(in LocalQueue) *unstructured.Unstructured {
 }
 
 func jobObject(in Job) (*batchv1.Job, error) {
-	gpu, ok := in.Resources[gpuResourceName]
-	if !ok || gpu <= 0 {
-		return nil, fmt.Errorf("positive gpu resource is required")
+	if len(in.Resources) != 1 {
+		return nil, fmt.Errorf("exactly one positive accelerator resource is required")
 	}
-	qty := *resource.NewQuantity(gpu, resource.DecimalSI)
+	var resourceName string
+	var count int64
+	for name, value := range in.Resources {
+		resourceName = name
+		count = value
+	}
+	if resourceName == "" || count <= 0 {
+		return nil, fmt.Errorf("exactly one positive accelerator resource is required")
+	}
+	qty := *resource.NewQuantity(count, resource.DecimalSI)
 	jobLabels := cloneStringMap(in.Labels)
 	jobLabels["ai.compute/workload"] = in.Name
 	podLabels := map[string]string{"ai.compute/workload": in.Name}
@@ -97,10 +122,10 @@ func jobObject(in Job) (*batchv1.Job, error) {
 							Command: append([]string(nil), in.Command...),
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{
-									corev1.ResourceName(gpuResourceName): qty,
+									corev1.ResourceName(resourceName): qty,
 								},
 								Requests: corev1.ResourceList{
-									corev1.ResourceName(gpuResourceName): qty,
+									corev1.ResourceName(resourceName): qty,
 								},
 							},
 						},
