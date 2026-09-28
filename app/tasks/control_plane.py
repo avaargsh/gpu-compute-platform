@@ -6,6 +6,8 @@ import logging
 from app.core.celery_app import celery_app
 from app.core.database import async_session_maker
 from app.control_plane.resource_store_sqlalchemy import SQLAlchemyResourceStore
+from app.control_plane.revision_store_sqlalchemy import SQLAlchemyRevisionStore
+from app.control_plane.revision_gc import RevisionRetentionPolicy
 from app.control_plane.config import control_plane_settings
 from app.control_plane.provider_factory import build_scheduler_reconcile_provider
 from app.control_plane.reconcile import Reconciler
@@ -36,6 +38,13 @@ async def _reconcile_resource(resource_key: str) -> None:
             generation=record.generation,
         )
         await store.put_observed(resource_key, record.generation, result.state)
+        revisions = SQLAlchemyRevisionStore(session)
+        await revisions.upsert(resource_key, record.generation, result.state)
+
+        for revision in await revisions.gc_candidates(resource_key, record.generation, RevisionRetentionPolicy()):
+            await provider.delete(revision.provider_ref)
+            await revisions.mark_garbage_collected(resource_key, revision.generation)
+
         logger.info(
             "reconciled key=%s generation=%s phase=%s provider_ref=%s",
             resource_key, record.generation, result.state.phase.value, result.provider_ref,
