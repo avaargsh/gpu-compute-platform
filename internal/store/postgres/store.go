@@ -187,6 +187,27 @@ func (s *Store) UpsertDesired(ctx context.Context, clusterID domain.ID, in agent
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
+	var tombstoneGeneration int64
+	err := s.db.QueryRowContext(ctx, `
+SELECT generation
+FROM deletion_tombstones
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, in.Kind, in.ID).Scan(&tombstoneGeneration)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if err == nil && in.Generation <= tombstoneGeneration {
+		return agentstore.ErrStaleGeneration
+	}
+	if err == nil {
+		if _, err := s.db.ExecContext(ctx, `
+DELETE FROM deletion_tombstones
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, in.Kind, in.ID); err != nil {
+			return err
+		}
+	}
+
 	spec, err := json.Marshal(in.Spec)
 	if err != nil {
 		return fmt.Errorf("marshal desired spec: %w", err)
@@ -240,24 +261,61 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	return nil
 }
 
-func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) error {
+func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	result, err := s.db.ExecContext(ctx, `
-DELETE FROM desired_resources WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
-`, clusterID, kind, resourceID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
+	defer tx.Rollback()
+
+	var currentGeneration int64
+	err = tx.QueryRowContext(ctx, `
+SELECT generation
+FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
+`, clusterID, kind, resourceID).Scan(&currentGeneration)
+	if err == sql.ErrNoRows {
 		return agentstore.ErrDesiredNotFound
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if currentGeneration != generation {
+		return agentstore.ErrStaleGeneration
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO deletion_tombstones (cluster_id, kind, resource_id, generation)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
+    generation = GREATEST(deletion_tombstones.generation, EXCLUDED.generation),
+    finalized_at = now()
+`, clusterID, kind, resourceID, generation); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM resource_observations
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, kind, resourceID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM reconcile_leases
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, kind, resourceID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3 AND generation = $4
+`, clusterID, kind, resourceID, generation); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []agent.Observation) error {
@@ -283,6 +341,20 @@ FOR UPDATE
 		}
 		if err == nil && item.ObservedGeneration != desiredGeneration {
 			continue
+		}
+		if err == sql.ErrNoRows {
+			var tombstoneGeneration int64
+			tombstoneErr := tx.QueryRowContext(ctx, `
+SELECT generation
+FROM deletion_tombstones
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, item.Kind, item.ID).Scan(&tombstoneGeneration)
+			if tombstoneErr != nil && tombstoneErr != sql.ErrNoRows {
+				return tombstoneErr
+			}
+			if tombstoneErr == nil && item.ObservedGeneration <= tombstoneGeneration {
+				continue
+			}
 		}
 
 		var previousJSON []byte
