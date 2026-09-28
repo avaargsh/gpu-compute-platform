@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
@@ -49,7 +50,7 @@ func (s *Store) Desired(ctx context.Context, clusterID domain.ID) ([]agent.Desir
 		return nil, fmt.Errorf("postgres database is required")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT kind, resource_id, generation, spec
+SELECT kind, resource_id, generation, spec, deletion_timestamp, finalizers
 FROM desired_resources
 WHERE cluster_id = $1
 ORDER BY kind, resource_id
@@ -62,12 +63,20 @@ ORDER BY kind, resource_id
 	var out []agent.DesiredResource
 	for rows.Next() {
 		var item agent.DesiredResource
-		var spec []byte
-		if err := rows.Scan(&item.Kind, &item.ID, &item.Generation, &spec); err != nil {
+		var spec, finalizers []byte
+		var deletionTimestamp sql.NullTime
+		if err := rows.Scan(&item.Kind, &item.ID, &item.Generation, &spec, &deletionTimestamp, &finalizers); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(spec, &item.Spec); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal(finalizers, &item.Finalizers); err != nil {
+			return nil, err
+		}
+		if deletionTimestamp.Valid {
+			ts := deletionTimestamp.Time.UTC()
+			item.DeletionTimestamp = &ts
 		}
 		out = append(out, item)
 	}
@@ -76,12 +85,13 @@ ORDER BY kind, resource_id
 
 func (s *Store) GetDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (agent.DesiredResource, bool, error) {
 	var item agent.DesiredResource
-	var spec []byte
+	var spec, finalizers []byte
+	var deletionTimestamp sql.NullTime
 	err := s.db.QueryRowContext(ctx, `
-SELECT kind, resource_id, generation, spec
+SELECT kind, resource_id, generation, spec, deletion_timestamp, finalizers
 FROM desired_resources
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
-`, clusterID, kind, resourceID).Scan(&item.Kind, &item.ID, &item.Generation, &spec)
+`, clusterID, kind, resourceID).Scan(&item.Kind, &item.ID, &item.Generation, &spec, &deletionTimestamp, &finalizers)
 	if err == sql.ErrNoRows {
 		return agent.DesiredResource{}, false, nil
 	}
@@ -91,6 +101,13 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	if err := json.Unmarshal(spec, &item.Spec); err != nil {
 		return agent.DesiredResource{}, false, err
 	}
+	if err := json.Unmarshal(finalizers, &item.Finalizers); err != nil {
+		return agent.DesiredResource{}, false, err
+	}
+	if deletionTimestamp.Valid {
+		ts := deletionTimestamp.Time.UTC()
+		item.DeletionTimestamp = &ts
+	}
 	return item, true, nil
 }
 
@@ -99,7 +116,7 @@ func (s *Store) LocateDesired(ctx context.Context, kind string, resourceID domai
 		return "", agent.DesiredResource{}, false, fmt.Errorf("postgres database is required")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-SELECT cluster_id, kind, resource_id, generation, spec
+SELECT cluster_id, kind, resource_id, generation, spec, deletion_timestamp, finalizers
 FROM desired_resources
 WHERE kind = $1 AND resource_id = $2
 ORDER BY cluster_id
@@ -113,12 +130,21 @@ LIMIT 2
 	var item agent.DesiredResource
 	matches := 0
 	for rows.Next() {
-		var spec []byte
-		if err := rows.Scan(&clusterID, &item.Kind, &item.ID, &item.Generation, &spec); err != nil {
+		var spec, finalizers []byte
+		var deletionTimestamp sql.NullTime
+		if err := rows.Scan(&clusterID, &item.Kind, &item.ID, &item.Generation, &spec, &deletionTimestamp, &finalizers); err != nil {
 			return "", agent.DesiredResource{}, false, err
 		}
 		if err := json.Unmarshal(spec, &item.Spec); err != nil {
 			return "", agent.DesiredResource{}, false, err
+		}
+		if err := json.Unmarshal(finalizers, &item.Finalizers); err != nil {
+			return "", agent.DesiredResource{}, false, err
+		}
+		item.DeletionTimestamp = nil
+		if deletionTimestamp.Valid {
+			ts := deletionTimestamp.Time.UTC()
+			item.DeletionTimestamp = &ts
 		}
 		matches++
 	}
@@ -187,14 +213,51 @@ WHERE desired_resources.generation <= EXCLUDED.generation
 	return nil
 }
 
-func (s *Store) DeleteDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) error {
+func (s *Store) MarkDesiredDeleting(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, at time.Time) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	result, err := s.db.ExecContext(ctx, `
+UPDATE desired_resources
+SET deletion_timestamp = COALESCE(deletion_timestamp, $4),
+    finalizers = CASE
+        WHEN finalizers ? $5 THEN finalizers
+        ELSE finalizers || to_jsonb($5::text)
+    END,
+    updated_at = now()
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, kind, resourceID, at.UTC(), agentstore.ProviderCleanupFinalizer)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return agentstore.ErrDesiredNotFound
+	}
+	return nil
+}
+
+func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) error {
+	if s.db == nil {
+		return fmt.Errorf("postgres database is required")
+	}
+	result, err := s.db.ExecContext(ctx, `
 DELETE FROM desired_resources WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 `, clusterID, kind, resourceID)
-	return err
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return agentstore.ErrDesiredNotFound
+	}
+	return nil
 }
 
 func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []agent.Observation) error {
