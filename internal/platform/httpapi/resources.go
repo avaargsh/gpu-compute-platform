@@ -116,3 +116,41 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+
+type workloadView struct {
+	Spec   map[string]any `json:"spec"`
+	Status resourceState  `json:"status"`
+}
+
+func (a *ResourceAPI) GetWorkload(w http.ResponseWriter, r *http.Request) {
+	resourceID := domain.ID(r.PathValue("resourceID"))
+	poolID := domain.ID(r.URL.Query().Get("poolId"))
+	if resourceID == "" || poolID == "" {
+		http.Error(w, "resource id and poolId are required", http.StatusBadRequest)
+		return
+	}
+	placement, err := a.placement.ResolvePool(r.Context(), poolID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	desired, found, err := a.store.GetDesired(r.Context(), placement.ClusterID, "Workload", resourceID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found || desired.Spec["poolID"] != string(poolID) {
+		http.NotFound(w, r)
+		return
+	}
+	observation, observed, err := a.store.GetObservation(r.Context(), placement.ClusterID, "Workload", resourceID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	status := projectResourceState(desired.Generation, observed, observation.ObservedGeneration, observation.Conditions, observation.EvidenceRefs)
+	status.Kind = desired.Kind
+	status.ID = desired.ID
+	writeJSON(w, http.StatusOK, workloadView{Spec: desired.Spec, Status: status})
+}

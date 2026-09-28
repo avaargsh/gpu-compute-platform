@@ -25,6 +25,22 @@ func NewStateAPI(store agentstore.Store) *StateAPI {
 	return &StateAPI{store: store}
 }
 
+func projectResourceState(desiredGeneration int64, observationFound bool, observationGeneration int64, conditions []domain.Condition, evidenceRefs []string) resourceState {
+	out := resourceState{DesiredGeneration: desiredGeneration, SyncState: "Reconciling"}
+	if observationFound {
+		out.ObservedGeneration = observationGeneration
+		out.Conditions = conditions
+		out.EvidenceRefs = evidenceRefs
+		switch {
+		case observationGeneration == desiredGeneration:
+			out.SyncState = "Synced"
+		case observationGeneration > desiredGeneration:
+			out.SyncState = "Inconsistent"
+		}
+	}
+	return out
+}
+
 func (a *StateAPI) Get(w http.ResponseWriter, r *http.Request) {
 	clusterID := domain.ID(r.PathValue("clusterID"))
 	kind := r.PathValue("kind")
@@ -49,20 +65,8 @@ func (a *StateAPI) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := resourceState{
-		Kind: desired.Kind, ID: desired.ID, DesiredGeneration: desired.Generation,
-		SyncState: "Reconciling",
-	}
-	if observed {
-		out.ObservedGeneration = observation.ObservedGeneration
-		out.Conditions = observation.Conditions
-		out.EvidenceRefs = observation.EvidenceRefs
-		switch {
-		case observation.ObservedGeneration == desired.Generation:
-			out.SyncState = "Synced"
-		case observation.ObservedGeneration > desired.Generation:
-			out.SyncState = "Inconsistent"
-		}
-	}
+	out := projectResourceState(desired.Generation, observed, observation.ObservedGeneration, observation.Conditions, observation.EvidenceRefs)
+	out.Kind = desired.Kind
+	out.ID = desired.ID
 	writeJSON(w, http.StatusOK, out)
 }
