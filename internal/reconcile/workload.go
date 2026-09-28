@@ -35,6 +35,9 @@ func (r *WorkloadReconciler) Reconcile(
 	if clusterBinding.PoolID != pool.Metadata.ID || clusterBinding.ClusterID != projectBinding.ClusterID {
 		return provider.WorkloadObservation{}, fmt.Errorf("invalid cluster placement")
 	}
+	if !resourceReady(pool.Status, pool.Metadata.Generation) {
+		return provider.WorkloadObservation{}, fmt.Errorf("compute pool not ready: %s", pool.Metadata.ID)
+	}
 
 	binding, err := resolveAcceleratorBinding(pool.Spec.AcceleratorBindings, workload.Spec.Accelerator.Class)
 	if err != nil {
@@ -76,4 +79,16 @@ func resolveAcceleratorBinding(bindings []domain.AcceleratorBinding, class strin
 		return domain.AcceleratorBinding{}, fmt.Errorf("accelerator binding is incomplete: %s", class)
 	}
 	return resolved, nil
+}
+
+func resourceReady(status domain.ResourceStatus, generation int64) bool {
+	if status.ObservedGeneration != generation {
+		return false
+	}
+	for _, condition := range status.Conditions {
+		if condition.Type == "Ready" && condition.Status == "True" {
+			return true
+		}
+	}
+	return false
 }
