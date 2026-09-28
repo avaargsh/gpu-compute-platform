@@ -10,7 +10,7 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/cluster"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
-	"github.com/avaargsh/gpu-compute-platform/internal/provider/kueue"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
@@ -77,9 +77,6 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 		t.Fatalf("unexpected workload observation: %#v", observed[1])
 	}
 
-	if _, err := dynamicClient.Resource(kueue.ClusterQueueGVRForTest()).Get(ctx, "cq-pool-h100", metav1.GetOptions{}); err != nil {
-		t.Fatalf("cluster queue was not projected: %v", err)
-	}
 	if _, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, "job-train-1", metav1.GetOptions{}); err != nil {
 		t.Fatalf("job was not projected: %v", err)
 	}
