@@ -68,7 +68,7 @@ func TestDesiredAPIWritesAgentPullState(t *testing.T) {
 		t.Fatalf("repeated delete must be idempotent: %#v", items)
 	}
 
-	if err := store.FinalizeDesired(context.Background(), "cluster-a", "Workload", "train-1"); err != nil {
+	if err := store.FinalizeDesired(context.Background(), "cluster-a", "Workload", "train-1", 7); err != nil {
 		t.Fatal(err)
 	}
 	items, err = store.Desired(context.Background(), "cluster-a")
