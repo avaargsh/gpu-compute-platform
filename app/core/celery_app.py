@@ -9,6 +9,7 @@ celery_app = Celery(
     backend=settings.celery_result_backend,
     include=[
         "app.tasks.gpu_tasks",  # GPU任务模块
+        "app.tasks.control_plane",
         "app.core.dag_engine",  # DAG任务模块，确保worker加载
     ]
 )
@@ -59,12 +60,17 @@ from kombu import Queue, Exchange
 celery_app.conf.task_queues = (
     Queue("default", Exchange("default"), routing_key="default"),
     Queue("gpu_tasks", Exchange("gpu_tasks"), routing_key="gpu_tasks"),
+    Queue("control_plane", Exchange("control_plane"), routing_key="control_plane"),
     Queue("priority_high", Exchange("priority"), routing_key="priority.high"),
     Queue("priority_low", Exchange("priority"), routing_key="priority.low"),
 )
 
 # 任务优先级路由
 celery_app.conf.task_routes.update({
+    "app.tasks.control_plane.reconcile_resource": {
+        "queue": "control_plane",
+        "routing_key": "control_plane",
+    },
     "app.tasks.gpu_tasks.execute_gpu_task": {
         "queue": "gpu_tasks",
         "routing_key": "gpu_tasks",
