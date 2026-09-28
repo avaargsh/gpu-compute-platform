@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Protocol
 
 from app.control_plane.adapters.kueue import KueueBinding, KueueManifestBuilder
@@ -16,11 +17,17 @@ class BatchClient(Protocol):
     def delete_namespaced_job(self, name: str, namespace: str, **kwargs: Any) -> Any: ...
 
 
-class KueueSchedulerProvider(SchedulerProvider):
-    """Submit standard Kubernetes Jobs that are admitted by Kueue."""
+class CustomObjectsClient(Protocol):
+    def list_namespaced_custom_object(self, group: str, version: str, namespace: str, plural: str, **kwargs: Any) -> Any: ...
 
-    def __init__(self, batch_client: BatchClient, binding: KueueBinding):
+
+class KueueSchedulerProvider(SchedulerProvider):
+    GROUP = "kueue.x-k8s.io"
+    VERSION = "v1beta1"
+
+    def __init__(self, batch_client: BatchClient, binding: KueueBinding, custom_client: CustomObjectsClient):
         self._client = batch_client
+        self._custom = custom_client
         self._binding = binding
         self._builder = KueueManifestBuilder(binding)
 
@@ -28,14 +35,16 @@ class KueueSchedulerProvider(SchedulerProvider):
         manifest = self._builder.build_job(workload, generation=generation)
         job_name = manifest["metadata"]["name"]
         try:
-            self._client.read_namespaced_job(
+            await asyncio.to_thread(
+                self._client.read_namespaced_job,
                 name=job_name,
                 namespace=self._binding.namespace,
             )
         except Exception as exc:
             if getattr(exc, "status", None) != 404:
                 raise
-            self._client.create_namespaced_job(
+            await asyncio.to_thread(
+                self._client.create_namespaced_job,
                 namespace=self._binding.namespace,
                 body=manifest,
             )
@@ -43,11 +52,13 @@ class KueueSchedulerProvider(SchedulerProvider):
 
     async def status(self, binding_id: str) -> ProviderStatus:
         namespace, name = self._parse_binding_id(binding_id)
-        job = self._client.read_namespaced_job_status(name=name, namespace=namespace)
+        job = await asyncio.to_thread(
+            self._client.read_namespaced_job_status,
+            name=name,
+            namespace=namespace,
+        )
         status = getattr(job, "status", None)
         metadata = getattr(job, "metadata", None)
-        conditions = list(getattr(status, "conditions", None) or [])
-        condition_map = {getattr(item, "type", ""): getattr(item, "status", "") for item in conditions}
 
         active = int(getattr(status, "active", 0) or 0)
         succeeded = int(getattr(status, "succeeded", 0) or 0)
@@ -62,8 +73,9 @@ class KueueSchedulerProvider(SchedulerProvider):
         else:
             phase = "pending"
 
-        admitted = condition_map.get("QuotaReserved") == "True" or condition_map.get("Admitted") == "True"
-        evicted = condition_map.get("Evicted") == "True"
+        conditions = await self._workload_conditions(namespace, metadata)
+        admitted = conditions.get("Admitted") == "True"
+        evicted = conditions.get("Evicted") == "True"
 
         return ProviderStatus(
             provider="kueue",
@@ -75,16 +87,43 @@ class KueueSchedulerProvider(SchedulerProvider):
             resource_version=getattr(metadata, "resource_version", None),
             admitted=admitted,
             evicted=evicted,
-            conditions=condition_map,
+            conditions=conditions,
         )
 
     async def cancel(self, binding_id: str) -> None:
         namespace, name = self._parse_binding_id(binding_id)
-        self._client.delete_namespaced_job(
-            name=name,
-            namespace=namespace,
-            propagation_policy="Foreground",
+        try:
+            await asyncio.to_thread(
+                self._client.delete_namespaced_job,
+                name=name,
+                namespace=namespace,
+                propagation_policy="Foreground",
+            )
+        except Exception as exc:
+            if getattr(exc, "status", None) != 404:
+                raise
+
+    async def _workload_conditions(self, namespace: str, job_metadata: Any) -> dict[str, str]:
+        job_uid = getattr(job_metadata, "uid", None)
+        if not job_uid:
+            return {}
+        payload = await asyncio.to_thread(
+            self._custom.list_namespaced_custom_object,
+            self.GROUP,
+            self.VERSION,
+            namespace,
+            "workloads",
+            label_selector=f"kueue.x-k8s.io/job-uid={job_uid}",
         )
+        items = payload.get("items", []) if isinstance(payload, dict) else []
+        if not items:
+            return {}
+        conditions = items[0].get("status", {}).get("conditions", [])
+        return {
+            item.get("type", ""): str(item.get("status", ""))
+            for item in conditions
+            if item.get("type")
+        }
 
     def _binding_id(self, name: str) -> str:
         return f"{self._binding.namespace}/{name}"
