@@ -18,6 +18,7 @@ var ErrPlacementMigrationNotFound = errors.New("placement migration not found")
 var ErrPlacementMigrationTransition = errors.New("invalid placement migration transition")
 var ErrPlacementTargetNotReady = errors.New("placement migration target is not ready")
 var ErrDesiredNotFound = errors.New("desired resource not found")
+var ErrDesiredNotDeleting = errors.New("desired resource is not deleting")
 
 const ProviderCleanupFinalizer = "gpu-compute-platform.io/provider-cleanup"
 
