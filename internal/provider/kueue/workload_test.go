@@ -14,7 +14,6 @@ func TestProjectWorkload(t *testing.T) {
 		PoolID:     "pool-h100",
 		ClusterID:  "cluster-a",
 		Namespace:  "project-1",
-		QueueName:  "lq-pool-h100",
 		Generation: 2,
 		Image:      "example/train:latest",
 		Command:    []string{"python", "train.py"},
