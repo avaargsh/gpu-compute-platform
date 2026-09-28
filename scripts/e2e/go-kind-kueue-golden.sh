@@ -83,7 +83,6 @@ kubectl apply --server-side -f "https://github.com/kubernetes-sigs/kueue/release
 kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout="${TIMEOUT_SECONDS}s"
 
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
-kubectl label node "$node" nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3 --overwrite
 bash scripts/e2e/install-fake-gpu.sh
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
