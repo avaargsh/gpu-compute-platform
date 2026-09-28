@@ -24,21 +24,21 @@ type retryState struct {
 }
 
 type Runner struct {
-	clusterID domain.ID
-	control   ControlPlane
-	runtime   Runtime
-	now       func() time.Time
-	retries   map[string]retryState
+	clusterID  domain.ID
+	control    ControlPlane
+	runtime    Runtime
+	now        func() time.Time
+	retries    map[string]retryState
 	leaseOwner string
 }
 
 func NewRunner(clusterID domain.ID, control ControlPlane, runtime Runtime) *Runner {
 	return &Runner{
-		clusterID: clusterID,
-		control:   control,
-		runtime:   runtime,
-		now:       time.Now,
-		retries:   make(map[string]retryState),
+		clusterID:  clusterID,
+		control:    control,
+		runtime:    runtime,
+		now:        time.Now,
+		retries:    make(map[string]retryState),
 		leaseOwner: newLeaseOwner(),
 	}
 }
