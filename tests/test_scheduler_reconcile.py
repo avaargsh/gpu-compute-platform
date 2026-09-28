@@ -1,6 +1,6 @@
 import pytest
 
-from app.control_plane.domain import AcceleratorClass, ComputePoolRef, WorkloadKind, WorkloadSpec
+from app.control_plane.domain import AcceleratorRequest, ComputePoolRef, WorkloadKind, WorkloadSpec
 from app.control_plane.providers import ProviderStatus
 from app.control_plane.scheduler_reconcile import SchedulerReconcileProvider
 
@@ -9,12 +9,12 @@ class FakeScheduler:
     def __init__(self):
         self.submits = 0
 
-    async def submit(self, workload):
+    async def submit(self, workload, generation=None):
         self.submits += 1
         return "team-a/train"
 
     async def status(self, binding_id):
-        return ProviderStatus(provider="kueue", binding_id=binding_id, phase="running")
+        return ProviderStatus(provider="kueue", binding_id=binding_id, phase="running", admitted=True, pods_ready=2)
 
     async def cancel(self, binding_id):
         pass
@@ -25,7 +25,7 @@ def workload():
         name="train",
         kind=WorkloadKind.TRAINING,
         compute_pool=ComputePoolRef(name="gpu"),
-        accelerator=AcceleratorClass(name="h100", count=8),
+        accelerator=AcceleratorRequest(class_name="h100", count=8),
         image="registry.example/train:1.0.0",
         command=["python", "train.py"],
     )
@@ -38,7 +38,7 @@ async def test_scheduler_adapter_normalizes_running_to_progressing():
     ref = await provider.apply(workload())
     observed = await provider.observe(ref)
     assert observed["phase"] == "progressing"
-    assert observed["admitted"] is True
+    assert observed["admitted"] is True\n    assert observed["replicas_ready"] == 2
 
 
 @pytest.mark.asyncio
