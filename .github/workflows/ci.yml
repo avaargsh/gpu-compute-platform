@@ -31,6 +31,24 @@ jobs:
       - name: Validate Docker Compose model
         run: docker compose config -q
       - name: Validate Golden Path shell
-        run: bash -n scripts/e2e/golden-path.sh scripts/e2e/up.sh scripts/e2e/install-fake-gpu.sh scripts/e2e/fake-gpu-golden.sh
+        run: bash -n scripts/e2e/golden-path.sh scripts/e2e/up.sh scripts/e2e/install-fake-gpu.sh scripts/e2e/fake-gpu-golden.sh scripts/e2e/gpu-up.sh
       - name: Run control-plane contract tests
         run: uv run pytest -q tests/test_control_plane_contracts.py tests/test_control_plane_v2_contracts.py tests/test_workload_gates.py tests/test_reconcile_policy.py tests/test_kueue_adapter.py tests/test_kueue_scheduler_provider.py tests/test_compute_pool.py tests/test_compute_pool_reconcile.py tests/test_device_providers.py tests/test_serving_plane.py tests/test_endpoint_traffic.py tests/test_kserve_provider.py tests/test_inference_pool.py tests/test_serving_topology.py tests/test_kv_transfer.py tests/test_reconcile.py tests/test_controller.py tests/test_scheduler_reconcile.py tests/test_workload_lifecycle_contract.py tests/test_controller_runtime.py tests/test_reconcile_signal.py tests/test_workload_revision.py tests/test_revision_gc.py tests/test_revision_cleanup.py
+
+  fake-gpu-golden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Install kind
+        run: |
+          curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+      - name: Run Fake GPU Golden Path
+        run: make e2e-gpu-up
