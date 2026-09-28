@@ -23,6 +23,11 @@ jobs:
       - name: Import canonical app
         run: uv run python -c "import app.main; import app.tasks.control_plane; import app.control_plane.provider_factory"
       - name: Validate Alembic migration SQL
-        run: uv run alembic upgrade 20260928_cp_v2 --sql > /tmp/control-plane-v1.sql
+        run: |
+          uv run alembic upgrade 20260928_cp_v2 --sql > /tmp/control-plane-v1.sql
+          grep -q "CREATE TABLE users" /tmp/control-plane-v1.sql
+          grep -q "CREATE TABLE control_plane_resources" /tmp/control-plane-v1.sql
+      - name: Validate Docker Compose model
+        run: docker compose config -q
       - name: Run control-plane contract tests
         run: uv run pytest -q tests/test_control_plane_contracts.py tests/test_control_plane_v2_contracts.py tests/test_workload_gates.py tests/test_kueue_adapter.py tests/test_kueue_scheduler_provider.py tests/test_compute_pool.py tests/test_compute_pool_reconcile.py tests/test_device_providers.py tests/test_serving_plane.py tests/test_endpoint_traffic.py tests/test_kserve_provider.py tests/test_inference_pool.py tests/test_serving_topology.py tests/test_kv_transfer.py tests/test_reconcile.py tests/test_controller.py tests/test_scheduler_reconcile.py tests/test_controller_runtime.py tests/test_reconcile_signal.py tests/test_workload_revision.py tests/test_revision_gc.py tests/test_revision_cleanup.py
