@@ -47,12 +47,13 @@ func TestProviderAppliesPoolResourcesInDependencyOrder(t *testing.T) {
 		Namespace:    "project-1",
 		Generation:   7,
 		Accelerators: []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 8}},
+		AcceleratorBindings: []domain.AcceleratorBinding{{Class: "h100-80g", ResourceName: "nvidia.com/gpu", Flavor: "h100-80g"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	want := []string{"flavor:accel-h100-80g", "cq:cq-pool-1", "lq:lq-pool-1"}
+	want := []string{"flavor:h100-80g", "cq:cq-pool-1", "lq:lq-pool-1"}
 	if len(client.order) != len(want) {
 		t.Fatalf("unexpected apply order: %#v", client.order)
 	}
