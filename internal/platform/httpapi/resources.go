@@ -155,7 +155,6 @@ func (a *ResourceAPI) GetWorkload(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, workloadView{Spec: desired.Spec, Status: status})
 }
 
-
 type computePoolView struct {
 	Spec   map[string]any `json:"spec"`
 	Status resourceState  `json:"status"`
