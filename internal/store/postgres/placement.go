@@ -50,11 +50,11 @@ func (s *Store) UpsertProjectBinding(ctx context.Context, in domain.ProjectBindi
 INSERT INTO project_bindings (project_id, cluster_id, namespace, generation)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (project_id) DO UPDATE SET
-    cluster_id = EXCLUDED.cluster_id,
     namespace = EXCLUDED.namespace,
     generation = EXCLUDED.generation,
     updated_at = now()
-WHERE project_bindings.generation <= EXCLUDED.generation
+WHERE project_bindings.cluster_id = EXCLUDED.cluster_id
+  AND project_bindings.generation <= EXCLUDED.generation
 `, in.ProjectID, in.ClusterID, in.Namespace, in.Metadata.Generation)
 	if err != nil {
 		return err
@@ -63,10 +63,22 @@ WHERE project_bindings.generation <= EXCLUDED.generation
 	if err != nil {
 		return err
 	}
-	if affected == 0 {
-		return agentstore.ErrStaleGeneration
+	if affected > 0 {
+		return nil
 	}
-	return nil
+	var currentCluster domain.ID
+	var currentGeneration int64
+	if err := s.db.QueryRowContext(ctx, `
+SELECT cluster_id, generation
+FROM project_bindings
+WHERE project_id = $1
+`, in.ProjectID).Scan(&currentCluster, &currentGeneration); err != nil {
+		return err
+	}
+	if currentCluster != in.ClusterID {
+		return agentstore.ErrPlacementMigrationRequired
+	}
+	return agentstore.ErrStaleGeneration
 }
 
 func (s *Store) UpsertClusterBinding(ctx context.Context, in domain.ClusterBinding) error {
