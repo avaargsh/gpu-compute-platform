@@ -45,6 +45,28 @@ func (m *Memory) Desired(_ context.Context, clusterID domain.ID) ([]agent.Desire
 	return append([]agent.DesiredResource(nil), m.desired[clusterID]...), nil
 }
 
+func (m *Memory) GetDesired(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (agent.DesiredResource, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, item := range m.desired[clusterID] {
+		if item.Kind == kind && item.ID == resourceID {
+			return item, true, nil
+		}
+	}
+	return agent.DesiredResource{}, false, nil
+}
+
+func (m *Memory) GetObservation(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (agent.Observation, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, item := range m.observations[clusterID] {
+		if item.Kind == kind && item.ID == resourceID {
+			return item, true, nil
+		}
+	}
+	return agent.Observation{}, false, nil
+}
+
 func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.DesiredResource) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -36,6 +36,9 @@ func NewRouterWithDependencies(store agentstore.Store, bindings BindingStore) ht
 	mux.HandleFunc("PUT /api/v1/compute-pools/{resourceID}", resourceAPI.UpsertComputePool)
 	mux.HandleFunc("PUT /api/v1/workloads/{resourceID}", resourceAPI.UpsertWorkload)
 
+	stateAPI := NewStateAPI(store)
+	mux.HandleFunc("GET /api/v1/internal/clusters/{clusterID}/state/{kind}/{resourceID}", stateAPI.Get)
+
 	desiredAPI := NewDesiredAPI(store)
 	mux.HandleFunc("PUT /api/v1/internal/clusters/{clusterID}/desired/{kind}/{resourceID}", desiredAPI.Upsert)
 	mux.HandleFunc("DELETE /api/v1/internal/clusters/{clusterID}/desired/{kind}/{resourceID}", desiredAPI.Delete)

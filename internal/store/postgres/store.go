@@ -74,6 +74,49 @@ ORDER BY kind, resource_id
 	return out, rows.Err()
 }
 
+func (s *Store) GetDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (agent.DesiredResource, bool, error) {
+	var item agent.DesiredResource
+	var spec []byte
+	err := s.db.QueryRowContext(ctx, `
+SELECT kind, resource_id, generation, spec
+FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, kind, resourceID).Scan(&item.Kind, &item.ID, &item.Generation, &spec)
+	if err == sql.ErrNoRows {
+		return agent.DesiredResource{}, false, nil
+	}
+	if err != nil {
+		return agent.DesiredResource{}, false, err
+	}
+	if err := json.Unmarshal(spec, &item.Spec); err != nil {
+		return agent.DesiredResource{}, false, err
+	}
+	return item, true, nil
+}
+
+func (s *Store) GetObservation(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (agent.Observation, bool, error) {
+	var item agent.Observation
+	var conditions, evidence []byte
+	err := s.db.QueryRowContext(ctx, `
+SELECT kind, resource_id, observed_generation, conditions, evidence_refs
+FROM resource_observations
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, kind, resourceID).Scan(&item.Kind, &item.ID, &item.ObservedGeneration, &conditions, &evidence)
+	if err == sql.ErrNoRows {
+		return agent.Observation{}, false, nil
+	}
+	if err != nil {
+		return agent.Observation{}, false, err
+	}
+	if err := json.Unmarshal(conditions, &item.Conditions); err != nil {
+		return agent.Observation{}, false, err
+	}
+	if err := json.Unmarshal(evidence, &item.EvidenceRefs); err != nil {
+		return agent.Observation{}, false, err
+	}
+	return item, true, nil
+}
+
 func (s *Store) UpsertDesired(ctx context.Context, clusterID domain.ID, in agent.DesiredResource) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
