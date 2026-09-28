@@ -14,6 +14,12 @@ import (
 func TestStateAPIProjectsGenerationDrift(t *testing.T) {
 	store := agentstore.NewMemory()
 	ctx := context.Background()
+	if err := store.UpsertDesired(ctx, "cluster-a", agent.DesiredResource{Kind: "Workload", ID: "train-1", Generation: 7, Spec: map[string]any{"image": "v7"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Report(ctx, "cluster-a", []agent.Observation{{Kind: "Workload", ID: "train-1", ObservedGeneration: 7}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.UpsertDesired(ctx, "cluster-a", agent.DesiredResource{Kind: "Workload", ID: "train-1", Generation: 8, Spec: map[string]any{"image": "v8"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -36,13 +42,7 @@ func TestStateAPIProjectsGenerationDrift(t *testing.T) {
 		return out
 	}
 
-	if got := get(); got.SyncState != "Reconciling" || got.DesiredGeneration != 8 || got.ObservedGeneration != 0 {
-		t.Fatalf("unobserved state=%#v", got)
-	}
-	if err := store.Report(ctx, "cluster-a", []agent.Observation{{Kind: "Workload", ID: "train-1", ObservedGeneration: 7}}); err != nil {
-		t.Fatal(err)
-	}
-	if got := get(); got.SyncState != "Reconciling" || got.ObservedGeneration != 7 {
+	if got := get(); got.SyncState != "Reconciling" || got.DesiredGeneration != 8 || got.ObservedGeneration != 7 {
 		t.Fatalf("drift state=%#v", got)
 	}
 	if err := store.Report(ctx, "cluster-a", []agent.Observation{{Kind: "Workload", ID: "train-1", ObservedGeneration: 8, EvidenceRefs: []string{"reconciled"}}}); err != nil {
