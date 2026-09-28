@@ -12,7 +12,7 @@ from app.control_plane.resource_store_sqlalchemy import SQLAlchemyResourceStore
 from app.control_plane.revision_store_sqlalchemy import SQLAlchemyRevisionStore
 from app.control_plane.revision_gc import RevisionRetentionPolicy
 from app.control_plane.config import control_plane_settings
-from app.control_plane.provider_factory import build_scheduler_reconcile_provider
+from app.control_plane.provider_factory import build_compute_pool_reconciler, build_scheduler_reconcile_provider
 from app.control_plane.reconcile import Reconciler
 
 logger = logging.getLogger(__name__)
@@ -32,28 +32,44 @@ async def _reconcile_resource(resource_key: str) -> None:
                 return
 
             kind = resource_key.split("/")[-2]
-            if kind != "workload":
-                logger.info("no reconcile provider registered for kind=%s key=%s", kind, resource_key)
-                return
             if control_plane_settings.scheduler_provider == "disabled":
                 logger.info("control-plane scheduler disabled; retaining desired state key=%s", resource_key)
                 return
 
+            if kind == "computepool":
+                from app.control_plane.compute_pool import ComputePool
+                pool = ComputePool.model_validate(record.desired)
+                reconciler = build_compute_pool_reconciler(control_plane_settings)
+                state = await reconciler.reconcile(pool, generation=record.generation)
+                await store.put_observed(resource_key, record.generation, state)
+                logger.info(
+                    "reconciled compute pool key=%s generation=%s phase=%s",
+                    resource_key, record.generation, state.phase.value,
+                )
+                return
+
+            if kind != "workload":
+                logger.info("no reconcile provider registered for kind=%s key=%s", kind, resource_key)
+                return
+
             from app.control_plane.domain import WorkloadSpec
             from app.control_plane.compute_pool import ComputePool
+            from app.control_plane.status import Phase
             workload = WorkloadSpec.model_validate(record.desired)
             project_id = resource_key.split("/")[1]
             pool_key = f"project/{project_id}/computepool/{workload.compute_pool.name}"
             pool_record = await store.get(pool_key)
             if pool_record is None:
                 raise RuntimeError(f"ComputePool {workload.compute_pool.name!r} not found")
+            if pool_record.observed is None or pool_record.observed.phase != Phase.READY:
+                enqueue_reconcile(pool_key)
+                logger.info("compute pool not ready; deferring workload key=%s pool=%s", resource_key, pool_key)
+                return
+
             pool = ComputePool.model_validate(pool_record.desired)
             provider = build_scheduler_reconcile_provider(control_plane_settings, pool)
             reconciler = Reconciler(provider)
-            result = await reconciler.reconcile(
-                workload,
-                generation=record.generation,
-            )
+            result = await reconciler.reconcile(workload, generation=record.generation)
             await store.put_observed(resource_key, record.generation, result.state)
             revisions = SQLAlchemyRevisionStore(session)
             await revisions.upsert(resource_key, record.generation, result.state)
