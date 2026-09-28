@@ -95,7 +95,6 @@ func TestResourceAPIRejectsCrossClusterBindings(t *testing.T) {
 	}
 }
 
-
 func TestResourceAPIRejectsStaleWorkloadGenerationWithoutRollback(t *testing.T) {
 	store := agentstore.NewMemory()
 	server := httptest.NewServer(boundRouter(store, "cluster-a", "cluster-a"))
