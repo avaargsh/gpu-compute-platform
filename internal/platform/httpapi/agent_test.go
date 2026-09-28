@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -54,5 +53,4 @@ func TestAgentDesiredAndReportRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected observations: %#v", observed)
 	}
 
-	_ = context.Background()
 }
