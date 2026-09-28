@@ -18,6 +18,8 @@ type fakeControlPlane struct {
 	claimCalls          int
 	releaseCalls        int
 	reportBeforeRelease bool
+	reportErr           error
+	finalizeErr         error
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }
@@ -28,6 +30,11 @@ func (f *fakeControlPlane) PullDesired(context.Context, domain.ID) ([]DesiredRes
 func (f *fakeControlPlane) Report(_ context.Context, _ domain.ID, observations []Observation) error {
 	if f.releaseCalls == 0 {
 		f.reportBeforeRelease = true
+	}
+	if f.reportErr != nil {
+		err := f.reportErr
+		f.reportErr = nil
+		return err
 	}
 	f.reported = append(f.reported, observations...)
 	return nil
@@ -44,6 +51,11 @@ func (f *fakeControlPlane) ReleaseReconcileLease(_ context.Context, _ ReconcileL
 	return nil
 }
 func (f *fakeControlPlane) FinalizeDesired(_ context.Context, in FinalizeDesiredRequest) error {
+	if f.finalizeErr != nil {
+		err := f.finalizeErr
+		f.finalizeErr = nil
+		return err
+	}
 	out := f.desired[:0]
 	for _, item := range f.desired {
 		if item.Kind == in.Kind && item.ID == in.ResourceID && item.Generation == in.Generation {
@@ -284,5 +296,91 @@ func TestRunnerDeletionCleansDependentsBeforePoolAndFinalizesAfterGone(t *testin
 	}
 	if len(control.reported) != 2 || control.reported[1].EvidenceRefs[0] != "pool-delete-evidence" {
 		t.Fatalf("pool final evidence missing: %#v", control.reported)
+	}
+}
+
+
+func TestRunnerDeletionReplaysAfterFinalObservationFailure(t *testing.T) {
+	now := time.Date(2026, 9, 29, 4, 0, 0, 0, time.UTC)
+	control := &fakeControlPlane{
+		reportErr: errors.New("control plane unavailable"),
+		desired: []DesiredResource{{
+			Kind: "Workload", ID: "train-1", Generation: 4, DeletionTimestamp: &now,
+			Finalizers: []string{"gpu-compute-platform.io/provider-cleanup"},
+			Spec: map[string]any{
+				"poolID": "pool-1", "namespace": "project-1",
+				"image": "example/train:latest",
+				"accelerator": map[string]any{"class": "h100", "quota": float64(1)},
+			},
+		}},
+	}
+	runtime := &fakeRuntime{}
+	runner := NewRunner("cluster-a", control, runtime)
+
+	if err := runner.Sync(context.Background()); err == nil {
+		t.Fatal("expected final observation failure")
+	}
+	if runtime.workloadDeleteCalls != 1 {
+		t.Fatalf("cleanup calls=%d, want 1", runtime.workloadDeleteCalls)
+	}
+	if len(control.desired) != 1 {
+		t.Fatal("desired must survive until final evidence is durably reported")
+	}
+
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.workloadDeleteCalls != 2 {
+		t.Fatalf("cleanup must be replayed idempotently after report failure, calls=%d", runtime.workloadDeleteCalls)
+	}
+	if len(control.desired) != 0 {
+		t.Fatalf("desired must finalize after replay succeeds: %#v", control.desired)
+	}
+	if len(control.reported) != 1 || control.reported[0].Conditions[0].Reason != "Deleted" {
+		t.Fatalf("missing durable final deletion evidence: %#v", control.reported)
+	}
+}
+
+func TestRunnerDeletionReplaysAfterFinalizeFailure(t *testing.T) {
+	now := time.Date(2026, 9, 29, 5, 0, 0, 0, time.UTC)
+	control := &fakeControlPlane{
+		finalizeErr: errors.New("transaction interrupted"),
+		desired: []DesiredResource{{
+			Kind: "Workload", ID: "train-1", Generation: 4, DeletionTimestamp: &now,
+			Finalizers: []string{"gpu-compute-platform.io/provider-cleanup"},
+			Spec: map[string]any{
+				"poolID": "pool-1", "namespace": "project-1",
+				"image": "example/train:latest",
+				"accelerator": map[string]any{"class": "h100", "quota": float64(1)},
+			},
+		}},
+	}
+	runtime := &fakeRuntime{}
+	runner := NewRunner("cluster-a", control, runtime)
+
+	if err := runner.Sync(context.Background()); err == nil {
+		t.Fatal("expected finalize failure")
+	}
+	if runtime.workloadDeleteCalls != 1 {
+		t.Fatalf("cleanup calls=%d, want 1", runtime.workloadDeleteCalls)
+	}
+	if len(control.reported) != 1 {
+		t.Fatalf("final evidence must be reported before finalize: %#v", control.reported)
+	}
+	if len(control.desired) != 1 {
+		t.Fatal("desired must survive failed finalize")
+	}
+
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.workloadDeleteCalls != 2 {
+		t.Fatalf("cleanup must be replayed idempotently after finalize failure, calls=%d", runtime.workloadDeleteCalls)
+	}
+	if len(control.desired) != 0 {
+		t.Fatalf("desired must finalize after replay succeeds: %#v", control.desired)
+	}
+	if len(control.reported) != 2 {
+		t.Fatalf("final evidence replay must remain safe: %#v", control.reported)
 	}
 }
