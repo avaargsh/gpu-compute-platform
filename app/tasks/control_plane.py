@@ -58,7 +58,6 @@ async def _reconcile_resource(resource_key: str) -> None:
                 "reconciled key=%s generation=%s phase=%s provider_ref=%s",
                 resource_key, record.generation, result.state.phase.value, result.provider_ref,
             )
-            await leases.release(resource_key, owner)
         finally:
             await leases.release(resource_key, owner)
 
