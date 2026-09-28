@@ -224,7 +224,7 @@ FOR UPDATE
 
 		var previousJSON []byte
 		var previousGeneration int64
-		err := tx.QueryRowContext(ctx, `
+		err = tx.QueryRowContext(ctx, `
 SELECT observed_generation, conditions
 FROM resource_observations
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
