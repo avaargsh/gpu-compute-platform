@@ -15,7 +15,7 @@ def test_kueue_job_uses_local_queue_and_gpu_request():
         KueueBinding(
             namespace="team-a",
             local_queue="training",
-            accelerator_resources={"h100-80gb": "nvidia.com/gpu"},
+            accelerator_resources={"h100-80gb": "nvidia.com/gpu"},\n            priority_class="gpu-high",
         )
     ).build_job(workload)
 
@@ -24,7 +24,7 @@ def test_kueue_job_uses_local_queue_and_gpu_request():
     container = manifest["spec"]["template"]["spec"]["containers"][0]
     assert container["resources"]["requests"]["nvidia.com/gpu"] == "8"
     assert "nodeName" not in manifest["spec"]["template"]["spec"]
-    assert "nodeSelector" not in manifest["spec"]["template"]["spec"]
+    assert "nodeSelector" not in manifest["spec"]["template"]["spec"]\n    assert manifest["spec"]["template"]["spec"]["priorityClassName"] == "gpu-high"
 
 
 def test_accelerator_resource_is_provider_binding_not_domain_field():
