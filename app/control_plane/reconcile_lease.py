@@ -53,9 +53,11 @@ class ReconcileLeaseStore:
             .where(
                 or_(
                     ControlPlaneResource.observed.is_(None),
-                    ControlPlaneResource.lease_until.is_(None),
-                    ControlPlaneResource.lease_until < now,
-                )
+                    ControlPlaneResource.observed_generation.is_(None),
+                    ControlPlaneResource.observed_generation < ControlPlaneResource.generation,
+                    ControlPlaneResource.lifecycle["deletion_timestamp"].as_string().is_not(None),
+                ),
+                or_(ControlPlaneResource.lease_until.is_(None), ControlPlaneResource.lease_until < now)
             )
             .order_by(ControlPlaneResource.updated_at)
             .limit(limit)
