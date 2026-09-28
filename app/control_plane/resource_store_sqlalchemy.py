@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 import uuid
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.control_plane.lifecycle import ResourceLifecycle
@@ -89,3 +89,27 @@ class SQLAlchemyResourceStore:
         if self._owned(row):
             await self.session.delete(row)
             await self.session.commit()
+
+
+    async def list_project_kind(self, project_id: uuid.UUID, kind: str) -> list[ResourceRecord]:
+        rows = (
+            await self.session.execute(
+                select(ControlPlaneResource).where(
+                    ControlPlaneResource.project_id == project_id,
+                    ControlPlaneResource.kind == kind,
+                )
+            )
+        ).scalars().all()
+        return [
+            ResourceRecord(
+                key=row.key,
+                generation=row.generation,
+                desired=row.desired,
+                observed=ObservedState.model_validate(row.observed) if row.observed else None,
+                lifecycle=ResourceLifecycle(
+                    deletion_timestamp=datetime.fromisoformat(row.lifecycle["deletion_timestamp"]) if row.lifecycle.get("deletion_timestamp") else None,
+                    finalizers=list(row.lifecycle.get("finalizers", [])),
+                ),
+            )
+            for row in rows
+        ]
