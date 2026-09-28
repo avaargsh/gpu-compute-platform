@@ -40,10 +40,18 @@ async def _reconcile_resource(resource_key: str) -> None:
                 return
 
             from app.control_plane.domain import WorkloadSpec
-            provider = build_scheduler_reconcile_provider(control_plane_settings)
+            from app.control_plane.compute_pool import ComputePool
+            workload = WorkloadSpec.model_validate(record.desired)
+            project_id = resource_key.split("/")[1]
+            pool_key = f"project/{project_id}/computepool/{workload.compute_pool.name}"
+            pool_record = await store.get(pool_key)
+            if pool_record is None:
+                raise RuntimeError(f"ComputePool {workload.compute_pool.name!r} not found")
+            pool = ComputePool.model_validate(pool_record.desired)
+            provider = build_scheduler_reconcile_provider(control_plane_settings, pool)
             reconciler = Reconciler(provider)
             result = await reconciler.reconcile(
-                WorkloadSpec.model_validate(record.desired),
+                workload,
                 generation=record.generation,
             )
             await store.put_observed(resource_key, record.generation, result.state)
