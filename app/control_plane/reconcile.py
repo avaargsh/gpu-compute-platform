@@ -50,6 +50,6 @@ class Reconciler:
             replicas_ready=raw.get("replicas_ready"),
             admitted=raw.get("admitted"),
             evidence_refs=evidence,
-            provider_status=raw.get("provider_status", {}),
+            provider_status=raw.get("provider_status", {}),\n            observed_generation=generation,
         )
         return ReconcileResult(provider_ref=provider_ref, state=state)
