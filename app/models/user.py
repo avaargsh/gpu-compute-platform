@@ -1,7 +1,6 @@
 from fastapi_users.db import SQLAlchemyBaseUserTableUUID
 from sqlalchemy import Column, String, Boolean, DateTime, func, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 from app.core.database import Base
 from enum import Enum
 import uuid
@@ -40,10 +39,6 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_login = Column(DateTime(timezone=True), nullable=True, comment="最后登录时间")
-    
-    # Relationships
-    gpu_tasks = relationship("GpuTask", back_populates="user")
-    task_dags = relationship("TaskDAG", back_populates="user")
     
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email})>"
