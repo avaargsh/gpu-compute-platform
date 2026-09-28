@@ -42,14 +42,14 @@ func (r *WorkloadReconciler) Reconcile(
 	}
 
 	return r.provider.ReconcileWorkload(ctx, provider.WorkloadProjection{
-		WorkloadID:  workload.Metadata.ID,
-		ProjectID:   workload.ProjectID,
-		PoolID:      workload.PoolID,
-		ClusterID:   clusterBinding.ClusterID,
-		Namespace:   projectBinding.Namespace,
-		Generation:  workload.Metadata.Generation,
-		Image:       workload.Spec.Image,
-		Command:     workload.Spec.Command,
+		WorkloadID:         workload.Metadata.ID,
+		ProjectID:          workload.ProjectID,
+		PoolID:             workload.PoolID,
+		ClusterID:          clusterBinding.ClusterID,
+		Namespace:          projectBinding.Namespace,
+		Generation:         workload.Metadata.Generation,
+		Image:              workload.Spec.Image,
+		Command:            workload.Spec.Command,
 		Accelerator:        workload.Spec.Accelerator,
 		AcceleratorBinding: binding,
 	})
