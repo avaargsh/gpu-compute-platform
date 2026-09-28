@@ -3,7 +3,9 @@ from app.control_plane.compute_pool import (
     KueuePoolBinding,
     KueuePoolManifestBuilder,
     ResourceFlavorBinding,
-    ResourceQuota,\n    AdmissionPolicy,\n    DeviceBinding,
+    ResourceQuota,
+    AdmissionPolicy,
+    DeviceBinding,
 )
 
 
@@ -23,7 +25,8 @@ def test_compute_pool_renders_kueue_capacity_objects():
                     node_labels={"accelerator.platform/class": "h100-80g"},
                 )
             ],
-            quotas=[ResourceQuota(resource="nvidia.com/gpu", nominal_quota=32)],\n            admission=AdmissionPolicy(priority_class="gpu-high", admission_checks=["provisioning"], fair_sharing=True),
+            quotas=[ResourceQuota(resource="nvidia.com/gpu", nominal_quota=32)],
+            admission=AdmissionPolicy(priority_class="gpu-high", admission_checks=["provisioning"], fair_sharing=True),
         ),
     )
 
@@ -38,7 +41,9 @@ def test_compute_pool_renders_kueue_capacity_objects():
         "name": "nvidia.com/gpu",
         "nominalQuota": 32,
     }
-    assert manifests[1]["spec"]["admissionChecks"] == ["provisioning"]\n    assert manifests[1]["spec"]["fairSharing"] == {}\n    assert manifests[2]["spec"]["clusterQueue"] == "gpu-training"
+    assert manifests[1]["spec"]["admissionChecks"] == ["provisioning"]
+    assert manifests[1]["spec"]["fairSharing"] == {}
+    assert manifests[2]["spec"]["clusterQueue"] == "gpu-training"
 
 
 def test_provider_specific_labels_live_in_pool_binding_only():
