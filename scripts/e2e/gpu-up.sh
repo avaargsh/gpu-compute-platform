@@ -39,4 +39,12 @@ until curl -fsS http://127.0.0.1:8000/healthz >/dev/null 2>&1; do
   sleep 2
 done
 
-make e2e-gpu-golden
+if ! make e2e-gpu-golden; then
+  echo "--- API log ---" >&2
+  tail -200 /tmp/compute-api.log >&2 || true
+  echo "--- worker log ---" >&2
+  tail -300 /tmp/compute-worker.log >&2 || true
+  echo "--- Redis control_plane queue depth ---" >&2
+  docker compose exec -T redis redis-cli LLEN control_plane >&2 || true
+  exit 1
+fi
