@@ -12,11 +12,25 @@ class ResourceQuota(BaseModel):
     nominal_quota: int = Field(ge=0)
 
 
+class DeviceBinding(BaseModel):
+    mode: str = "resource"
+    device_class_name: str | None = None
+    hami_memory_resource_name: str | None = None
+    memory_mb: int | None = Field(default=None, ge=1)
+
+
+class AdmissionPolicy(BaseModel):
+    priority_class: str | None = None
+    admission_checks: list[str] = Field(default_factory=list)
+    fair_sharing: bool = False
+
+
 class ResourceFlavorBinding(BaseModel):
     name: str
     accelerator_class: str
     resource_name: str = "nvidia.com/gpu"
     node_labels: dict[str, str] = Field(default_factory=dict)
+    device: DeviceBinding = Field(default_factory=DeviceBinding)
 
 
 class KueuePoolBinding(BaseModel):
@@ -26,6 +40,7 @@ class KueuePoolBinding(BaseModel):
     cohort: str | None = None
     flavors: list[ResourceFlavorBinding] = Field(default_factory=list)
     quotas: list[ResourceQuota] = Field(default_factory=list)
+    admission: AdmissionPolicy = Field(default_factory=AdmissionPolicy)
 
 
 class ComputePool(BaseModel):
