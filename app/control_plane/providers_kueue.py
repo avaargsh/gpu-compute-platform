@@ -26,7 +26,7 @@ class KueueSchedulerProvider(SchedulerProvider):
     GROUP = "kueue.x-k8s.io"
     VERSION = "v1beta1"
 
-    def __init__(self, batch_client: BatchClient, binding: KueueBinding, custom_client: CustomObjectsClient):
+    def __init__(self, batch_client: BatchClient, binding: KueueBinding, custom_client: CustomObjectsClient, core_client: CoreClient):
         self._client = batch_client
         self._custom = custom_client
         self._binding = binding
@@ -130,7 +130,7 @@ class KueueSchedulerProvider(SchedulerProvider):
 
     async def _pods_ready(self, namespace: str, job_name: str) -> int:
         pods = await asyncio.to_thread(
-            self._client.list_namespaced_pod,
+            self._core.list_namespaced_pod,
             namespace=namespace,
             label_selector=f"job-name={job_name}",
         )
