@@ -26,8 +26,8 @@ func (f *fakeControlPlane) Report(_ context.Context, _ domain.ID, observations [
 }
 
 type fakeRuntime struct {
-	workload     provider.WorkloadProjection
-	workloadErr  error
+	workload      provider.WorkloadProjection
+	workloadErr   error
 	workloadCalls int
 }
 
