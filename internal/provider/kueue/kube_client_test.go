@@ -220,7 +220,6 @@ func TestApplyJobForbiddenGetDoesNotCreate(t *testing.T) {
 	}
 }
 
-
 func TestObserveSucceededJobPreservesKueueEvidenceWithoutInferringPodsReady(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
