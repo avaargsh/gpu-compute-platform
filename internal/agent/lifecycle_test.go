@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 )
 
 type lifecycleControl struct {
@@ -43,4 +42,3 @@ func TestLifecycleRegistersAndTicksImmediately(t *testing.T) {
 	}
 }
 
-var _ domain.ID
