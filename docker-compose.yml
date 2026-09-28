@@ -11,7 +11,7 @@ services:
       - "8000:8000"
     environment:
       - ENVIRONMENT=development
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gpu_platform
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/gpu_platform
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/0
@@ -30,9 +30,10 @@ services:
       - ${CONTROL_PLANE_KUBECONFIG:-./.kubeconfig-unused}:/root/.kube/config:ro
       - gpu_data:/app/data
     depends_on:
-      - postgres
-      - redis
-      - mlflow
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - gpu-platform
@@ -46,7 +47,7 @@ services:
     command: celery -A app.core.celery_app.celery_app worker -Q control_plane -l info --concurrency=4
     environment:
       - ENVIRONMENT=development
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gpu_platform
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/gpu_platform
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/0
@@ -61,9 +62,10 @@ services:
       - ${CONTROL_PLANE_KUBECONFIG:-./.kubeconfig-unused}:/root/.kube/config:ro
       - gpu_data:/app/data
     depends_on:
-      - postgres
-      - redis
-      - mlflow
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - gpu-platform
