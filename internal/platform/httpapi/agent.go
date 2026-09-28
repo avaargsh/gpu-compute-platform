@@ -120,3 +120,26 @@ func (a *AgentAPI) ReleaseReconcileLease(w http.ResponseWriter, r *http.Request)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (a *AgentAPI) FinalizeDesired(w http.ResponseWriter, r *http.Request) {
+	var in agent.FinalizeDesiredRequest
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.ClusterID == "" || in.Kind == "" || in.ResourceID == "" || in.Generation <= 0 {
+		http.Error(w, "clusterId, kind, resourceId and positive generation are required", http.StatusBadRequest)
+		return
+	}
+	if err := a.store.FinalizeDesired(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Generation); err != nil {
+		switch err {
+		case agentstore.ErrDesiredNotFound:
+			http.Error(w, err.Error(), http.StatusNotFound)
+		case agentstore.ErrStaleGeneration:
+			http.Error(w, err.Error(), http.StatusConflict)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
