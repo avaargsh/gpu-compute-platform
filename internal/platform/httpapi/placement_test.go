@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
@@ -15,17 +16,17 @@ import (
 func TestMemoryPlacementRejectsCrossClusterRebind(t *testing.T) {
 	store := NewMemoryPlacementResolver()
 	if err := store.UpsertClusterBinding(context.Background(), domain.ClusterBinding{
-		Metadata:  domain.Metadata{Generation: 1}, PoolID: "pool-1", ClusterID: "cluster-a", Provider: "kueue",
+		Metadata: domain.Metadata{Generation: 1}, PoolID: "pool-1", ClusterID: "cluster-a", Provider: "kueue",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpsertClusterBinding(context.Background(), domain.ClusterBinding{
-		Metadata:  domain.Metadata{Generation: 2}, PoolID: "pool-1", ClusterID: "cluster-a", Provider: "volcano",
+		Metadata: domain.Metadata{Generation: 2}, PoolID: "pool-1", ClusterID: "cluster-a", Provider: "volcano",
 	}); err != nil {
 		t.Fatalf("same-cluster update: %v", err)
 	}
 	err := store.UpsertClusterBinding(context.Background(), domain.ClusterBinding{
-		Metadata:  domain.Metadata{Generation: 3}, PoolID: "pool-1", ClusterID: "cluster-b", Provider: "volcano",
+		Metadata: domain.Metadata{Generation: 3}, PoolID: "pool-1", ClusterID: "cluster-b", Provider: "volcano",
 	})
 	if !errors.Is(err, agentstore.ErrPlacementMigrationRequired) {
 		t.Fatalf("error=%v, want placement migration required", err)
