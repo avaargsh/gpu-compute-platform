@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -14,8 +15,8 @@ type Placement struct {
 }
 
 type PlacementResolver interface {
-	ResolveProject(domain.ID) (Placement, error)
-	ResolvePool(domain.ID) (Placement, error)
+	ResolveProject(context.Context, domain.ID) (Placement, error)
+	ResolvePool(context.Context, domain.ID) (Placement, error)
 }
 
 type MemoryPlacementResolver struct {
@@ -46,7 +47,7 @@ func (r *MemoryPlacementResolver) BindPool(in domain.ClusterBinding) {
 	r.pools[in.PoolID] = current
 }
 
-func (r *MemoryPlacementResolver) ResolveProject(projectID domain.ID) (Placement, error) {
+func (r *MemoryPlacementResolver) ResolveProject(_ context.Context, projectID domain.ID) (Placement, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out, ok := r.projects[projectID]
@@ -56,7 +57,7 @@ func (r *MemoryPlacementResolver) ResolveProject(projectID domain.ID) (Placement
 	return out, nil
 }
 
-func (r *MemoryPlacementResolver) ResolvePool(poolID domain.ID) (Placement, error) {
+func (r *MemoryPlacementResolver) ResolvePool(_ context.Context, poolID domain.ID) (Placement, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	out, ok := r.pools[poolID]
