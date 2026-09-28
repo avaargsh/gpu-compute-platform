@@ -32,7 +32,7 @@ def build_scheduler_reconcile_provider(settings: ControlPlaneSettings, pool: Com
         binding=KueueBinding(
             namespace=pool.binding.namespace,
             local_queue=pool.binding.local_queue,
-            accelerator_resources=accelerator_resources,
+            accelerator_resources=accelerator_resources,\n            priority_class=pool.binding.admission.priority_class,
         ),
     )
     return SchedulerReconcileProvider(scheduler)
