@@ -117,7 +117,6 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-
 type workloadView struct {
 	Spec   map[string]any `json:"spec"`
 	Status resourceState  `json:"status"`
