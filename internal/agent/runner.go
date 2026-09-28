@@ -15,6 +15,8 @@ import (
 type Runtime interface {
 	ReconcilePool(context.Context, provider.PoolProjection) (provider.PoolObservation, error)
 	ReconcileWorkload(context.Context, provider.WorkloadProjection) (provider.WorkloadObservation, error)
+	DeletePool(context.Context, provider.PoolProjection) (provider.DeletionObservation, error)
+	DeleteWorkload(context.Context, provider.WorkloadProjection) (provider.DeletionObservation, error)
 }
 
 type retryState struct {
@@ -78,6 +80,59 @@ func (r *Runner) Sync(ctx context.Context) error {
 			return fmt.Errorf("claim reconcile lease for %s: %w", key, err)
 		}
 		if !claimed {
+			continue
+		}
+
+		if item.DeletionTimestamp != nil {
+			if item.Kind == "ComputePool" && hasDependentWorkload(desired, item.ID) {
+				if err := r.control.ReleaseReconcileLease(ctx, lease); err != nil {
+					return fmt.Errorf("release reconcile lease for %s: %w", key, err)
+				}
+				continue
+			}
+			deletion, deleteErr := r.delete(ctx, item, bindings)
+			if deleteErr != nil && provider.IsRetryable(deleteErr) {
+				r.scheduleRetry(key, item.Generation)
+				if err := r.control.ReleaseReconcileLease(ctx, lease); err != nil {
+					return fmt.Errorf("release reconcile lease for %s: %w", key, err)
+				}
+				continue
+			}
+			if deleteErr != nil {
+				if err := r.control.ReleaseReconcileLease(ctx, lease); err != nil {
+					return fmt.Errorf("release reconcile lease for %s: %w", key, err)
+				}
+				return fmt.Errorf("delete provider resource for %s: %w", key, deleteErr)
+			}
+			if !deletion.Gone {
+				r.scheduleRetry(key, item.Generation)
+				if err := r.control.ReleaseReconcileLease(ctx, lease); err != nil {
+					return fmt.Errorf("release reconcile lease for %s: %w", key, err)
+				}
+				continue
+			}
+
+			delete(r.retries, key)
+			finalObservation := Observation{
+				Kind:               item.Kind,
+				ID:                 item.ID,
+				ObservedGeneration: item.Generation,
+				Conditions: []domain.Condition{{
+					Type: "Ready", Status: "False", Reason: "Deleted",
+					Message: "provider resources are gone",
+				}},
+				EvidenceRefs: deletion.EvidenceRefs,
+			}
+			if err := r.control.Report(ctx, r.clusterID, []Observation{finalObservation}); err != nil {
+				_ = r.control.ReleaseReconcileLease(ctx, lease)
+				return fmt.Errorf("report final observation for %s: %w", key, err)
+			}
+			if err := r.control.FinalizeDesired(ctx, FinalizeDesiredRequest{
+				ClusterID: r.clusterID, Kind: item.Kind, ResourceID: item.ID, Generation: item.Generation,
+			}); err != nil {
+				_ = r.control.ReleaseReconcileLease(ctx, lease)
+				return fmt.Errorf("finalize desired resource %s: %w", key, err)
+			}
 			continue
 		}
 
@@ -169,6 +224,47 @@ func (r *Runner) reconcile(ctx context.Context, item DesiredResource, bindings m
 	default:
 		return Observation{}, fmt.Errorf("unsupported desired resource kind %q", item.Kind)
 	}
+}
+
+func (r *Runner) delete(ctx context.Context, item DesiredResource, bindings map[domain.ID]map[string]domain.AcceleratorBinding) (provider.DeletionObservation, error) {
+	switch item.Kind {
+	case "ComputePool":
+		var projection provider.PoolProjection
+		if err := decodeSpec(item.Spec, &projection); err != nil {
+			return provider.DeletionObservation{}, err
+		}
+		projection.PoolID = item.ID
+		projection.ClusterID = r.clusterID
+		projection.Generation = item.Generation
+		return r.runtime.DeletePool(ctx, projection)
+	case "Workload":
+		var projection provider.WorkloadProjection
+		if err := decodeSpec(item.Spec, &projection); err != nil {
+			return provider.DeletionObservation{}, err
+		}
+		projection.WorkloadID = item.ID
+		projection.ClusterID = r.clusterID
+		projection.Generation = item.Generation
+		if poolBindings, ok := bindings[projection.PoolID]; ok {
+			projection.AcceleratorBinding = poolBindings[projection.Accelerator.Class]
+		}
+		return r.runtime.DeleteWorkload(ctx, projection)
+	default:
+		return provider.DeletionObservation{}, fmt.Errorf("unsupported desired resource kind %q", item.Kind)
+	}
+}
+
+func hasDependentWorkload(desired []DesiredResource, poolID domain.ID) bool {
+	for _, item := range desired {
+		if item.Kind != "Workload" {
+			continue
+		}
+		var projection provider.WorkloadProjection
+		if decodeSpec(item.Spec, &projection) == nil && projection.PoolID == poolID {
+			return true
+		}
+	}
+	return false
 }
 
 func decodeSpec(spec map[string]any, out any) error {
