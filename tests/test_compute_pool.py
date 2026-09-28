@@ -18,6 +18,8 @@ def test_compute_pool_renders_kueue_capacity_objects():
             flavors=[
                 ResourceFlavorBinding(
                     name="h100",
+                    accelerator_class="h100-80gb",
+                    resource_name="nvidia.com/gpu",
                     node_labels={"accelerator.platform/class": "h100-80g"},
                 )
             ],
@@ -49,6 +51,8 @@ def test_provider_specific_labels_live_in_pool_binding_only():
             flavors=[
                 ResourceFlavorBinding(
                     name="vendor-gpu",
+                    accelerator_class="vendor-x",
+                    resource_name="vendor.example/gpu",
                     node_labels={"vendor.example/gpu-family": "x"},
                 )
             ],
