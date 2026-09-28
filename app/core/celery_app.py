@@ -7,11 +7,7 @@ celery_app = Celery(
     "gpu-compute-platform",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=[
-        "app.tasks.gpu_tasks",  # GPU任务模块
-        "app.tasks.control_plane",
-        "app.core.dag_engine",  # DAG任务模块，确保worker加载
-    ]
+    include=["app.tasks.control_plane"]
 )
 
 # Celery配置
@@ -24,9 +20,7 @@ celery_app.conf.update(
     enable_utc=True,
     
     # 任务路由
-    task_routes={
-        "app.tasks.gpu_tasks.*": {"queue": "gpu_tasks"},
-    },
+    task_routes={"app.tasks.control_plane.*": {"queue": "control_plane"}},
     
     # 任务结果过期时间
     result_expires=3600,
@@ -57,32 +51,8 @@ celery_app.conf.update(
 # 定义队列
 from kombu import Queue, Exchange
 
-celery_app.conf.task_queues = (
-    Queue("default", Exchange("default"), routing_key="default"),
-    Queue("gpu_tasks", Exchange("gpu_tasks"), routing_key="gpu_tasks"),
-    Queue("control_plane", Exchange("control_plane"), routing_key="control_plane"),
-    Queue("priority_high", Exchange("priority"), routing_key="priority.high"),
-    Queue("priority_low", Exchange("priority"), routing_key="priority.low"),
-)
-
-# 任务优先级路由
-celery_app.conf.task_routes.update({
-    "app.tasks.control_plane.reconcile_resource": {
-        "queue": "control_plane",
-        "routing_key": "control_plane",
-    },
-    "app.tasks.gpu_tasks.execute_gpu_task": {
-        "queue": "gpu_tasks",
-        "routing_key": "gpu_tasks",
-    },
-    "app.tasks.gpu_tasks.monitor_task_status": {
-        "queue": "default",
-        "routing_key": "default",
-    },
-})
-
-
-def get_celery_app() -> Celery:
+celery_app.conf.task_queues = (\n    Queue("default", Exchange("default"), routing_key="default"),\n    Queue("control_plane", Exchange("control_plane"), routing_key="control_plane"),\n)\n\n# 任务优先级路由
+celery_app.conf.task_routes.update({\n    "app.tasks.control_plane.*": {"queue": "control_plane", "routing_key": "control_plane"},\n})\n\n\ndef get_celery_app() -> Celery:
     """获取Celery应用实例"""
     return celery_app
 
@@ -91,22 +61,4 @@ def get_celery_app() -> Celery:
 @celery_app.on_after_configure.connect
 def setup_periodic_tasks(sender, **kwargs):
     """设置定期任务"""
-    # 每30秒检查一次任务状态
-    sender.add_periodic_task(
-        30.0, 
-        "app.tasks.gpu_tasks.check_running_tasks",
-        name="check-running-tasks"
-    )
-    
-    # 每小时清理过期任务
-    sender.add_periodic_task(
-        60.0,
-        "app.tasks.control_plane.sweep_reconcile_candidates",
-        name="control-plane-convergence-sweep",
-    )
-
-    sender.add_periodic_task(
-        3600.0,
-        "app.tasks.gpu_tasks.cleanup_expired_tasks", 
-        name="cleanup-expired-tasks"
-    )
+    sender.add_periodic_task(\n        60.0,\n        "app.tasks.control_plane.sweep_reconcile_candidates",\n        name="control-plane-convergence-sweep",\n    )
