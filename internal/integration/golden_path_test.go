@@ -10,6 +10,7 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/cluster"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -79,5 +80,38 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 
 	if _, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, "job-train-1", metav1.GetOptions{}); err != nil {
 		t.Fatalf("job was not projected: %v", err)
+	}
+
+	_, err = coreClient.CoreV1().Pods("project-1").Create(ctx, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "job-train-1-pod",
+			Labels: map[string]string{"ai.compute/workload": "job-train-1"},
+		},
+		Status: corev1.PodStatus{
+			Conditions: []corev1.PodCondition{
+				{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runner.Sync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	observed = store.Observations("cluster-a")
+	var workload agent.Observation
+	for _, item := range observed {
+		if item.ID == "train-1" {
+			workload = item
+			break
+		}
+	}
+	if len(workload.Conditions) != 1 {
+		t.Fatalf("workload conditions missing: %#v", workload)
+	}
+	if workload.Conditions[0].Status != "True" || workload.Conditions[0].Reason != "PodsReady" {
+		t.Fatalf("workload did not converge to ready: %#v", workload)
 	}
 }
