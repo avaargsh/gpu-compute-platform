@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
@@ -90,20 +91,24 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 	}
 
 	if c.dynamic != nil {
-		workloads, err := c.dynamic.Resource(workloadGVR).Namespace(namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: "kueue.x-k8s.io/job-uid=" + string(job.UID),
-		})
-		if err != nil && !apierrors.IsNotFound(err) {
-			return JobObservation{}, err
-		}
-		for _, workload := range workloads.Items {
-			conditions, found, err := unstructured.NestedSlice(workload.Object, "status", "conditions")
-			if err != nil {
+		workloads, err := c.dynamic.Resource(workloadGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
 				return JobObservation{}, err
 			}
-			if found && conditionTrue(conditions, "Admitted") {
-				out.Admitted = true
-				break
+		} else {
+			for _, workload := range workloads.Items {
+				if !ownedByJob(workload.GetOwnerReferences(), job.UID) {
+					continue
+				}
+				conditions, found, err := unstructured.NestedSlice(workload.Object, "status", "conditions")
+				if err != nil {
+					return JobObservation{}, err
+				}
+				if found && conditionTrue(conditions, "Admitted") {
+					out.Admitted = true
+					break
+				}
 			}
 		}
 	}
@@ -154,6 +159,15 @@ func (c *KubeClient) apply(ctx context.Context, gvr schema.GroupVersionResource,
 	}
 	_, err = resource.Create(ctx, obj, metav1.CreateOptions{})
 	return err
+}
+
+func ownedByJob(refs []metav1.OwnerReference, uid types.UID) bool {
+	for _, ref := range refs {
+		if ref.Kind == "Job" && ref.UID == uid {
+			return true
+		}
+	}
+	return false
 }
 
 func conditionTrue(conditions []any, conditionType string) bool {
