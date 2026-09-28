@@ -34,13 +34,18 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := client.ApplyLocalQueue(ctx, LocalQueue{
-		Name: "lq-pool-h100", Namespace: "project-1", ClusterQueue: "cq-pool-h100",
+		Name:         "lq-pool-h100",
+		Namespace:    "project-1",
+		ClusterQueue: "cq-pool-h100",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.ApplyJob(ctx, Job{
-		Name: "job-train-1", Namespace: "project-1", QueueName: "lq-pool-h100",
-		Image: "example/train:latest", Resources: map[string]int64{gpuResourceName: 2},
+		Name:      "job-train-1",
+		Namespace: "project-1",
+		QueueName: "lq-pool-h100",
+		Image:     "example/train:latest",
+		Resources: map[string]int64{gpuResourceName: 2},
 		Annotations: map[string]string{"kueue.x-k8s.io/queue-name": "lq-pool-h100"},
 	}); err != nil {
 		t.Fatal(err)
@@ -57,7 +62,7 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 
 	_, err = coreClient.CoreV1().Pods("project-1").Create(ctx, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "job-train-1-pod",
+			Name:   "job-train-1-pod",
 			Labels: map[string]string{"ai.compute/workload": "job-train-1"},
 		},
 		Status: corev1.PodStatus{
