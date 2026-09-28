@@ -10,48 +10,51 @@ import (
 )
 
 type ResourceAPI struct {
-	store agentstore.Store
+	store     agentstore.Store
+	placement PlacementResolver
 }
 
-type placedComputePool struct {
-	ClusterID domain.ID          `json:"clusterId"`
-	Namespace string             `json:"namespace"`
-	Resource  domain.ComputePool `json:"resource"`
-}
-
-type placedWorkload struct {
-	ClusterID domain.ID       `json:"clusterId"`
-	Namespace string          `json:"namespace"`
-	Resource  domain.Workload `json:"resource"`
-}
-
-func NewResourceAPI(store agentstore.Store) *ResourceAPI {
-	return &ResourceAPI{store: store}
+func NewResourceAPI(store agentstore.Store, placement PlacementResolver) *ResourceAPI {
+	return &ResourceAPI{store: store, placement: placement}
 }
 
 func (a *ResourceAPI) UpsertComputePool(w http.ResponseWriter, r *http.Request) {
 	resourceID := domain.ID(r.PathValue("resourceID"))
-	var in placedComputePool
+	var in domain.ComputePool
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid compute pool", http.StatusBadRequest)
 		return
 	}
-	if resourceID == "" || in.ClusterID == "" || in.Namespace == "" || in.Resource.Metadata.ID == "" || in.Resource.Metadata.Generation <= 0 || in.Resource.ProjectID == "" {
-		http.Error(w, "clusterId, namespace, resource id, projectId and positive generation are required", http.StatusBadRequest)
+	if resourceID == "" || in.Metadata.ID == "" || in.Metadata.Generation <= 0 || in.ProjectID == "" {
+		http.Error(w, "resource id, projectId and positive generation are required", http.StatusBadRequest)
 		return
 	}
-	if in.Resource.Metadata.ID != resourceID {
+	if in.Metadata.ID != resourceID {
 		http.Error(w, "resource id must match path", http.StatusBadRequest)
 		return
 	}
-	spec := map[string]any{
-		"projectID":    in.Resource.ProjectID,
-		"namespace":    in.Namespace,
-		"accelerators": in.Resource.Spec.Accelerators,
-		"scheduling":   in.Resource.Spec.Scheduling,
+	projectPlacement, err := a.placement.ResolveProject(in.ProjectID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
 	}
-	if err := a.store.UpsertDesired(r.Context(), in.ClusterID, agent.DesiredResource{
-		Kind: "ComputePool", ID: in.Resource.Metadata.ID, Generation: in.Resource.Metadata.Generation, Spec: spec,
+	poolPlacement, err := a.placement.ResolvePool(in.Metadata.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if projectPlacement.ClusterID != poolPlacement.ClusterID {
+		http.Error(w, "project and pool bindings target different clusters", http.StatusConflict)
+		return
+	}
+	spec := map[string]any{
+		"projectID":    in.ProjectID,
+		"namespace":    projectPlacement.Namespace,
+		"accelerators": in.Spec.Accelerators,
+		"scheduling":   in.Spec.Scheduling,
+	}
+	if err := a.store.UpsertDesired(r.Context(), poolPlacement.ClusterID, agent.DesiredResource{
+		Kind: "ComputePool", ID: in.Metadata.ID, Generation: in.Metadata.Generation, Spec: spec,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -61,29 +64,43 @@ func (a *ResourceAPI) UpsertComputePool(w http.ResponseWriter, r *http.Request) 
 
 func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 	resourceID := domain.ID(r.PathValue("resourceID"))
-	var in placedWorkload
+	var in domain.Workload
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid workload", http.StatusBadRequest)
 		return
 	}
-	if resourceID == "" || in.ClusterID == "" || in.Namespace == "" || in.Resource.Metadata.ID == "" || in.Resource.Metadata.Generation <= 0 || in.Resource.ProjectID == "" || in.Resource.PoolID == "" {
-		http.Error(w, "clusterId, namespace, resource id, projectId, poolId and positive generation are required", http.StatusBadRequest)
+	if resourceID == "" || in.Metadata.ID == "" || in.Metadata.Generation <= 0 || in.ProjectID == "" || in.PoolID == "" {
+		http.Error(w, "resource id, projectId, poolId and positive generation are required", http.StatusBadRequest)
 		return
 	}
-	if in.Resource.Metadata.ID != resourceID {
+	if in.Metadata.ID != resourceID {
 		http.Error(w, "resource id must match path", http.StatusBadRequest)
 		return
 	}
-	spec := map[string]any{
-		"projectID":   in.Resource.ProjectID,
-		"poolID":      in.Resource.PoolID,
-		"namespace":   in.Namespace,
-		"image":       in.Resource.Spec.Image,
-		"command":     in.Resource.Spec.Command,
-		"accelerator": in.Resource.Spec.Accelerator,
+	projectPlacement, err := a.placement.ResolveProject(in.ProjectID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
 	}
-	if err := a.store.UpsertDesired(r.Context(), in.ClusterID, agent.DesiredResource{
-		Kind: "Workload", ID: in.Resource.Metadata.ID, Generation: in.Resource.Metadata.Generation, Spec: spec,
+	poolPlacement, err := a.placement.ResolvePool(in.PoolID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if projectPlacement.ClusterID != poolPlacement.ClusterID {
+		http.Error(w, "project and pool bindings target different clusters", http.StatusConflict)
+		return
+	}
+	spec := map[string]any{
+		"projectID":   in.ProjectID,
+		"poolID":      in.PoolID,
+		"namespace":   projectPlacement.Namespace,
+		"image":       in.Spec.Image,
+		"command":     in.Spec.Command,
+		"accelerator": in.Spec.Accelerator,
+	}
+	if err := a.store.UpsertDesired(r.Context(), poolPlacement.ClusterID, agent.DesiredResource{
+		Kind: "Workload", ID: in.Metadata.ID, Generation: in.Metadata.Generation, Spec: spec,
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
