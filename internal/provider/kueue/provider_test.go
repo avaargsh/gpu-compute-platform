@@ -27,6 +27,15 @@ func (f *fakeClient) ApplyLocalQueue(_ context.Context, v LocalQueue) error {
 	return nil
 }
 
+func (f *fakeClient) ApplyJob(_ context.Context, v Job) error {
+	f.order = append(f.order, "job:"+v.Name)
+	return nil
+}
+
+func (f *fakeClient) ObserveJob(_ context.Context, _, _ string) (JobObservation, error) {
+	return JobObservation{}, nil
+}
+
 func TestProviderAppliesPoolResourcesInDependencyOrder(t *testing.T) {
 	client := &fakeClient{}
 	p := NewProvider(client)
