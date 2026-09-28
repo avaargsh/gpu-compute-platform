@@ -258,13 +258,13 @@ func TestMemoryDesiredDeletionLifecycle(t *testing.T) {
 		t.Fatalf("mark-delete must be idempotent: %#v", got)
 	}
 
-	if err := store.FinalizeDesired(ctx, clusterID, "Workload", "train-1"); err != nil {
+	if err := store.FinalizeDesired(ctx, clusterID, "Workload", "train-1", 4); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, err := store.GetDesired(ctx, clusterID, "Workload", "train-1"); err != nil || ok {
 		t.Fatalf("desired must be gone after finalize: ok=%t err=%v", ok, err)
 	}
-	if err := store.FinalizeDesired(ctx, clusterID, "Workload", "train-1"); !errors.Is(err, ErrDesiredNotFound) {
+	if err := store.FinalizeDesired(ctx, clusterID, "Workload", "train-1", 4); !errors.Is(err, ErrDesiredNotFound) {
 		t.Fatalf("second finalize err=%v, want ErrDesiredNotFound", err)
 	}
 }
