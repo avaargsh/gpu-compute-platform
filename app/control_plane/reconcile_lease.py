@@ -55,6 +55,7 @@ class ReconcileLeaseStore:
                     ControlPlaneResource.observed.is_(None),
                     ControlPlaneResource.observed_generation.is_(None),
                     ControlPlaneResource.observed_generation < ControlPlaneResource.generation,
+                    ControlPlaneResource.observed["phase"].as_string().not_in(("ready", "failed")),
                     ControlPlaneResource.lifecycle["deletion_timestamp"].as_string().is_not(None),
                 ),
                 or_(ControlPlaneResource.lease_until.is_(None), ControlPlaneResource.lease_until < now)
