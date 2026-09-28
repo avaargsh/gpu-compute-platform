@@ -32,6 +32,7 @@ type MemoryPlacementResolver struct {
 	pools              map[domain.ID]Placement
 	projectGenerations map[domain.ID]int64
 	poolGenerations    map[domain.ID]int64
+	migrations         map[domain.ID]map[domain.ID]domain.PlacementMigration
 }
 
 func NewMemoryPlacementResolver() *MemoryPlacementResolver {
@@ -40,6 +41,7 @@ func NewMemoryPlacementResolver() *MemoryPlacementResolver {
 		pools:              make(map[domain.ID]Placement),
 		projectGenerations: make(map[domain.ID]int64),
 		poolGenerations:    make(map[domain.ID]int64),
+		migrations:         make(map[domain.ID]map[domain.ID]domain.PlacementMigration),
 	}
 }
 

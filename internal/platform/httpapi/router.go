@@ -32,6 +32,12 @@ func NewRouterWithDependencies(store agentstore.Store, bindings BindingStore) ht
 	mux.HandleFunc("PUT /api/v1/projects/{projectID}/binding", bindingAPI.UpsertProject)
 	mux.HandleFunc("PUT /api/v1/compute-pools/{poolID}/binding", bindingAPI.UpsertPool)
 
+	if migrations, ok := bindings.(MigrationStore); ok {
+		migrationAPI := NewMigrationAPI(migrations)
+		mux.HandleFunc("POST /api/v1/compute-pools/{poolID}/migrations", migrationAPI.Create)
+		mux.HandleFunc("GET /api/v1/compute-pools/{poolID}/migrations/{migrationID}", migrationAPI.Get)
+	}
+
 	resourceAPI := NewResourceAPI(store, bindings)
 	mux.HandleFunc("PUT /api/v1/compute-pools/{resourceID}", resourceAPI.UpsertComputePool)
 	mux.HandleFunc("GET /api/v1/compute-pools/{resourceID}", resourceAPI.GetComputePool)

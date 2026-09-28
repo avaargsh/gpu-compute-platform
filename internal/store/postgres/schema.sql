@@ -55,3 +55,20 @@ CREATE INDEX IF NOT EXISTS project_bindings_cluster_idx
 
 CREATE INDEX IF NOT EXISTS cluster_bindings_cluster_idx
     ON cluster_bindings (cluster_id);
+
+
+CREATE TABLE IF NOT EXISTS placement_migrations (
+    migration_id TEXT PRIMARY KEY,
+    pool_id TEXT NOT NULL,
+    source_cluster_id TEXT NOT NULL,
+    target_cluster_id TEXT NOT NULL,
+    generation BIGINT NOT NULL,
+    phase TEXT NOT NULL,
+    conditions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    evidence_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS placement_migrations_pool_idx
+    ON placement_migrations (pool_id, created_at);
