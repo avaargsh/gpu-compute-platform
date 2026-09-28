@@ -9,10 +9,13 @@ class SchedulerReconcileProvider:
         self.scheduler = scheduler
         self._refs: dict[str, str] = {}
 
-    async def apply(self, desired: WorkloadSpec) -> str:
-        key = desired.name
+    async def apply(self, desired: WorkloadSpec, generation: int | None = None) -> str:
+        key = f"{desired.name}:g{generation}" if generation is not None else desired.name
         if key not in self._refs:
-            self._refs[key] = await self.scheduler.submit(desired)
+            try:
+                self._refs[key] = await self.scheduler.submit(desired, generation=generation)
+            except TypeError:
+                self._refs[key] = await self.scheduler.submit(desired)
         return self._refs[key]
 
     async def observe(self, provider_ref: str) -> dict:
