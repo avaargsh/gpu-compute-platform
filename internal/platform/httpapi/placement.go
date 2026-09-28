@@ -27,17 +27,17 @@ type BindingStore interface {
 }
 
 type MemoryPlacementResolver struct {
-	mu       sync.RWMutex
-	projects map[domain.ID]Placement
-	pools    map[domain.ID]Placement
+	mu                 sync.RWMutex
+	projects           map[domain.ID]Placement
+	pools              map[domain.ID]Placement
 	projectGenerations map[domain.ID]int64
 	poolGenerations    map[domain.ID]int64
 }
 
 func NewMemoryPlacementResolver() *MemoryPlacementResolver {
 	return &MemoryPlacementResolver{
-		projects: make(map[domain.ID]Placement),
-		pools:    make(map[domain.ID]Placement),
+		projects:           make(map[domain.ID]Placement),
+		pools:              make(map[domain.ID]Placement),
 		projectGenerations: make(map[domain.ID]int64),
 		poolGenerations:    make(map[domain.ID]int64),
 	}
