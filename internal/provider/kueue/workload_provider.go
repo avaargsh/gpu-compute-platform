@@ -27,32 +27,87 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 		return baseprovider.WorkloadObservation{}, fmt.Errorf("observe job: %w", err)
 	}
 
-	condition := domain.Condition{
-		Type:               "Ready",
-		Status:             "False",
-		Reason:             "Pending",
-		Message:            state.Message,
-		LastTransitionTime: time.Now().UTC(),
+	now := time.Now().UTC()
+	conditions := []domain.Condition{
+		{
+			Type:               "Ready",
+			Status:             boolStatus(state.PodsReady && !state.Failed),
+			Reason:             readyReason(state),
+			Message:            state.Message,
+			LastTransitionTime: now,
+		},
+		{
+			Type:               "QuotaReserved",
+			Status:             boolStatus(state.QuotaReserved),
+			Reason:             conditionReason(state.QuotaReserved, "KueueQuotaReserved", "AwaitingQuota"),
+			LastTransitionTime: now,
+		},
+		{
+			Type:               "Admitted",
+			Status:             boolStatus(state.Admitted),
+			Reason:             conditionReason(state.Admitted, "KueueAdmitted", "AwaitingAdmission"),
+			LastTransitionTime: now,
+		},
+		{
+			Type:               "PodsReady",
+			Status:             boolStatus(state.PodsReady),
+			Reason:             conditionReason(state.PodsReady, "PodsReady", "AwaitingPods"),
+			LastTransitionTime: now,
+		},
 	}
-	switch {
-	case state.Failed:
-		condition.Type = "Failed"
-		condition.Reason = "JobFailed"
-	case state.PodsReady:
-		condition.Status = "True"
-		condition.Reason = "PodsReady"
-	case state.Admitted:
-		condition.Type = "Admitted"
-		condition.Status = "True"
-		condition.Reason = "KueueAdmitted"
+	if state.Failed {
+		conditions = append(conditions, domain.Condition{
+			Type:               "Failed",
+			Status:             "True",
+			Reason:             "JobFailed",
+			Message:            state.Message,
+			LastTransitionTime: now,
+		})
+	}
+
+	evidenceRefs := []string{
+		fmt.Sprintf("k8s://%s/namespaces/%s/jobs/%s", projection.ClusterID, job.Namespace, job.Name),
+	}
+	if state.WorkloadName != "" {
+		evidenceRefs = append(evidenceRefs,
+			fmt.Sprintf("kueue://%s/namespaces/%s/workloads/%s", projection.ClusterID, job.Namespace, state.WorkloadName),
+		)
 	}
 
 	return baseprovider.WorkloadObservation{
 		ObservedGeneration: projection.Generation,
 		Phase:              state.Phase,
-		Conditions:         []domain.Condition{condition},
-		EvidenceRefs: []string{
-			fmt.Sprintf("k8s://%s/namespaces/%s/jobs/%s", projection.ClusterID, job.Namespace, job.Name),
-		},
+		Conditions:         conditions,
+		EvidenceRefs:       evidenceRefs,
 	}, nil
+}
+
+func boolStatus(value bool) string {
+	if value {
+		return "True"
+	}
+	return "False"
+}
+
+func conditionReason(value bool, trueReason, falseReason string) string {
+	if value {
+		return trueReason
+	}
+	return falseReason
+}
+
+func readyReason(state JobObservation) string {
+	switch {
+	case state.Failed:
+		return "JobFailed"
+	case state.PodsReady:
+		return "PodsReady"
+	case state.Admitted:
+		return "AwaitingPods"
+	case state.QuotaReserved:
+		return "AwaitingAdmission"
+	default:
+		return "Pending"
+	}
+}
 }
