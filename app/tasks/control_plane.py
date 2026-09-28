@@ -3,6 +3,9 @@
 import asyncio
 import logging
 
+from app.control_plane.reconcile_lease import ReconcileLeaseStore, new_lease_owner
+from app.control_plane.reconcile_signal import enqueue_reconcile
+
 from app.core.celery_app import celery_app
 from app.core.database import async_session_maker
 from app.control_plane.resource_store_sqlalchemy import SQLAlchemyResourceStore
@@ -16,7 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 async def _reconcile_resource(resource_key: str) -> None:
+    owner = new_lease_owner()
     async with async_session_maker() as session:
+        leases = ReconcileLeaseStore(session)
+        if not await leases.claim(resource_key, owner):
+            logger.info("reconcile lease busy key=%s", resource_key)
+            return
         store = SQLAlchemyResourceStore(session)
         record = await store.get(resource_key)
         if record is None:
@@ -49,6 +57,7 @@ async def _reconcile_resource(resource_key: str) -> None:
             "reconciled key=%s generation=%s phase=%s provider_ref=%s",
             resource_key, record.generation, result.state.phase.value, result.provider_ref,
         )
+        await leases.release(resource_key, owner)
 
 
 @celery_app.task(
@@ -61,3 +70,16 @@ async def _reconcile_resource(resource_key: str) -> None:
 )
 def reconcile_resource(resource_key: str):
     asyncio.run(_reconcile_resource(resource_key))
+
+
+async def _sweep_reconcile_candidates() -> int:
+    async with async_session_maker() as session:
+        keys = await ReconcileLeaseStore(session).sweep_candidates()
+        for key in keys:
+            enqueue_reconcile(key)
+        return len(keys)
+
+
+@celery_app.task(name="app.tasks.control_plane.sweep_reconcile_candidates")
+def sweep_reconcile_candidates():
+    return asyncio.run(_sweep_reconcile_candidates())
