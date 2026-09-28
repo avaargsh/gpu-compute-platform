@@ -30,7 +30,9 @@ status=data.get("status") or {}
 if expr == "pool-ready":
     ok=status.get("phase")=="ready" and any(c.get("type")=="Ready" and c.get("status") is True for c in status.get("conditions",[]))
 elif expr == "workload-ready":
-    ok=status.get("admitted") is True and status.get("phase")=="ready"
+    provider=status.get("provider_status") or {}
+    ok=(status.get("admitted") is True and status.get("phase")=="ready"
+        and int(provider.get("succeeded", 0) or 0) >= 1)
 else:
     ok=False
 raise SystemExit(0 if ok else 1)
