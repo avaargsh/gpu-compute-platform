@@ -15,6 +15,30 @@ depends_on = None
 
 
 def upgrade() -> None:
+    user_role = sa.Enum("ADMIN", "USER", name="userrole")
+    op.create_table(
+        "users",
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("email", sa.String(length=320), nullable=False),
+        sa.Column("hashed_password", sa.String(length=1024), nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("is_superuser", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("is_verified", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("first_name", sa.String(length=50), nullable=True),
+        sa.Column("last_name", sa.String(length=50), nullable=True),
+        sa.Column("nickname", sa.String(length=50), nullable=True),
+        sa.Column("avatar", sa.String(length=500), nullable=True),
+        sa.Column("phone", sa.String(length=20), nullable=True),
+        sa.Column("organization", sa.String(length=100), nullable=True),
+        sa.Column("role", user_role, nullable=False, server_default="USER"),
+        sa.Column("total_compute_hours", sa.String(), nullable=True, server_default="0.0"),
+        sa.Column("total_cost", sa.String(), nullable=True, server_default="0.0"),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_login", sa.DateTime(timezone=True), nullable=True),
+        sa.UniqueConstraint("email", name="uq_users_email"),
+    )
+    op.create_index("ix_users_email", "users", ["email"], unique=True)
     op.create_table("tenants", sa.Column("id", sa.String(length=36), primary_key=True), sa.Column("name", sa.String(length=128), nullable=False), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False))
     op.create_table("projects", sa.Column("id", sa.String(length=36), primary_key=True), sa.Column("tenant_id", sa.String(length=36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False), sa.Column("name", sa.String(length=128), nullable=False), sa.Column("created_at", sa.DateTime(timezone=True), nullable=False), sa.UniqueConstraint("tenant_id", "name", name="uq_project_tenant_name"))
     op.create_index("ix_projects_tenant_id", "projects", ["tenant_id"])
@@ -72,3 +96,6 @@ def downgrade() -> None:
     op.drop_index("ix_projects_tenant_id", table_name="projects")
     op.drop_table("projects")
     op.drop_table("tenants")
+    op.drop_index("ix_users_email", table_name="users")
+    op.drop_table("users")
+    sa.Enum(name="userrole").drop(op.get_bind(), checkfirst=True)
