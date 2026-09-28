@@ -10,6 +10,7 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/agent/httpclient"
 	"github.com/avaargsh/gpu-compute-platform/internal/cluster"
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	corev1 "k8s.io/api/core/v1"
@@ -24,8 +25,11 @@ import (
 func TestGoldenPathDesiredToObserved(t *testing.T) {
 	ctx := context.Background()
 	store := agentstore.NewMemory()
+	placement := httpapi.NewMemoryPlacementResolver()
+	placement.BindProject(domain.ProjectBinding{ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "project-1"})
+	placement.BindPool(domain.ClusterBinding{PoolID: "pool-h100", ClusterID: "cluster-a", Provider: "kueue"})
 
-	server := httptest.NewServer(httpapi.NewRouterWithAgentStore(store))
+	server := httptest.NewServer(httpapi.NewRouterWithDependencies(store, placement))
 	defer server.Close()
 
 	putJSON := func(path, body string) {
@@ -45,14 +49,12 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 		}
 	}
 	putJSON("/api/v1/compute-pools/pool-h100", `{
-		"clusterId":"cluster-a","namespace":"project-1",
-		"resource":{"metadata":{"id":"pool-h100","generation":1},"projectId":"project-1",
-		"spec":{"accelerators":[{"class":"h100-80g","quota":8}],"scheduling":{"mode":"default"}},"status":{"observedGeneration":0}}
+		"metadata":{"id":"pool-h100","generation":1},"projectId":"project-1",
+		"spec":{"accelerators":[{"class":"h100-80g","quota":8}],"scheduling":{"mode":"default"}},"status":{"observedGeneration":0}
 	}`)
 	putJSON("/api/v1/workloads/train-1", `{
-		"clusterId":"cluster-a","namespace":"project-1",
-		"resource":{"metadata":{"id":"train-1","generation":1},"projectId":"project-1","poolId":"pool-h100",
-		"spec":{"image":"example/train:latest","accelerator":{"class":"h100-80g","quota":2}},"status":{"observedGeneration":0}}
+		"metadata":{"id":"train-1","generation":1},"projectId":"project-1","poolId":"pool-h100",
+		"spec":{"image":"example/train:latest","accelerator":{"class":"h100-80g","quota":2}},"status":{"observedGeneration":0}
 	}`)
 
 	coreClient := kubefake.NewSimpleClientset()
