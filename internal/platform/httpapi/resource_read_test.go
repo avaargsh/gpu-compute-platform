@@ -50,7 +50,6 @@ func TestGetWorkloadProjectsStatusWithoutExposingCluster(t *testing.T) {
 	}
 }
 
-
 func TestGetWorkloadRejectsWrongPool(t *testing.T) {
 	store := agentstore.NewMemory()
 	bindings := NewMemoryPlacementResolver()
