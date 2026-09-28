@@ -11,6 +11,7 @@ import (
 )
 
 type MigrationStore interface {
+	ResolvePool(context.Context, domain.ID) (Placement, error)
 	CreatePlacementMigration(context.Context, domain.PlacementMigration) (domain.PlacementMigration, bool, error)
 	GetPlacementMigration(context.Context, domain.ID, domain.ID) (domain.PlacementMigration, error)
 	UpdatePlacementMigration(context.Context, domain.ID, domain.ID, domain.PlacementMigrationPhase, []domain.Condition, []string) (domain.PlacementMigration, error)
