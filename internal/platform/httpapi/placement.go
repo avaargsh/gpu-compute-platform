@@ -53,7 +53,13 @@ func (r *MemoryPlacementResolver) UpsertProjectBinding(_ context.Context, in dom
 	if in.Metadata.Generation < r.projectGenerations[in.ProjectID] {
 		return agentstore.ErrStaleGeneration
 	}
-	r.projects[in.ProjectID] = Placement{ClusterID: in.ClusterID, Namespace: in.Namespace}
+	current := r.projects[in.ProjectID]
+	if current.ClusterID != "" && current.ClusterID != in.ClusterID {
+		return agentstore.ErrPlacementMigrationRequired
+	}
+	current.ClusterID = in.ClusterID
+	current.Namespace = in.Namespace
+	r.projects[in.ProjectID] = current
 	r.projectGenerations[in.ProjectID] = in.Metadata.Generation
 	return nil
 }

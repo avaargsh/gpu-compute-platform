@@ -61,3 +61,49 @@ func TestBindingAPIRejectsCrossClusterRebind(t *testing.T) {
 		t.Fatalf("move status=%d, want 409", moved.StatusCode)
 	}
 }
+
+func TestMemoryPlacementRejectsProjectCrossClusterRebind(t *testing.T) {
+	resolver := NewMemoryPlacementResolver()
+	ctx := context.Background()
+
+	if err := resolver.UpsertProjectBinding(ctx, domain.ProjectBinding{
+		Metadata: domain.Metadata{Generation: 1},
+		ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "team-a",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := resolver.UpsertProjectBinding(ctx, domain.ProjectBinding{
+		Metadata: domain.Metadata{Generation: 2},
+		ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "team-b",
+	}); err != nil {
+		t.Fatalf("same-cluster namespace update failed: %v", err)
+	}
+	err := resolver.UpsertProjectBinding(ctx, domain.ProjectBinding{
+		Metadata: domain.Metadata{Generation: 3},
+		ProjectID: "project-1", ClusterID: "cluster-b", Namespace: "team-b",
+	})
+	if !errors.Is(err, agentstore.ErrPlacementMigrationRequired) {
+		t.Fatalf("expected placement migration requirement, got %v", err)
+	}
+}
+
+func TestProjectBindingAPIRejectsCrossClusterRebind(t *testing.T) {
+	bindings := NewMemoryPlacementResolver()
+	router := NewRouterWithDependencies(agentstore.NewMemory(), bindings)
+
+	first := httptest.NewRequest(http.MethodPut, "/api/v1/projects/project-1/binding", strings.NewReader(`{"metadata":{"generation":1},"projectId":"project-1","clusterId":"cluster-a","namespace":"team-a"}`))
+	first.Header.Set("Content-Type", "application/json")
+	firstResponse := httptest.NewRecorder()
+	router.ServeHTTP(firstResponse, first)
+	if firstResponse.Code != http.StatusNoContent {
+		t.Fatalf("initial project binding status=%d body=%s", firstResponse.Code, firstResponse.Body.String())
+	}
+
+	move := httptest.NewRequest(http.MethodPut, "/api/v1/projects/project-1/binding", strings.NewReader(`{"metadata":{"generation":2},"projectId":"project-1","clusterId":"cluster-b","namespace":"team-a"}`))
+	move.Header.Set("Content-Type", "application/json")
+	moveResponse := httptest.NewRecorder()
+	router.ServeHTTP(moveResponse, move)
+	if moveResponse.Code != http.StatusConflict {
+		t.Fatalf("cross-cluster project binding status=%d body=%s", moveResponse.Code, moveResponse.Body.String())
+	}
+}
