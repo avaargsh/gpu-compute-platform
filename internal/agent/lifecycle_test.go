@@ -24,7 +24,7 @@ func (f *lifecycleControl) Heartbeat(context.Context, Heartbeat) error {
 
 func TestLifecycleRegistersAndTicksImmediately(t *testing.T) {
 	control := &lifecycleControl{}
-	runner := NewRunner("cluster-a", control, fakeRuntime{})
+	runner := NewRunner("cluster-a", control, &fakeRuntime{})
 	lifecycle := NewLifecycle("cluster-a", control, runner, "dev", "v1.34.0", time.Hour)
 
 	ctx, cancel := context.WithCancel(context.Background())
