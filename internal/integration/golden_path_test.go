@@ -10,6 +10,7 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/agent/httpclient"
 	"github.com/avaargsh/gpu-compute-platform/internal/cluster"
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	corev1 "k8s.io/api/core/v1"
@@ -83,11 +84,17 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 	if len(observed) != 2 {
 		t.Fatalf("observations=%d, want 2: %#v", len(observed), observed)
 	}
-	if observed[0].ID != "pool-h100" || observed[0].ObservedGeneration != 1 {
-		t.Fatalf("unexpected pool observation: %#v", observed[0])
+	byID := make(map[domain.ID]agent.Observation, len(observed))
+	for _, item := range observed {
+		byID[item.ID] = item
 	}
-	if observed[1].ID != "train-1" || observed[1].ObservedGeneration != 1 {
-		t.Fatalf("unexpected workload observation: %#v", observed[1])
+	pool, ok := byID["pool-h100"]
+	if !ok || pool.ObservedGeneration != 1 {
+		t.Fatalf("unexpected pool observation: %#v", pool)
+	}
+	initialWorkload, ok := byID["train-1"]
+	if !ok || initialWorkload.ObservedGeneration != 1 {
+		t.Fatalf("unexpected workload observation: %#v", initialWorkload)
 	}
 
 	job, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, "job-train-1", metav1.GetOptions{})
