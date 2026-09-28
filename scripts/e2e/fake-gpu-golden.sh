@@ -14,11 +14,14 @@ for cmd in curl python kubectl docker; do need "$cmd"; done
 json() { python -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"; }
 request() {
   local method="$1" path="$2" body="${3:-}"
-  if [[ -n "$body" ]]; then
-    curl -fsS -X "$method" "$BASE_URL$path" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$body"
-  else
-    curl -fsS -X "$method" "$BASE_URL$path" -H "Authorization: Bearer $TOKEN"
+  local -a args=(-fsS -X "$method" "$BASE_URL$path")
+  if [[ -n "${TOKEN:-}" ]]; then
+    args+=(-H "Authorization: Bearer $TOKEN")
   fi
+  if [[ -n "$body" ]]; then
+    args+=(-H 'Content-Type: application/json' -d "$body")
+  fi
+  curl "${args[@]}"
 }
 wait_status() {
   local path="$1" expression="$2" deadline=$((SECONDS + TIMEOUT_SECONDS))
