@@ -49,3 +49,8 @@ class ComputePoolReconciler:
             await asyncio.to_thread(self.client.create_namespaced_custom_object, self.GROUP, self.VERSION, meta["namespace"], plural, manifest)
         else:
             await asyncio.to_thread(self.client.create_cluster_custom_object, self.GROUP, self.VERSION, plural, manifest)
+
+    @staticmethod
+    def _condition_true(resource: dict[str, Any], condition_type: str) -> bool:
+        conditions = resource.get("status", {}).get("conditions", [])
+        return any(item.get("type") == condition_type and str(item.get("status")) == "True" for item in conditions)
