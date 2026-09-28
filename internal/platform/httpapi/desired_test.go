@@ -14,8 +14,15 @@ func TestDesiredAPIWritesAgentPullState(t *testing.T) {
 	store := agentstore.NewMemory()
 	router := NewRouterWithAgentStore(store)
 
+	publicReq := httptest.NewRequest(http.MethodPut, "/api/v1/clusters/cluster-a/desired/Workload/train-1", strings.NewReader(`{"generation":1,"spec":{}}`))
+	publicRec := httptest.NewRecorder()
+	router.ServeHTTP(publicRec, publicReq)
+	if publicRec.Code != http.StatusNotFound {
+		t.Fatalf("raw desired public route status=%d, want 404", publicRec.Code)
+	}
+
 	body := `{"generation":7,"spec":{"projectID":"project-1","poolID":"pool-1","namespace":"project-1","image":"example/train:latest"}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/clusters/cluster-a/desired/Workload/train-1", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/internal/clusters/cluster-a/desired/Workload/train-1", strings.NewReader(body))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
@@ -30,7 +37,7 @@ func TestDesiredAPIWritesAgentPullState(t *testing.T) {
 		t.Fatalf("unexpected desired state: %#v", items)
 	}
 
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/clusters/cluster-a/desired/Workload/train-1", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/internal/clusters/cluster-a/desired/Workload/train-1", nil)
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {
