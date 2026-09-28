@@ -101,14 +101,16 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 				if !ownedByJob(workload.GetOwnerReferences(), job.UID) {
 					continue
 				}
+				out.WorkloadName = workload.GetName()
 				conditions, found, err := unstructured.NestedSlice(workload.Object, "status", "conditions")
 				if err != nil {
 					return JobObservation{}, err
 				}
-				if found && conditionTrue(conditions, "Admitted") {
-					out.Admitted = true
-					break
+				if found {
+					out.QuotaReserved = conditionTrue(conditions, "QuotaReserved")
+					out.Admitted = conditionTrue(conditions, "Admitted")
 				}
+				break
 			}
 		}
 	}
