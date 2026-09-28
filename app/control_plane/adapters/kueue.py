@@ -71,4 +71,6 @@ class KueueManifestBuilder:
                 }
             },
         }
+        if self.binding.priority_class:
+            manifest["spec"]["template"]["spec"]["priorityClassName"] = self.binding.priority_class
         return manifest
