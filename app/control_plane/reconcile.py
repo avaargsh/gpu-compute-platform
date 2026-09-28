@@ -24,10 +24,7 @@ class Reconciler:
         self.provider = provider
 
     async def reconcile(self, desired: Any, generation: int | None = None) -> ReconcileResult:
-        try:
-            provider_ref = await self.provider.apply(desired, generation=generation)
-        except TypeError:
-            provider_ref = await self.provider.apply(desired)
+        provider_ref = await self.provider.apply(desired, generation=generation)
         try:
             raw = await self.provider.observe(provider_ref)
         except Exception as exc:
@@ -61,26 +58,48 @@ class Reconciler:
             return ReconcileResult(provider_ref=provider_ref, state=state)
 
         phase = Phase(raw.get("phase", Phase.PENDING))
-        ready = phase == Phase.READY
-        condition = Condition(
-            type="Ready",
-            status=ready,
-            reason=raw.get("reason", phase.value),
-            message=raw.get("message", ""),
-            observed_generation=generation,
-        )
-        evidence = [
-            EvidenceRef.model_validate(item)
-            for item in raw.get("evidence_refs", [])
+        conditions = [
+            Condition(
+                type="Ready",
+                status=phase == Phase.READY,
+                reason=raw.get("reason", phase.value),
+                message=raw.get("message", ""),
+                observed_generation=generation,
+            )
         ]
+        if raw.get("admitted") is not None:
+            admitted = bool(raw["admitted"])
+            conditions.append(
+                Condition(
+                    type="Admitted",
+                    status=admitted,
+                    reason="Admitted" if admitted else "PendingAdmission",
+                    observed_generation=generation,
+                )
+            )
+        if raw.get("replicas_ready") is not None:
+            pods_ready = int(raw["replicas_ready"] or 0)
+            conditions.append(
+                Condition(
+                    type="PodsReady",
+                    status=pods_ready > 0,
+                    reason="PodsReady" if pods_ready > 0 else "WaitingForPods",
+                    observed_generation=generation,
+                )
+            )
+
         state = ObservedState(
             phase=phase,
+            observed_generation=generation,
             conditions=conditions,
             provider_ref=provider_ref,
             endpoint=raw.get("endpoint"),
             replicas_ready=raw.get("replicas_ready"),
             admitted=raw.get("admitted"),
-            evidence_refs=evidence,
-            provider_status=raw.get("provider_status", {}),\n            observed_generation=generation,
+            evidence_refs=[
+                EvidenceRef.model_validate(item)
+                for item in raw.get("evidence_refs", [])
+            ],
+            provider_status=raw.get("provider_status", {}),
         )
         return ReconcileResult(provider_ref=provider_ref, state=state)
