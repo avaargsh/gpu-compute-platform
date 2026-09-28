@@ -15,7 +15,7 @@ func TestPlacementMigrationCreateDoesNotMutateBinding(t *testing.T) {
 	bindings := NewMemoryPlacementResolver()
 	if err := bindings.UpsertClusterBinding(t.Context(), domain.ClusterBinding{
 		Metadata: domain.Metadata{Generation: 1},
-		PoolID: "pool-1", ClusterID: "cluster-a", Provider: "kueue",
+		PoolID:   "pool-1", ClusterID: "cluster-a", Provider: "kueue",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestPlacementMigrationRequiresCurrentSource(t *testing.T) {
 	bindings := NewMemoryPlacementResolver()
 	if err := bindings.UpsertClusterBinding(t.Context(), domain.ClusterBinding{
 		Metadata: domain.Metadata{Generation: 1},
-		PoolID: "pool-1", ClusterID: "cluster-a", Provider: "kueue",
+		PoolID:   "pool-1", ClusterID: "cluster-a", Provider: "kueue",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestPlacementMigrationCreateIsIdempotent(t *testing.T) {
 	bindings := NewMemoryPlacementResolver()
 	if err := bindings.UpsertClusterBinding(t.Context(), domain.ClusterBinding{
 		Metadata: domain.Metadata{Generation: 1},
-		PoolID: "pool-1", ClusterID: "cluster-a", Provider: "kueue",
+		PoolID:   "pool-1", ClusterID: "cluster-a", Provider: "kueue",
 	}); err != nil {
 		t.Fatal(err)
 	}
