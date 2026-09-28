@@ -9,6 +9,9 @@ set -euo pipefail
 : "${PROJECT_ID:=project-golden}"
 : "${POOL_ID:=pool-h100}"
 : "${WORKLOAD_ID:=train-golden}"
+: "${INVALID_WORKLOAD_ID:=train-invalid}"
+: "${ACCELERATOR_RESOURCE:=nvidia.com/gpu}"
+: "${ACCELERATOR_FLAVOR:=h100-80g}"
 
 cleanup() {
   [[ -z "${AGENT_PID:-}" ]] || kill "$AGENT_PID" 2>/dev/null || true
@@ -77,7 +80,7 @@ kubectl apply --server-side -f "https://github.com/kubernetes-sigs/kueue/release
 kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout="${TIMEOUT_SECONDS}s"
 
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
-kubectl label node "$node" ai.compute/accelerator-class=h100-80g --overwrite
+kubectl label node "$node" nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3 --overwrite
 bash scripts/e2e/install-fake-gpu.sh
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
@@ -90,13 +93,52 @@ AGENT_PID=$!
 
 put "/api/v1/projects/$PROJECT_ID/binding" "{\"metadata\":{\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"clusterId\":\"$CLUSTER_ID\",\"namespace\":\"$NAMESPACE\"}"
 put "/api/v1/compute-pools/$POOL_ID/binding" "{\"metadata\":{\"generation\":1},\"poolId\":\"$POOL_ID\",\"clusterId\":\"$CLUSTER_ID\",\"provider\":\"kueue\"}"
-put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"h100-80g\",\"quota\":4}],\"scheduling\":{\"mode\":\"default\"}}}"
+put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"h100-80g\",\"quota\":4}],\"acceleratorBindings\":[{\"class\":\"h100-80g\",\"resourceName\":\"$ACCELERATOR_RESOURCE\",\"flavor\":\"$ACCELERATOR_FLAVOR\",\"nodeLabels\":{\"nvidia.com/gpu.product\":\"NVIDIA-H100-80GB-HBM3\"}}],\"scheduling\":{\"mode\":\"default\"}}}"
 put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"h100-80g\",\"quota\":1}}}"
 
 result="$(wait_workload)"
 condition_true "$result" "Admitted"
 requested="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.nvidia\.com/gpu}')"
-[[ "$requested" == "1" ]] || { echo "expected nvidia.com/gpu request=1, got $requested" >&2; exit 1; }
+[[ "$requested" == "1" ]] || { echo "expected $ACCELERATOR_RESOURCE request=1, got $requested" >&2; exit 1; }
+flavor_label="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o jsonpath='{.spec.nodeLabels.nvidia\.com/gpu\.product}')"
+[[ "$flavor_label" == "NVIDIA-H100-80GB-HBM3" ]] || { echo "unexpected H100 flavor node label: $flavor_label" >&2; exit 1; }
+
+# Replaying desired state must not drift the resolved Kubernetes projection.
+before="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o json)"
+put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"h100-80g\",\"quota\":1}}}"
+sleep 3
+after="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o json)"
+BEFORE="$before" AFTER="$after" python - <<'PY'
+import json, os
+before=json.loads(os.environ["BEFORE"])
+after=json.loads(os.environ["AFTER"])
+def projection(obj):
+    c=obj["spec"]["template"]["spec"]["containers"][0]
+    return {
+        "requests": c["resources"]["requests"],
+        "limits": c["resources"]["limits"],
+        "annotations": obj["metadata"].get("annotations", {}),
+        "labels": obj["metadata"].get("labels", {}),
+    }
+assert projection(before) == projection(after), (projection(before), projection(after))
+PY
+
+# An unbound portable class must fail closed before any Kubernetes Job is created.
+put "/api/v1/workloads/$INVALID_WORKLOAD_ID" "{\"metadata\":{\"id\":\"$INVALID_WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"exit 0\"],\"accelerator\":{\"class\":\"a100-invalid\",\"quota\":1}}}"
+sleep 3
+invalid="$(curl -fsS "$BASE_URL/api/v1/workloads/$INVALID_WORKLOAD_ID")"
+PAYLOAD="$invalid" python - <<'PY'
+import json, os
+data=json.loads(os.environ["PAYLOAD"])
+conditions=(data.get("status") or {}).get("conditions") or []
+failed=[c for c in conditions if c.get("type")=="Ready" and c.get("status")=="False" and c.get("reason")=="ReconcileFailed"]
+assert failed, conditions
+assert "accelerator binding not found: a100-invalid" in (failed[0].get("message") or ""), failed[0]
+PY
+if kubectl get job "job-$INVALID_WORKLOAD_ID" -n "$NAMESPACE" >/dev/null 2>&1; then
+  echo "fail-closed violated: invalid accelerator workload created a Job" >&2
+  exit 1
+fi
 
 echo "$result"
 echo "GO GOLDEN PASS: Control Plane -> Agent -> kind -> Kueue -> Job/Pod -> Observation -> Product GET"
