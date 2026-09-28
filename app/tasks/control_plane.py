@@ -60,7 +60,8 @@ async def _reconcile_resource(resource_key: str) -> None:
 
             from app.control_plane.domain import WorkloadSpec
             from app.control_plane.compute_pool import ComputePool
-            from app.control_plane.status import Condition, ObservedState, Phase
+            from app.control_plane.status import Phase
+            from app.control_plane.workload_gates import waiting_for_compute_pool
             workload = WorkloadSpec.model_validate(record.desired)
             project_id = resource_key.split("/")[1]
             pool_key = f"project/{project_id}/computepool/{workload.compute_pool.name}"
@@ -69,25 +70,10 @@ async def _reconcile_resource(resource_key: str) -> None:
                 raise RuntimeError(f"ComputePool {workload.compute_pool.name!r} not found")
             if pool_record.observed is None or pool_record.observed.phase != Phase.READY:
                 enqueue_reconcile(pool_key)
-                waiting_state = ObservedState(
-                    phase=Phase.PROGRESSING,
-                    observed_generation=record.generation,
-                    conditions=[
-                        Condition(
-                            type="Admitted",
-                            status=False,
-                            reason="ComputePoolNotReady",
-                            message=f"waiting for ComputePool {workload.compute_pool.name!r} to become Ready",
-                            observed_generation=record.generation,
-                        ),
-                        Condition(
-                            type="Ready",
-                            status=False,
-                            reason="ComputePoolNotReady",
-                            observed_generation=record.generation,
-                        ),
-                    ],
-                    provider_status={"blocked_by": pool_key},
+                waiting_state = waiting_for_compute_pool(
+                    workload.compute_pool.name,
+                    pool_key,
+                    record.generation,
                 )
                 await store.put_observed(resource_key, record.generation, waiting_state)
                 logger.info("compute pool not ready; deferring workload key=%s pool=%s", resource_key, pool_key)
