@@ -4,10 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/provider"
 )
-
-const gpuResourceName = "nvidia.com/gpu"
 
 func ProjectPool(in provider.PoolProjection) (PoolResources, error) {
 	if in.PoolID == "" || in.ClusterID == "" || in.Namespace == "" {
@@ -23,27 +22,49 @@ func ProjectPool(in provider.PoolProjection) (PoolResources, error) {
 		},
 	}
 
+	bindings := make(map[string]domain.AcceleratorBinding, len(in.AcceleratorBindings))
+	for _, binding := range in.AcceleratorBindings {
+		if binding.Class == "" || binding.ResourceName == "" || binding.Flavor == "" {
+			return PoolResources{}, fmt.Errorf("accelerator binding class, resource name and flavor are required")
+		}
+		if _, exists := bindings[binding.Class]; exists {
+			return PoolResources{}, fmt.Errorf("duplicate accelerator binding: %s", binding.Class)
+		}
+		bindings[binding.Class] = binding
+	}
+
 	for _, accelerator := range in.Accelerators {
 		if accelerator.Class == "" || accelerator.Quota <= 0 {
 			return PoolResources{}, fmt.Errorf("accelerator class and positive quota are required")
 		}
-
-		flavor := resourceName("accel", accelerator.Class)
+		binding, ok := bindings[accelerator.Class]
+		if !ok {
+			return PoolResources{}, fmt.Errorf("accelerator binding not found: %s", accelerator.Class)
+		}
 		out.Flavors = append(out.Flavors, ResourceFlavor{
-			Name:         flavor,
-			ResourceName: gpuResourceName,
-			NodeLabels: map[string]string{
-				"ai.compute/accelerator-class": accelerator.Class,
-			},
+			Name:         binding.Flavor,
+			ResourceName: binding.ResourceName,
+			NodeLabels:   cloneLabels(binding.NodeLabels),
 		})
 		out.ClusterQueue.Quotas = append(out.ClusterQueue.Quotas, ResourceQuota{
-			Flavor:   flavor,
-			Resource: gpuResourceName,
+			Flavor:   binding.Flavor,
+			Resource: binding.ResourceName,
 			Nominal:  accelerator.Quota,
 		})
 	}
 
 	return out, nil
+}
+
+func cloneLabels(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func resourceName(prefix, value string) string {
