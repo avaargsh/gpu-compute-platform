@@ -29,7 +29,7 @@ func NewRouterWithAgentStore(store agentstore.Store) http.Handler {
 	mux.HandleFunc("PUT /api/v1/workloads/{resourceID}", resourceAPI.UpsertWorkload)
 
 	desiredAPI := NewDesiredAPI(store)
-	mux.HandleFunc("PUT /api/v1/clusters/{clusterID}/desired/{kind}/{resourceID}", desiredAPI.Upsert)
-	mux.HandleFunc("DELETE /api/v1/clusters/{clusterID}/desired/{kind}/{resourceID}", desiredAPI.Delete)
+	mux.HandleFunc("PUT /api/v1/internal/clusters/{clusterID}/desired/{kind}/{resourceID}", desiredAPI.Upsert)
+	mux.HandleFunc("DELETE /api/v1/internal/clusters/{clusterID}/desired/{kind}/{resourceID}", desiredAPI.Delete)
 	return mux
 }
