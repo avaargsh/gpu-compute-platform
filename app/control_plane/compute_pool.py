@@ -1,4 +1,9 @@
-"""ComputePool scheduling bindings and Kueue resource manifests."""
+"""ComputePool scheduling bindings and Kueue resource manifests.
+
+AcceleratorClass describes WHAT the user needs. ComputePool describes WHERE and
+policy. AcceleratorBinding describes HOW that intent maps to provider-private
+quota, placement and device mechanisms.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +22,24 @@ class DeviceBinding(BaseModel):
     device_class_name: str | None = None
     hami_memory_resource_name: str | None = None
     memory_mb: int | None = Field(default=None, ge=1)
+
+
+class QuotaBinding(BaseModel):
+    resource: str
+    flavor: str | None = None
+
+
+class PlacementBinding(BaseModel):
+    scheduler: str = "default"
+    topology: str | None = None
+
+
+class AcceleratorBinding(BaseModel):
+    """Provider-private realization of a portable AcceleratorClass."""
+
+    quota: QuotaBinding
+    device: DeviceBinding = Field(default_factory=DeviceBinding)
+    placement: PlacementBinding = Field(default_factory=PlacementBinding)
 
 
 class AdmissionPolicy(BaseModel):
@@ -38,6 +61,9 @@ class KueuePoolBinding(BaseModel):
     local_queue: str
     cluster_queue: str
     cohort: str | None = None
+    # New portable-class -> provider-private realization map. Existing flavors /
+    # quotas remain supported during Phase 0 migration.
+    accelerators: dict[str, AcceleratorBinding] = Field(default_factory=dict)
     flavors: list[ResourceFlavorBinding] = Field(default_factory=list)
     quotas: list[ResourceQuota] = Field(default_factory=list)
     admission: AdmissionPolicy = Field(default_factory=AdmissionPolicy)
@@ -91,6 +117,10 @@ class KueuePoolManifestBuilder:
         }
         if binding.cohort:
             cluster_queue_spec["cohort"] = binding.cohort
+        if binding.admission.admission_checks:
+            cluster_queue_spec["admissionChecks"] = binding.admission.admission_checks
+        if binding.admission.fair_sharing:
+            cluster_queue_spec["fairSharing"] = {}
 
         manifests.append(
             {
