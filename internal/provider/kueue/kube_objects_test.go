@@ -13,15 +13,15 @@ func TestJobObjectCarriesQueueAndGPURequest(t *testing.T) {
 		Image:     "example/train:latest",
 		Command:   []string{"python", "train.py"},
 		Resources: map[string]int64{gpuResourceName: 2},
-		Annotations: map[string]string{
+		Labels: map[string]string{
 			"kueue.x-k8s.io/queue-name": "lq-pool-h100",
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Annotations["kueue.x-k8s.io/queue-name"] != "lq-pool-h100" {
-		t.Fatalf("queue annotation missing")
+	if job.Labels["kueue.x-k8s.io/queue-name"] != "lq-pool-h100" {
+		t.Fatalf("queue label missing")
 	}
 	got := job.Spec.Template.Spec.Containers[0].Resources.Requests[corev1.ResourceName(gpuResourceName)]
 	if got.Value() != 2 {
