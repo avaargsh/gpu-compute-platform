@@ -41,12 +41,12 @@ func TestProviderAppliesPoolResourcesInDependencyOrder(t *testing.T) {
 	p := NewProvider(client)
 
 	got, err := p.ReconcilePool(context.Background(), baseprovider.PoolProjection{
-		PoolID:       "pool-1",
-		ProjectID:    "project-1",
-		ClusterID:    "cluster-a",
-		Namespace:    "project-1",
-		Generation:   7,
-		Accelerators: []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 8}},
+		PoolID:              "pool-1",
+		ProjectID:           "project-1",
+		ClusterID:           "cluster-a",
+		Namespace:           "project-1",
+		Generation:          7,
+		Accelerators:        []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 8}},
 		AcceleratorBindings: []domain.AcceleratorBinding{{Class: "h100-80g", ResourceName: "nvidia.com/gpu", Flavor: "h100-80g"}},
 	})
 	if err != nil {
