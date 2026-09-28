@@ -50,11 +50,11 @@ func (a *ResourceAPI) UpsertComputePool(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	spec := map[string]any{
-		"projectID":    in.ProjectID,
-		"namespace":    projectPlacement.Namespace,
+		"projectID":           in.ProjectID,
+		"namespace":           projectPlacement.Namespace,
 		"accelerators":        in.Spec.Accelerators,
 		"acceleratorBindings": in.Spec.AcceleratorBindings,
-		"scheduling":   in.Spec.Scheduling,
+		"scheduling":          in.Spec.Scheduling,
 	}
 	if err := a.store.UpsertDesired(r.Context(), poolPlacement.ClusterID, agent.DesiredResource{
 		Kind: "ComputePool", ID: in.Metadata.ID, Generation: in.Metadata.Generation, Spec: spec,
@@ -212,10 +212,10 @@ func projectComputePool(desired agent.DesiredResource) (computePoolView, error) 
 		return computePoolView{}, err
 	}
 	var projected struct {
-		ProjectID    domain.ID                   `json:"projectID"`
+		ProjectID           domain.ID                   `json:"projectID"`
 		Accelerators        []domain.AcceleratorRequest `json:"accelerators"`
 		AcceleratorBindings []domain.AcceleratorBinding `json:"acceleratorBindings"`
-		Scheduling   domain.SchedulingPolicy     `json:"scheduling"`
+		Scheduling          domain.SchedulingPolicy     `json:"scheduling"`
 	}
 	if err := json.Unmarshal(raw, &projected); err != nil {
 		return computePoolView{}, err
