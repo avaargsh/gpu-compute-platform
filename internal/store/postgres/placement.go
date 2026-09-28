@@ -107,4 +107,3 @@ WHERE pool_id = $1
 	}
 	return agentstore.ErrStaleGeneration
 }
-
