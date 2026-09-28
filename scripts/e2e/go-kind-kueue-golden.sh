@@ -180,8 +180,10 @@ if kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Pool cleanup is dependency-gated behind workloads and removes namespaced
-# queue state before cluster-scoped queue/flavor state.
+# Pool cleanup is dependency-gated behind workloads and removes resources
+# owned by that pool. ResourceFlavor is cluster-scoped and may be shared by
+# multiple pools, so pool finalization must not garbage-collect it without
+# explicit control-plane ownership/reference tracking.
 delete_desired "ComputePool" "$POOL_ID"
 wait_api_gone "/api/v1/compute-pools/$POOL_ID"
 if kubectl get localqueue "lq-$POOL_ID" -n "$NAMESPACE" >/dev/null 2>&1; then
@@ -192,8 +194,8 @@ if kubectl get clusterqueue "cq-$POOL_ID" >/dev/null 2>&1; then
   echo "ClusterQueue survived pool finalization" >&2
   exit 1
 fi
-if kubectl get resourceflavor "$ACCELERATOR_FLAVOR" >/dev/null 2>&1; then
-  echo "ResourceFlavor survived pool finalization" >&2
+if ! kubectl get resourceflavor "$ACCELERATOR_FLAVOR" >/dev/null 2>&1; then
+  echo "shared ResourceFlavor was incorrectly deleted by pool finalization" >&2
   exit 1
 fi
 
