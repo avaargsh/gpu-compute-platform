@@ -86,12 +86,29 @@ func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Obser
 		previous[item.Kind+"/"+string(item.ID)] = item
 	}
 	out := append([]agent.Observation(nil), in...)
+	filtered := out[:0]
 	for i := range out {
 		if old, ok := previous[out[i].Kind+"/"+string(out[i].ID)]; ok {
+			if out[i].ObservedGeneration < old.ObservedGeneration {
+				continue
+			}
 			out[i].Conditions = MergeConditions(old.Conditions, out[i].Conditions)
 		}
+		filtered = append(filtered, out[i])
 	}
-	m.observations[clusterID] = out
+	for key, old := range previous {
+		found := false
+		for _, item := range filtered {
+			if item.Kind+"/"+string(item.ID) == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			filtered = append(filtered, old)
+		}
+	}
+	m.observations[clusterID] = filtered
 	return nil
 }
 
