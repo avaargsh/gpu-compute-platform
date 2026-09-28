@@ -80,7 +80,18 @@ func (m *Memory) DeleteDesired(_ context.Context, clusterID domain.ID, kind stri
 func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Observation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.observations[clusterID] = append([]agent.Observation(nil), in...)
+
+	previous := make(map[string]agent.Observation, len(m.observations[clusterID]))
+	for _, item := range m.observations[clusterID] {
+		previous[item.Kind+"/"+string(item.ID)] = item
+	}
+	out := append([]agent.Observation(nil), in...)
+	for i := range out {
+		if old, ok := previous[out[i].Kind+"/"+string(out[i].ID)]; ok {
+			out[i].Conditions = MergeConditions(old.Conditions, out[i].Conditions)
+		}
+	}
+	m.observations[clusterID] = out
 	return nil
 }
 
