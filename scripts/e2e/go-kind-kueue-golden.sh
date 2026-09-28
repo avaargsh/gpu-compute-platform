@@ -147,5 +147,55 @@ if kubectl get job "job-$INVALID_WORKLOAD_ID" -n "$NAMESPACE" >/dev/null 2>&1; t
   exit 1
 fi
 
+delete_desired() {
+  local kind="$1" resource_id="$2"
+  code="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+    "$BASE_URL/api/v1/internal/clusters/$CLUSTER_ID/desired/$kind/$resource_id")"
+  [[ "$code" == "202" ]] || { echo "delete $kind/$resource_id returned HTTP $code" >&2; exit 1; }
+}
+
+wait_api_gone() {
+  local path="$1"
+  local deadline=$((SECONDS + TIMEOUT_SECONDS)) code
+  while (( SECONDS < deadline )); do
+    code="$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL$path" || true)"
+    [[ "$code" == "404" ]] && return 0
+    sleep 2
+  done
+  echo "timeout waiting for API resource to disappear: $path" >&2
+  return 1
+}
+
+# Deletion lifecycle: failed projections must still be deletable because cleanup
+# identity is independent of accelerator resolution.
+delete_desired "Workload" "$INVALID_WORKLOAD_ID"
+wait_api_gone "/api/v1/workloads/$INVALID_WORKLOAD_ID"
+
+# A realized workload must be cleaned at the provider before desired state is
+# finalized. The finalization transaction also removes observation and lease.
+delete_desired "Workload" "$WORKLOAD_ID"
+wait_api_gone "/api/v1/workloads/$WORKLOAD_ID"
+if kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" >/dev/null 2>&1; then
+  echo "workload desired state finalized before provider Job was gone" >&2
+  exit 1
+fi
+
+# Pool cleanup is dependency-gated behind workloads and removes namespaced
+# queue state before cluster-scoped queue/flavor state.
+delete_desired "ComputePool" "$POOL_ID"
+wait_api_gone "/api/v1/compute-pools/$POOL_ID"
+if kubectl get localqueue "lq-$POOL_ID" -n "$NAMESPACE" >/dev/null 2>&1; then
+  echo "LocalQueue survived pool finalization" >&2
+  exit 1
+fi
+if kubectl get clusterqueue "cq-$POOL_ID" >/dev/null 2>&1; then
+  echo "ClusterQueue survived pool finalization" >&2
+  exit 1
+fi
+if kubectl get resourceflavor "$ACCELERATOR_FLAVOR" >/dev/null 2>&1; then
+  echo "ResourceFlavor survived pool finalization" >&2
+  exit 1
+fi
+
 echo "$result"
-echo "GO GOLDEN PASS: Control Plane -> Agent -> kind -> Kueue -> Job/Pod -> Observation -> Product GET"
+echo "GO GOLDEN PASS: Control Plane -> Agent -> kind -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete"
