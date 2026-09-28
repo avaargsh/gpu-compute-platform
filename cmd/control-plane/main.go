@@ -30,7 +30,7 @@ func main() {
 	}
 }
 
-func buildStore() (agentstore.Store, httpapi.PlacementResolver, func()) {
+func buildStore() (agentstore.Store, httpapi.BindingStore, func()) {
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
 		log.Print("DATABASE_URL is empty; using in-memory agent store")
