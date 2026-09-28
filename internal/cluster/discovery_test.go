@@ -25,6 +25,7 @@ func TestDiscoverFindsKueueAndAccelerators(t *testing.T) {
 			"metadata":   map[string]any{"name": "existing"},
 		},
 	)
+	)
 	coreClient := kubefake.NewSimpleClientset(
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{
 			Name:   "gpu-1",
