@@ -63,15 +63,11 @@ func TestResourceAPIRejectsPathBodyIdentityMismatch(t *testing.T) {
 	server := httptest.NewServer(boundRouter(agentstore.NewMemory(), "cluster-a", "cluster-a"))
 	defer server.Close()
 	body := []byte(`{"metadata":{"id":"other","generation":1},"projectId":"project-1","poolId":"pool-h100","spec":{"image":"example/train:latest","accelerator":{"class":"h100-80g","quota":1}}}`)
-	resp, err := http.Post(server.URL+"/unused", "application/json", nil)
-	if err == nil {
-		resp.Body.Close()
-	}
 	req, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/workloads/train-1", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err = server.Client().Do(req)
+	resp, err := server.Client().Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
