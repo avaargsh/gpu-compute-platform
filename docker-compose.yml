@@ -36,13 +36,6 @@ services:
     restart: unless-stopped
     networks:
       - gpu-platform
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   # Celery worker for background tasks
   celery-worker:
@@ -50,7 +43,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: app
-    command: celery -A app.core.celery_app.celery_app worker -Q default,gpu_tasks -l info --concurrency=4
+    command: celery -A app.core.celery_app.celery_app worker -Q control_plane -l info --concurrency=4
     environment:
       - ENVIRONMENT=development
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gpu_platform
@@ -74,13 +67,6 @@ services:
     restart: unless-stopped
     networks:
       - gpu-platform
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   # PostgreSQL database
   postgres:
