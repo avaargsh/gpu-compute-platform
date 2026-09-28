@@ -74,19 +74,20 @@ func jobObject(in Job) (*batchv1.Job, error) {
 		return nil, fmt.Errorf("positive gpu resource is required")
 	}
 	qty := *resource.NewQuantity(gpu, resource.DecimalSI)
-	labels := cloneStringMap(in.Labels)
-	labels["ai.compute/workload"] = in.Name
+	jobLabels := cloneStringMap(in.Labels)
+	jobLabels["ai.compute/workload"] = in.Name
+	podLabels := map[string]string{"ai.compute/workload": in.Name}
 
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        in.Name,
 			Namespace:   in.Namespace,
 			Annotations: cloneStringMap(in.Annotations),
-			Labels:      labels,
+			Labels:      jobLabels,
 		},
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: podLabels},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
