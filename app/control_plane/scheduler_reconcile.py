@@ -12,10 +12,7 @@ class SchedulerReconcileProvider:
     async def apply(self, desired: WorkloadSpec, generation: int | None = None) -> str:
         key = f"{desired.name}:g{generation}" if generation is not None else desired.name
         if key not in self._refs:
-            try:
-                self._refs[key] = await self.scheduler.submit(desired, generation=generation)
-            except TypeError:
-                self._refs[key] = await self.scheduler.submit(desired)
+            self._refs[key] = await self.scheduler.submit(desired, generation=generation)
         return self._refs[key]
 
     async def delete(self, provider_ref: str) -> None:
