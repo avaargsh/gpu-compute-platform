@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: migrate compose-migrate test contract-test kind-up install-kueue install-fake-gpu e2e-golden e2e-gpu-golden e2e-up
+.PHONY: migrate compose-migrate test contract-test kind-up install-kueue install-fake-gpu e2e-golden e2e-gpu-golden e2e-up e2e-gpu-up
 
 migrate:
 	uv run alembic upgrade head
@@ -32,3 +32,6 @@ e2e-gpu-golden:
 
 e2e-up:
 	./scripts/e2e/up.sh
+
+e2e-gpu-up:
+	bash scripts/e2e/gpu-up.sh
