@@ -13,6 +13,7 @@ done
 
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
 kubectl label node "$node" run.ai/simulated-gpu-node-pool=default --overwrite
+kubectl label node "$node" nvidia.com/gpu.product=Tesla-K80 --overwrite
 # Simulate the product label normally published by NVIDIA GPU discovery so the
 # H100 ResourceFlavor exercises the same node-selection contract in kind.
 kubectl label node "$node" nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3 --overwrite
