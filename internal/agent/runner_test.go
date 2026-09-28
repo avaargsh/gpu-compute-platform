@@ -11,8 +11,11 @@ import (
 )
 
 type fakeControlPlane struct {
-	desired  []DesiredResource
-	reported []Observation
+	desired       []DesiredResource
+	reported      []Observation
+	leaseClaimed  bool
+	claimCalls    int
+	releaseCalls  int
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }
@@ -22,6 +25,17 @@ func (f *fakeControlPlane) PullDesired(context.Context, domain.ID) ([]DesiredRes
 }
 func (f *fakeControlPlane) Report(_ context.Context, _ domain.ID, observations []Observation) error {
 	f.reported = append(f.reported, observations...)
+	return nil
+}
+func (f *fakeControlPlane) ClaimReconcileLease(_ context.Context, _ ReconcileLeaseRequest) (bool, error) {
+	f.claimCalls++
+	if !f.leaseClaimed {
+		return true, nil
+	}
+	return f.leaseClaimed, nil
+}
+func (f *fakeControlPlane) ReleaseReconcileLease(_ context.Context, _ ReconcileLeaseRequest) error {
+	f.releaseCalls++
 	return nil
 }
 
