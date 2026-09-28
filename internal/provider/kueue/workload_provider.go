@@ -19,12 +19,12 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 		return baseprovider.WorkloadObservation{}, err
 	}
 	if err := p.client.ApplyJob(ctx, job); err != nil {
-		return baseprovider.WorkloadObservation{}, fmt.Errorf("apply job: %w", err)
+		return baseprovider.WorkloadObservation{}, fmt.Errorf("apply job: %w", classifyProviderError(err))
 	}
 
 	state, err := p.client.ObserveJob(ctx, job.Namespace, job.Name)
 	if err != nil {
-		return baseprovider.WorkloadObservation{}, fmt.Errorf("observe job: %w", err)
+		return baseprovider.WorkloadObservation{}, fmt.Errorf("observe job: %w", classifyProviderError(err))
 	}
 
 	now := time.Now().UTC()
