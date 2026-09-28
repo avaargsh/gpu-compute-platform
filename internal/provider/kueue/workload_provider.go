@@ -120,3 +120,23 @@ func readyReason(state JobObservation) string {
 		return "Pending"
 	}
 }
+
+func (p *Provider) DeleteWorkload(ctx context.Context, projection baseprovider.WorkloadProjection) (baseprovider.DeletionObservation, error) {
+	if p.client == nil {
+		return baseprovider.DeletionObservation{}, fmt.Errorf("kueue client is required")
+	}
+	job, err := ProjectWorkload(projection)
+	if err != nil {
+		return baseprovider.DeletionObservation{}, err
+	}
+	gone, err := p.client.DeleteJob(ctx, job.Namespace, job.Name)
+	if err != nil {
+		return baseprovider.DeletionObservation{}, fmt.Errorf("delete job: %w", classifyProviderError(err))
+	}
+	return baseprovider.DeletionObservation{
+		Gone: gone,
+		EvidenceRefs: []string{
+			fmt.Sprintf("k8s://%s/namespaces/%s/jobs/%s", projection.ClusterID, job.Namespace, job.Name),
+		},
+	}, nil
+}
