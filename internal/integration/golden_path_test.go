@@ -41,7 +41,6 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 				"projectID": "project-1",
 				"poolID":    "pool-h100",
 				"namespace": "project-1",
-				"queueName": "lq-pool-h100",
 				"image":     "example/train:latest",
 				"accelerator": map[string]any{
 					"class": "h100-80g",
