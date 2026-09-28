@@ -7,13 +7,14 @@ import (
 )
 
 type PoolProjection struct {
-	PoolID       domain.ID
-	ProjectID    domain.ID
-	ClusterID    domain.ID
-	Namespace    string
-	Generation   int64
-	Accelerators []domain.AcceleratorRequest
-	Scheduling   domain.SchedulingPolicy
+	PoolID              domain.ID
+	ProjectID           domain.ID
+	ClusterID           domain.ID
+	Namespace           string
+	Generation          int64
+	Accelerators        []domain.AcceleratorRequest
+	AcceleratorBindings []domain.AcceleratorBinding
+	Scheduling          domain.SchedulingPolicy
 }
 
 type PoolObservation struct {
@@ -23,15 +24,16 @@ type PoolObservation struct {
 }
 
 type WorkloadProjection struct {
-	WorkloadID  domain.ID
-	ProjectID   domain.ID
-	PoolID      domain.ID
-	ClusterID   domain.ID
-	Namespace   string
-	Generation  int64
-	Image       string
-	Command     []string
-	Accelerator domain.AcceleratorRequest
+	WorkloadID         domain.ID
+	ProjectID          domain.ID
+	PoolID             domain.ID
+	ClusterID          domain.ID
+	Namespace          string
+	Generation         int64
+	Image              string
+	Command            []string
+	Accelerator        domain.AcceleratorRequest
+	AcceleratorBinding domain.AcceleratorBinding
 }
 
 type WorkloadObservation struct {
