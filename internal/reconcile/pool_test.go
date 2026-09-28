@@ -12,6 +12,10 @@ type fakeComputeProvider struct {
 	last provider.PoolProjection
 }
 
+func (f *fakeComputeProvider) DeletePool(_ context.Context, _ provider.PoolProjection) (provider.DeletionObservation, error) {
+	return provider.DeletionObservation{Gone: true}, nil
+}
+
 func (f *fakeComputeProvider) ReconcilePool(_ context.Context, p provider.PoolProjection) (provider.PoolObservation, error) {
 	f.last = p
 	return provider.PoolObservation{
