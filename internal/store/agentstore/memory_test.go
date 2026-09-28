@@ -103,3 +103,64 @@ func observationsByKey(items []agent.Observation) map[string]agent.Observation {
 	}
 	return out
 }
+
+func TestReportRejectsObservationStaleAgainstDesiredGeneration(t *testing.T) {
+	store := NewMemory()
+	clusterID := domain.ID("cluster-a")
+	store.SetDesired(clusterID, []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-1", Generation: 2,
+	}})
+
+	if err := store.Report(context.Background(), clusterID, []agent.Observation{{
+		Kind: "Workload", ID: "train-1", ObservedGeneration: 1,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "True"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.GetObservation(context.Background(), clusterID, "Workload", "train-1"); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("stale observation must not be persisted")
+	}
+
+	if err := store.Report(context.Background(), clusterID, []agent.Observation{{
+		Kind: "Workload", ID: "train-1", ObservedGeneration: 2,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "True"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := store.GetObservation(context.Background(), clusterID, "Workload", "train-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || got.ObservedGeneration != 2 {
+		t.Fatalf("current observation not persisted: %#v", got)
+	}
+}
+
+func TestReportMergesConditionsAtCurrentGeneration(t *testing.T) {
+	store := NewMemory()
+	clusterID := domain.ID("cluster-a")
+	store.SetDesired(clusterID, []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-1", Generation: 2,
+	}})
+	if err := store.Report(context.Background(), clusterID, []agent.Observation{{
+		Kind: "Workload", ID: "train-1", ObservedGeneration: 2,
+		Conditions: []domain.Condition{{Type: "Admitted", Status: "True"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Report(context.Background(), clusterID, []agent.Observation{{
+		Kind: "Workload", ID: "train-1", ObservedGeneration: 2,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "True"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := store.GetObservation(context.Background(), clusterID, "Workload", "train-1")
+	if err != nil || !ok {
+		t.Fatalf("observation missing: ok=%v err=%v", ok, err)
+	}
+	if len(got.Conditions) != 2 {
+		t.Fatalf("expected merged conditions, got %#v", got.Conditions)
+	}
+}
