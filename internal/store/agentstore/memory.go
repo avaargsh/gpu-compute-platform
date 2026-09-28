@@ -9,7 +9,7 @@ import (
 )
 
 type Memory struct {
-	mu           sync.RWMutex
+	mu            sync.RWMutex
 	registrations map[domain.ID]agent.Registration
 	heartbeats    map[domain.ID]agent.Heartbeat
 	desired       map[domain.ID][]agent.DesiredResource
