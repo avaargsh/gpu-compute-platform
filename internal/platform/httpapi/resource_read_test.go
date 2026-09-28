@@ -84,9 +84,9 @@ func TestGetComputePoolProjectsStatus(t *testing.T) {
 	if err := store.UpsertDesired(context.Background(), "cluster-a", agent.DesiredResource{
 		Kind: "ComputePool", ID: "pool-h100", Generation: 4,
 		Spec: map[string]any{
-			"projectID": domain.ID("project-1"),
+			"projectID":    domain.ID("project-1"),
 			"accelerators": []domain.AcceleratorRequest{{Class: "h100", Quota: 8}},
-			"scheduling": domain.SchedulingPolicy{Mode: "default"},
+			"scheduling":   domain.SchedulingPolicy{Mode: "default"},
 		},
 	}); err != nil {
 		t.Fatal(err)

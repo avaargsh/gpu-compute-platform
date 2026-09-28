@@ -132,20 +132,20 @@ func projectWorkload(desired agent.DesiredResource) (workloadView, error) {
 		return workloadView{}, err
 	}
 	var projected struct {
-		ProjectID domain.ID           `json:"projectID"`
-		PoolID    domain.ID           `json:"poolID"`
-		Image     string              `json:"image"`
-		Command   []string            `json:"command"`
+		ProjectID   domain.ID                 `json:"projectID"`
+		PoolID      domain.ID                 `json:"poolID"`
+		Image       string                    `json:"image"`
+		Command     []string                  `json:"command"`
 		Accelerator domain.AcceleratorRequest `json:"accelerator"`
 	}
 	if err := json.Unmarshal(raw, &projected); err != nil {
 		return workloadView{}, err
 	}
 	return workloadView{
-		Metadata: domain.Metadata{ID: desired.ID, Generation: desired.Generation},
+		Metadata:  domain.Metadata{ID: desired.ID, Generation: desired.Generation},
 		ProjectID: projected.ProjectID,
-		PoolID: projected.PoolID,
-		Spec: domain.WorkloadSpec{Image: projected.Image, Command: projected.Command, Accelerator: projected.Accelerator},
+		PoolID:    projected.PoolID,
+		Spec:      domain.WorkloadSpec{Image: projected.Image, Command: projected.Command, Accelerator: projected.Accelerator},
 	}, nil
 }
 
@@ -187,10 +187,10 @@ func (a *ResourceAPI) GetWorkload(w http.ResponseWriter, r *http.Request) {
 }
 
 type computePoolView struct {
-	Metadata  domain.Metadata      `json:"metadata"`
-	ProjectID domain.ID            `json:"projectId"`
+	Metadata  domain.Metadata        `json:"metadata"`
+	ProjectID domain.ID              `json:"projectId"`
 	Spec      domain.ComputePoolSpec `json:"spec"`
-	Status    resourceState        `json:"status"`
+	Status    resourceState          `json:"status"`
 }
 
 func projectComputePool(desired agent.DesiredResource) (computePoolView, error) {
@@ -199,7 +199,7 @@ func projectComputePool(desired agent.DesiredResource) (computePoolView, error) 
 		return computePoolView{}, err
 	}
 	var projected struct {
-		ProjectID    domain.ID                    `json:"projectID"`
+		ProjectID    domain.ID                   `json:"projectID"`
 		Accelerators []domain.AcceleratorRequest `json:"accelerators"`
 		Scheduling   domain.SchedulingPolicy     `json:"scheduling"`
 	}
@@ -207,9 +207,9 @@ func projectComputePool(desired agent.DesiredResource) (computePoolView, error) 
 		return computePoolView{}, err
 	}
 	return computePoolView{
-		Metadata: domain.Metadata{ID: desired.ID, Generation: desired.Generation},
+		Metadata:  domain.Metadata{ID: desired.ID, Generation: desired.Generation},
 		ProjectID: projected.ProjectID,
-		Spec: domain.ComputePoolSpec{Accelerators: projected.Accelerators, Scheduling: projected.Scheduling},
+		Spec:      domain.ComputePoolSpec{Accelerators: projected.Accelerators, Scheduling: projected.Scheduling},
 	}, nil
 }
 
