@@ -18,6 +18,9 @@ class SchedulerReconcileProvider:
                 self._refs[key] = await self.scheduler.submit(desired)
         return self._refs[key]
 
+    async def delete(self, provider_ref: str) -> None:
+        await self.scheduler.cancel(provider_ref)
+
     async def observe(self, provider_ref: str) -> dict:
         status = await self.scheduler.status(provider_ref)
         phase = {
