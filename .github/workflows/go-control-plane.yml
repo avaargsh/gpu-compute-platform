@@ -23,7 +23,7 @@ jobs:
         run: go mod tidy
       - name: Format check
         run: |
-          files="$(gofmt -l .)"
+          files="$(find cmd internal -name '*.go' -type f -print0 | xargs -0 gofmt -l)"
           if [ -n "$files" ]; then
             echo "gofmt required for:"
             echo "$files"
