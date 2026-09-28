@@ -19,4 +19,8 @@ type Client interface {
 	ApplyLocalQueue(context.Context, LocalQueue) error
 	ApplyJob(context.Context, Job) error
 	ObserveJob(context.Context, string, string) (JobObservation, error)
+	DeleteJob(context.Context, string, string) (bool, error)
+	DeleteResourceFlavor(context.Context, string) (bool, error)
+	DeleteClusterQueue(context.Context, string) (bool, error)
+	DeleteLocalQueue(context.Context, string, string) (bool, error)
 }
