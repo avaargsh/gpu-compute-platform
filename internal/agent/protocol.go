@@ -39,6 +39,13 @@ type ReconcileLeaseResponse struct {
 	Claimed bool `json:"claimed"`
 }
 
+type FinalizeDesiredRequest struct {
+	ClusterID  domain.ID `json:"clusterId"`
+	Kind       string    `json:"kind"`
+	ResourceID domain.ID `json:"resourceId"`
+	Generation int64     `json:"generation"`
+}
+
 type Observation struct {
 	Kind               string             `json:"kind"`
 	ID                 domain.ID          `json:"id"`
@@ -54,4 +61,5 @@ type ControlPlane interface {
 	Report(context.Context, domain.ID, []Observation) error
 	ClaimReconcileLease(context.Context, ReconcileLeaseRequest) (bool, error)
 	ReleaseReconcileLease(context.Context, ReconcileLeaseRequest) error
+	FinalizeDesired(context.Context, FinalizeDesiredRequest) error
 }
