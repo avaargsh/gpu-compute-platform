@@ -99,11 +99,11 @@ func TestProjectPoolProjectsMIGPartitionAsExtendedResource(t *testing.T) {
 		PoolID: "pool-mig", ClusterID: "cluster-a", Namespace: "project-1",
 		Accelerators: []domain.AcceleratorRequest{{Class: "a100-1g-10gb", Quota: 4}},
 		AcceleratorBindings: []domain.AcceleratorBinding{{
-			Class: "a100-1g-10gb",
+			Class:          "a100-1g-10gb",
 			AllocationMode: domain.AcceleratorAllocationExtendedResource,
-			ResourceName: "nvidia.com/mig-1g.10gb",
-			Flavor: "a100-mig-1g-10gb",
-			Partition: &domain.AcceleratorPartition{Kind: domain.AcceleratorPartitionMIG, Profile: "1g.10gb"},
+			ResourceName:   "nvidia.com/mig-1g.10gb",
+			Flavor:         "a100-mig-1g-10gb",
+			Partition:      &domain.AcceleratorPartition{Kind: domain.AcceleratorPartitionMIG, Profile: "1g.10gb"},
 		}},
 	})
 	if err != nil {
