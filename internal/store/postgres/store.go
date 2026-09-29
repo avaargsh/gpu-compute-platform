@@ -334,6 +334,25 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3 AND generation = $4
 	return tx.Commit()
 }
 
+func (s *Store) FinalizedGeneration(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (int64, bool, error) {
+	if s.db == nil {
+		return 0, false, fmt.Errorf("postgres database is required")
+	}
+	var generation int64
+	err := s.db.QueryRowContext(ctx, `
+SELECT generation
+FROM deletion_tombstones
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, kind, resourceID).Scan(&generation)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return generation, true, nil
+}
+
 func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []agent.Observation) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
