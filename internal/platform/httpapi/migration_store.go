@@ -70,6 +70,7 @@ func sameMigrationIntent(a, b domain.PlacementMigration) bool {
 		a.Metadata.Generation == b.Metadata.Generation &&
 		a.PoolID == b.PoolID &&
 		a.SourceClusterID == b.SourceClusterID &&
+		a.SourceGeneration == b.SourceGeneration &&
 		a.TargetClusterID == b.TargetClusterID
 }
 
