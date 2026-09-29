@@ -61,3 +61,45 @@ func TestRetireRetryReturnsSucceededMigration(t *testing.T) {
 		t.Fatalf("status=%d, want 200", resp.StatusCode)
 	}
 }
+
+func TestCutoverRetrySucceedsAfterControlPlaneRestart(t *testing.T) {
+	ctx := t.Context()
+	recovered := NewMemoryPlacementResolver()
+	recovered.pools["pool-1"] = Placement{ClusterID: "cluster-b", Provider: "kueue"}
+	recovered.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
+		"migration-1": {
+			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
+			PoolID:   "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
+			Phase: domain.PlacementMigrationCutover,
+		},
+	}
+
+	server := httptest.NewServer(NewRouterWithDependencies(agentstore.NewMemory(), recovered))
+	defer server.Close()
+	resp, err := server.Client().Post(
+		server.URL+"/api/v1/compute-pools/pool-1/migrations/migration-1/cutover",
+		"application/json",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d, want 200 after recovered cutover replay", resp.StatusCode)
+	}
+	placement, err := recovered.ResolvePool(ctx, "pool-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if placement.ClusterID != "cluster-b" {
+		t.Fatalf("cluster=%s, want cluster-b", placement.ClusterID)
+	}
+	migration, err := recovered.GetPlacementMigration(ctx, "pool-1", "migration-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migration.Phase != domain.PlacementMigrationCutover {
+		t.Fatalf("phase=%s, want Cutover", migration.Phase)
+	}
+}
