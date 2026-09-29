@@ -42,12 +42,12 @@ func (c *Client) PullDesired(ctx context.Context, clusterID domain.ID) ([]agent.
 	return out, nil
 }
 
-func (c *Client) ClaimReconcileLease(ctx context.Context, in agent.ReconcileLeaseRequest) (bool, error) {
-	var out agent.ReconcileLeaseResponse
+func (c *Client) ClaimReconcileLease(ctx context.Context, in agent.ReconcileLeaseRequest) (agent.ReconcileLeaseGrant, error) {
+	var out agent.ReconcileLeaseGrant
 	if err := c.postJSON(ctx, "/api/v1/agent/reconcile-lease/claim", in, &out); err != nil {
-		return false, err
+		return agent.ReconcileLeaseGrant{}, err
 	}
-	return out.Claimed, nil
+	return out, nil
 }
 
 func (c *Client) ReleaseReconcileLease(ctx context.Context, in agent.ReconcileLeaseRequest) error {
