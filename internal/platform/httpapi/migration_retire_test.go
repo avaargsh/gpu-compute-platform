@@ -132,3 +132,49 @@ func TestRetireSourceWaitsForFinalizationEvidence(t *testing.T) {
 		t.Fatalf("unexpected evidence=%#v", migration.EvidenceRefs)
 	}
 }
+
+
+func TestRetireSourceWaitsWhileSourceObservationStillExists(t *testing.T) {
+	ctx := t.Context()
+	bindings := NewMemoryPlacementResolver()
+	bindings.pools["pool-1"] = Placement{ClusterID: "cluster-b", Provider: "kueue"}
+	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
+		"migration-1": {
+			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
+			PoolID:   "pool-1", SourceClusterID: "cluster-a", SourceGeneration: 7,
+			TargetClusterID: "cluster-b", Phase: domain.PlacementMigrationRetiring,
+		},
+	}
+	resources := agentstore.NewMemory()
+	if err := resources.Report(ctx, "cluster-a", []agent.Observation{{
+		Kind: "ComputePool", ID: "pool-1", ObservedGeneration: 7,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "False"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(NewRouterWithDependencies(resources, bindings))
+	defer server.Close()
+	resp, err := server.Client().Post(
+		server.URL+"/api/v1/compute-pools/pool-1/migrations/migration-1/retire-source",
+		"application/json",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d, want 202 while source observation remains", resp.StatusCode)
+	}
+	migration, err := bindings.GetPlacementMigration(ctx, "pool-1", "migration-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migration.Phase != domain.PlacementMigrationRetiring {
+		t.Fatalf("phase=%s, want Retiring", migration.Phase)
+	}
+	if len(migration.EvidenceRefs) != 0 {
+		t.Fatalf("unexpected evidence=%#v", migration.EvidenceRefs)
+	}
+}
