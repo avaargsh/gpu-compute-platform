@@ -39,12 +39,12 @@ func (f *fakeControlPlane) Report(_ context.Context, _ domain.ID, observations [
 	f.reported = append(f.reported, observations...)
 	return nil
 }
-func (f *fakeControlPlane) ClaimReconcileLease(_ context.Context, _ ReconcileLeaseRequest) (bool, error) {
+func (f *fakeControlPlane) ClaimReconcileLease(_ context.Context, in ReconcileLeaseRequest) (ReconcileLeaseGrant, error) {
 	f.claimCalls++
 	if f.denyLease {
-		return false, nil
+		return ReconcileLeaseGrant{}, nil
 	}
-	return true, nil
+	return ReconcileLeaseGrant{Claimed: true, Owner: in.Owner, Epoch: 1, ExpiresAt: time.Now().Add(2 * time.Minute)}, nil
 }
 func (f *fakeControlPlane) ReleaseReconcileLease(_ context.Context, _ ReconcileLeaseRequest) error {
 	f.releaseCalls++
