@@ -82,6 +82,7 @@ func (r *Runner) Sync(ctx context.Context) error {
 		if !grant.Claimed {
 			continue
 		}
+		lease.Epoch = grant.Epoch
 
 		if item.DeletionTimestamp != nil {
 			if item.Kind == "ComputePool" && hasDependentWorkload(desired, item.ID) {
@@ -114,6 +115,7 @@ func (r *Runner) Sync(ctx context.Context) error {
 
 			delete(r.retries, key)
 			finalObservation := Observation{
+				LeaseOwner: grant.Owner, LeaseEpoch: grant.Epoch,
 				Kind:               item.Kind,
 				ID:                 item.ID,
 				ObservedGeneration: item.Generation,
@@ -129,6 +131,7 @@ func (r *Runner) Sync(ctx context.Context) error {
 			}
 			if err := r.control.FinalizeDesired(ctx, FinalizeDesiredRequest{
 				ClusterID: r.clusterID, Kind: item.Kind, ResourceID: item.ID, Generation: item.Generation,
+				LeaseOwner: grant.Owner, LeaseEpoch: grant.Epoch,
 			}); err != nil {
 				_ = r.control.ReleaseReconcileLease(ctx, lease)
 				return fmt.Errorf("finalize desired resource %s: %w", key, err)
@@ -157,6 +160,8 @@ func (r *Runner) Sync(ctx context.Context) error {
 			}
 		}
 
+		observation.LeaseOwner = grant.Owner
+		observation.LeaseEpoch = grant.Epoch
 		reportErr := r.control.Report(ctx, r.clusterID, []Observation{observation})
 		releaseErr := r.control.ReleaseReconcileLease(ctx, lease)
 		if reportErr != nil {
