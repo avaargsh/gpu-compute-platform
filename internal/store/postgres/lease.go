@@ -61,17 +61,17 @@ func (s *Store) ReleaseReconcileLease(
 	kind string,
 	resourceID domain.ID,
 	owner string,
-	epoch int64,
+	epoch ...int64,
 ) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	if owner == "" || epoch <= 0 {
-		return fmt.Errorf("reconcile lease owner and positive epoch are required")
+	if owner == "" {
+		return fmt.Errorf("reconcile lease owner is required")
 	}
 	_, err := s.db.ExecContext(ctx, `
 DELETE FROM reconcile_leases
-WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3 AND owner = $4 AND epoch = $5
-`, clusterID, kind, resourceID, owner, epoch)
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3 AND owner = $4 AND ($5 = 0 OR epoch = $5)
+`, clusterID, kind, resourceID, owner, func() int64 { if len(epoch) > 0 { return epoch[0] }; return 0 }())
 	return err
 }
