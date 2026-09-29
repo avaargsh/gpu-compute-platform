@@ -9,7 +9,7 @@ import (
 )
 
 func TestProjectWorkloadUsesResolvedAcceleratorBinding(t *testing.T) {
-	job, err := ProjectWorkload(basebaseprovider.WorkloadProjection{
+	job, err := ProjectWorkload(baseprovider.WorkloadProjection{
 		WorkloadID: "train-1",
 		ProjectID:  "project-1",
 		PoolID:     "pool-h100",
@@ -101,7 +101,7 @@ func TestPodsReadyReasonDistinguishesTerminalJobs(t *testing.T) {
 }
 
 func TestProjectDRAWorkloadUsesDeviceClassWithoutExtendedResource(t *testing.T) {
-	got, err := ProjectWorkload(provider.WorkloadProjection{
+	got, err := ProjectWorkload(baseprovider.WorkloadProjection{
 		WorkloadID: "workload-dra", PoolID: "pool-dra", Namespace: "project-1",
 		Image: "example/train:latest", Accelerator: domain.AcceleratorRequest{Class: "h100-dra", Quota: 2},
 		AcceleratorBindings: []domain.AcceleratorBinding{{
@@ -121,7 +121,7 @@ func TestProjectDRAWorkloadUsesDeviceClassWithoutExtendedResource(t *testing.T) 
 }
 
 func TestProjectDRAWorkloadRequiresDeviceClass(t *testing.T) {
-	_, err := ProjectWorkload(provider.WorkloadProjection{
+	_, err := ProjectWorkload(baseprovider.WorkloadProjection{
 		WorkloadID: "workload-dra", PoolID: "pool-dra", Namespace: "project-1",
 		Image: "example/train:latest", Accelerator: domain.AcceleratorRequest{Class: "h100-dra", Quota: 1},
 		AcceleratorBindings: []domain.AcceleratorBinding{{
