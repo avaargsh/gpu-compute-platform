@@ -105,8 +105,8 @@ requested="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.s
 [[ "$requested" == "1" ]] || { echo "expected $ACCELERATOR_RESOURCE request=1, got $requested" >&2; exit 1; }
 flavor_label="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o jsonpath='{.spec.nodeLabels.nvidia\.com/gpu\.product}')"
 [[ "$flavor_label" == "NVIDIA-H100-80GB-HBM3" ]] || { echo "unexpected H100 flavor node label: $flavor_label" >&2; exit 1; }
-flavor_zone="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o jsonpath='{.spec.nodeLabels.topology\\.kubernetes\\.io/zone}')"
-flavor_rack="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o jsonpath='{.spec.nodeLabels.ai\\.compute/rack}')"
+flavor_zone="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o json | python -c 'import json,sys; print(json.load(sys.stdin)["spec"]["nodeLabels"].get("topology.kubernetes.io/zone", ""))')"
+flavor_rack="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o json | python -c 'import json,sys; print(json.load(sys.stdin)["spec"]["nodeLabels"].get("ai.compute/rack", ""))')"
 [[ "$flavor_zone" == "gpu-zone-a" ]] || { echo "unexpected H100 flavor zone: $flavor_zone" >&2; exit 1; }
 [[ "$flavor_rack" == "rack-a01" ]] || { echo "unexpected H100 flavor rack: $flavor_rack" >&2; exit 1; }
 scheduled_node="$(kubectl get pod -n "$NAMESPACE" -l "ai.compute/workload=job-$WORKLOAD_ID" -o jsonpath='{.items[0].spec.nodeName}')"
