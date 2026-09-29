@@ -97,7 +97,6 @@ func TestRetireSourceRejectsBeforeTargetVerification(t *testing.T) {
 	}
 }
 
-
 func TestRetireSourceWaitsForFinalizationEvidence(t *testing.T) {
 	ctx := t.Context()
 	bindings := NewMemoryPlacementResolver()
@@ -105,7 +104,7 @@ func TestRetireSourceWaitsForFinalizationEvidence(t *testing.T) {
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
 		"migration-1": {
 			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
-			PoolID: "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
+			PoolID:   "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
 			Phase: domain.PlacementMigrationRetiring,
 		},
 	}
