@@ -53,7 +53,7 @@ type AcceleratorBinding struct {
 	Flavor         string                `json:"flavor"`
 	NodeLabels     map[string]string     `json:"nodeLabels,omitempty"`
 	Partition      *AcceleratorPartition `json:"partition,omitempty"`
-	DRA            *DRAAllocation       `json:"dra,omitempty"`
+	DRA            *DRAAllocation        `json:"dra,omitempty"`
 }
 
 type AcceleratorPartition struct {
