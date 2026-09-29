@@ -133,7 +133,6 @@ func TestRetireSourceWaitsForFinalizationEvidence(t *testing.T) {
 	}
 }
 
-
 func TestRetireSourceWaitsWhileSourceObservationStillExists(t *testing.T) {
 	ctx := t.Context()
 	bindings := NewMemoryPlacementResolver()
