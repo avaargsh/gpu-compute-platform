@@ -65,12 +65,11 @@ func unstructuredNestedSlice(obj map[string]any, fields ...string) ([]any, bool,
 	return nil, false, nil
 }
 
-
 func TestDRAObjectsUseStableResourceAPI(t *testing.T) {
 	in := Job{
 		Name: "job-train-dra", Namespace: "project-1", Image: "example/train:latest",
 		Labels: map[string]string{"kueue.x-k8s.io/queue-name": "lq-pool-h100"},
-		DRA: &DRARequest{ClaimName: "accelerator-train-dra", DeviceClassName: "gpu.nvidia.com", Count: 2},
+		DRA:    &DRARequest{ClaimName: "accelerator-train-dra", DeviceClassName: "gpu.nvidia.com", Count: 2},
 	}
 	claim, err := resourceClaimObject(in)
 	if err != nil {
