@@ -200,6 +200,13 @@ func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind st
 	return nil
 }
 
+func (m *Memory) FinalizedGeneration(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (int64, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	generation, ok := m.tombstones[string(clusterID)+"/"+kind+"/"+string(resourceID)]
+	return generation, ok, nil
+}
+
 func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Observation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
