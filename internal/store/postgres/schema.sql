@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS placement_migrations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS placement_migrations_pool_idx
+ALTER TABLE placement_migrations\n    ADD COLUMN IF NOT EXISTS source_generation BIGINT NOT NULL DEFAULT 0;\n\nCREATE INDEX IF NOT EXISTS placement_migrations_pool_idx
     ON placement_migrations (pool_id, created_at);
 
 CREATE TABLE IF NOT EXISTS reconcile_leases (
