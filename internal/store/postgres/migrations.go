@@ -33,7 +33,7 @@ SELECT $1, $2, $3, $4, $5, $6, $7, $8
 FROM cluster_bindings
 WHERE pool_id = $2 AND cluster_id = $3
 ON CONFLICT (migration_id) DO NOTHING
-`, in.Metadata.ID, in.PoolID, in.SourceClusterID, in.TargetClusterID, in.Metadata.Generation, in.Phase, conditions, evidence)
+`, in.Metadata.ID, in.PoolID, in.SourceClusterID, in.SourceGeneration, in.TargetClusterID, in.Metadata.Generation, in.Phase, conditions, evidence)
 	if err != nil {
 		return domain.PlacementMigration{}, false, err
 	}
@@ -80,7 +80,7 @@ func (s *Store) getPlacementMigration(ctx context.Context, poolID, migrationID d
 	var out domain.PlacementMigration
 	var conditions, evidence []byte
 	err := s.db.QueryRowContext(ctx, `
-SELECT migration_id, pool_id, source_cluster_id, target_cluster_id, generation, phase,
+SELECT migration_id, pool_id, source_cluster_id, source_generation, target_cluster_id, generation, phase,
        conditions, evidence_refs, created_at, updated_at
 FROM placement_migrations
 WHERE pool_id = $1 AND migration_id = $2
