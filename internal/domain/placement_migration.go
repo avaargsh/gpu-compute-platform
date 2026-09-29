@@ -15,7 +15,7 @@ const (
 type PlacementMigration struct {
 	Metadata        Metadata                `json:"metadata"`
 	PoolID          ID                      `json:"poolId"`
-	SourceClusterID ID                      `json:"sourceClusterId"`\n\tSourceGeneration int64                   `json:"sourceGeneration,omitempty"`
+	SourceClusterID ID                      `json:"sourceClusterId"`\n\tSourceGeneration int64                   `json:"sourceGeneration,omitempty"`\n\tTargetGeneration int64                   `json:"targetGeneration,omitempty"`
 	TargetClusterID ID                      `json:"targetClusterId"`
 	Phase           PlacementMigrationPhase `json:"phase"`
 	Conditions      []Condition             `json:"conditions,omitempty"`
