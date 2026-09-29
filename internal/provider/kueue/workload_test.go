@@ -9,7 +9,7 @@ import (
 )
 
 func TestProjectWorkloadUsesResolvedAcceleratorBinding(t *testing.T) {
-	job, err := ProjectWorkload(baseprovider.WorkloadProjection{
+	job, err := ProjectWorkload(basebaseprovider.WorkloadProjection{
 		WorkloadID: "train-1",
 		ProjectID:  "project-1",
 		PoolID:     "pool-h100",
