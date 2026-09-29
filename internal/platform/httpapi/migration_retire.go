@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
@@ -51,8 +52,24 @@ func (a *MigrationAPI) RetireSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	finalizedGeneration, finalized, err := a.resources.FinalizedGeneration(
+		r.Context(), migration.SourceClusterID, "ComputePool", poolID,
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !finalized {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+
 	evidence := append([]string(nil), migration.EvidenceRefs...)
-	evidence = append(evidence, "control-plane://placement-migration/source-gone")
+	evidence = append(
+		evidence,
+		"control-plane://placement-migration/source-finalized/generation/"+
+			strconv.FormatInt(finalizedGeneration, 10),
+	)
 	out, err := a.store.UpdatePlacementMigration(
 		r.Context(), poolID, migrationID, domain.PlacementMigrationSucceeded, migration.Conditions, evidence,
 	)
