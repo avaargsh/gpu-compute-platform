@@ -137,15 +137,6 @@ func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.
 func (m *Memory) MarkDesiredDeleting(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID, at time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
-	if len(leaseToken) == 2 {
-		leaseOwner, _ := leaseToken[0].(string)
-		leaseEpoch, _ := leaseToken[1].(int64)
-		lease, ok := m.leases[key]
-		if !ok || lease.owner != leaseOwner || lease.epoch != leaseEpoch || !lease.until.After(m.now().UTC()) {
-			return ErrStaleReconcileLease
-		}
-	}
 	items := m.desired[clusterID]
 	for i := range items {
 		if items[i].Kind == kind && items[i].ID == resourceID {
@@ -173,6 +164,15 @@ func (m *Memory) MarkDesiredDeleting(_ context.Context, clusterID domain.ID, kin
 func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64, leaseToken ...any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
+	if len(leaseToken) == 2 {
+		leaseOwner, ownerOK := leaseToken[0].(string)
+		leaseEpoch, epochOK := leaseToken[1].(int64)
+		lease, ok := m.leases[key]
+		if !ownerOK || !epochOK || !ok || lease.owner != leaseOwner || lease.epoch != leaseEpoch || !lease.until.After(m.now().UTC()) {
+			return ErrStaleReconcileLease
+		}
+	}
 	items := m.desired[clusterID]
 	out := items[:0]
 	found := false
