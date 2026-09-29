@@ -30,6 +30,11 @@ func ProjectPool(in provider.PoolProjection) (PoolResources, error) {
 		if binding.AllocationMode != domain.AcceleratorAllocationExtendedResource {
 			return PoolResources{}, fmt.Errorf("accelerator allocation mode %q is not supported by the Kueue extended-resource provider", binding.AllocationMode)
 		}
+		if binding.Partition != nil {
+			if binding.Partition.Kind != domain.AcceleratorPartitionMIG || binding.Partition.Profile == "" {
+				return PoolResources{}, fmt.Errorf("unsupported accelerator partition: %#v", binding.Partition)
+			}
+		}
 		if binding.Class == "" || binding.ResourceName == "" || binding.Flavor == "" {
 			return PoolResources{}, fmt.Errorf("accelerator binding class, resource name and flavor are required")
 		}
