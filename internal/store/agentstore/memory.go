@@ -137,6 +137,11 @@ func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.
 func (m *Memory) MarkDesiredDeleting(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID, at time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
+	lease, ok := m.leases[key]
+	if !ok || lease.owner != leaseOwner || lease.epoch != leaseEpoch || !lease.until.After(m.now().UTC()) {
+		return ErrStaleReconcileLease
+	}
 	items := m.desired[clusterID]
 	for i := range items {
 		if items[i].Kind == kind && items[i].ID == resourceID {
@@ -161,7 +166,7 @@ func (m *Memory) MarkDesiredDeleting(_ context.Context, clusterID domain.ID, kin
 	return ErrDesiredNotFound
 }
 
-func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64) error {
+func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64, leaseOwner string, leaseEpoch int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	items := m.desired[clusterID]
@@ -185,7 +190,6 @@ func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind st
 	}
 	m.desired[clusterID] = append([]agent.DesiredResource(nil), out...)
 
-	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
 	m.tombstones[key] = generation
 	delete(m.leases, key)
 
@@ -211,6 +215,13 @@ func (m *Memory) FinalizedGeneration(_ context.Context, clusterID domain.ID, kin
 func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Observation) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for _, item := range in {
+		key := string(clusterID) + "/" + item.Kind + "/" + string(item.ID)
+		lease, ok := m.leases[key]
+		if !ok || lease.owner != item.LeaseOwner || lease.epoch != item.LeaseEpoch || !lease.until.After(m.now().UTC()) {
+			return ErrStaleReconcileLease
+		}
+	}
 
 	previous := make(map[string]agent.Observation, len(m.observations[clusterID]))
 	for _, item := range m.observations[clusterID] {
@@ -312,14 +323,15 @@ func (m *Memory) ReleaseReconcileLease(
 	kind string,
 	resourceID domain.ID,
 	owner string,
+	epoch int64,
 ) error {
-	if owner == "" {
-		return fmt.Errorf("reconcile lease owner is required")
+	if owner == "" || epoch <= 0 {
+		return fmt.Errorf("reconcile lease owner and positive epoch are required")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
-	if current, ok := m.leases[key]; ok && current.owner == owner {
+	if current, ok := m.leases[key]; ok && current.owner == owner && current.epoch == epoch {
 		delete(m.leases, key)
 	}
 	return nil
