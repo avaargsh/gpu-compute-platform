@@ -50,7 +50,10 @@ func TestPostgresReconcileLeaseOwnershipAndExpiry(t *testing.T) {
 	if err != nil || !grant.Claimed {
 		t.Fatalf("initial claim: claimed=%t err=%v", grant.Claimed, err)
 	}
-	if grant.Owner != "worker-a" || grant.Epoch != 1 || grant.ExpiresAt.IsZero() {\n\t\tt.Fatalf("unexpected initial grant: %#v", grant)\n\t}\n\tvar initialEpoch int64
+	if grant.Owner != "worker-a" || grant.Epoch != 1 || grant.ExpiresAt.IsZero() {
+		t.Fatalf("unexpected initial grant: %#v", grant)
+	}
+	var initialEpoch int64
 	if err := db.QueryRowContext(ctx, `SELECT epoch FROM reconcile_leases WHERE cluster_id = 'cluster-a' AND kind = 'Workload' AND resource_id = 'train-1'`).Scan(&initialEpoch); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +69,10 @@ func TestPostgresReconcileLeaseOwnershipAndExpiry(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT epoch FROM reconcile_leases WHERE cluster_id = 'cluster-a' AND kind = 'Workload' AND resource_id = 'train-1'`).Scan(&renewedEpoch); err != nil {
 		t.Fatal(err)
 	}
-	if grant.Epoch != initialEpoch {\n\t\tt.Fatalf("renewed grant epoch=%d, want %d", grant.Epoch, initialEpoch)\n\t}\n\tif renewedEpoch != initialEpoch {
+	if grant.Epoch != initialEpoch {
+		t.Fatalf("renewed grant epoch=%d, want %d", grant.Epoch, initialEpoch)
+	}
+	if renewedEpoch != initialEpoch {
 		t.Fatalf("same-owner renewal changed epoch: got=%d want=%d", renewedEpoch, initialEpoch)
 	}
 
@@ -85,7 +91,10 @@ WHERE cluster_id = 'cluster-a' AND kind = 'Workload' AND resource_id = 'train-1'
 	if err := db.QueryRowContext(ctx, `SELECT epoch FROM reconcile_leases WHERE cluster_id = 'cluster-a' AND kind = 'Workload' AND resource_id = 'train-1'`).Scan(&takeoverEpoch); err != nil {
 		t.Fatal(err)
 	}
-	if grant.Owner != "worker-b" || grant.Epoch != initialEpoch+1 {\n\t\tt.Fatalf("unexpected takeover grant: %#v", grant)\n\t}\n\tif takeoverEpoch != initialEpoch+1 {
+	if grant.Owner != "worker-b" || grant.Epoch != initialEpoch+1 {
+		t.Fatalf("unexpected takeover grant: %#v", grant)
+	}
+	if takeoverEpoch != initialEpoch+1 {
 		t.Fatalf("takeover epoch=%d, want %d", takeoverEpoch, initialEpoch+1)
 	}
 
