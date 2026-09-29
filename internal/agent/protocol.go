@@ -59,7 +59,7 @@ type ControlPlane interface {
 	Heartbeat(context.Context, Heartbeat) error
 	PullDesired(context.Context, domain.ID) ([]DesiredResource, error)
 	Report(context.Context, domain.ID, []Observation) error
-	ClaimReconcileLease(context.Context, ReconcileLeaseRequest) (bool, error)
+	ClaimReconcileLease(context.Context, ReconcileLeaseRequest) (ReconcileLeaseGrant, error)
 	ReleaseReconcileLease(context.Context, ReconcileLeaseRequest) error
 	FinalizeDesired(context.Context, FinalizeDesiredRequest) error
 }
