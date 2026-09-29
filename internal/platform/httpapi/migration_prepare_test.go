@@ -117,7 +117,6 @@ func TestPrepareCutoverRejectsStaleTargetObservation(t *testing.T) {
 	}
 }
 
-
 type generationDriftStore struct {
 	agentstore.Store
 	base      *agentstore.Memory
