@@ -93,9 +93,13 @@ CREATE TABLE IF NOT EXISTS reconcile_leases (
     resource_id TEXT NOT NULL,
     owner TEXT NOT NULL,
     lease_until TIMESTAMPTZ NOT NULL,
+    epoch BIGINT NOT NULL DEFAULT 1,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (cluster_id, kind, resource_id)
 );
+
+ALTER TABLE reconcile_leases
+    ADD COLUMN IF NOT EXISTS epoch BIGINT NOT NULL DEFAULT 1;
 
 CREATE INDEX IF NOT EXISTS reconcile_leases_expiry_idx
     ON reconcile_leases (lease_until);
