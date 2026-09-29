@@ -94,17 +94,40 @@ func TestProjectPoolDefaultsAllocationModeToExtendedResource(t *testing.T) {
 	}
 }
 
-func TestProjectPoolFailsClosedForMIGAllocationMode(t *testing.T) {
-	_, err := ProjectPool(provider.PoolProjection{
+func TestProjectPoolProjectsMIGPartitionAsExtendedResource(t *testing.T) {
+	got, err := ProjectPool(provider.PoolProjection{
 		PoolID: "pool-mig", ClusterID: "cluster-a", Namespace: "project-1",
 		Accelerators: []domain.AcceleratorRequest{{Class: "a100-1g-10gb", Quota: 4}},
 		AcceleratorBindings: []domain.AcceleratorBinding{{
-			Class: "a100-1g-10gb", AllocationMode: domain.AcceleratorAllocationMIG,
-			ResourceName: "nvidia.com/mig-1g.10gb", Flavor: "a100-mig-1g-10gb",
+			Class: "a100-1g-10gb",
+			AllocationMode: domain.AcceleratorAllocationExtendedResource,
+			ResourceName: "nvidia.com/mig-1g.10gb",
+			Flavor: "a100-mig-1g-10gb",
+			Partition: &domain.AcceleratorPartition{Kind: domain.AcceleratorPartitionMIG, Profile: "1g.10gb"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Flavors) != 1 || got.Flavors[0].ResourceName != "nvidia.com/mig-1g.10gb" {
+		t.Fatalf("MIG partition must project through the extended-resource path: %#v", got.Flavors)
+	}
+	if got.ClusterQueue.Quotas[0].Resource != "nvidia.com/mig-1g.10gb" || got.ClusterQueue.Quotas[0].Nominal != 4 {
+		t.Fatalf("unexpected MIG quota projection: %#v", got.ClusterQueue.Quotas)
+	}
+}
+
+func TestProjectPoolRejectsInvalidPartition(t *testing.T) {
+	_, err := ProjectPool(provider.PoolProjection{
+		PoolID: "pool-partition", ClusterID: "cluster-a", Namespace: "project-1",
+		Accelerators: []domain.AcceleratorRequest{{Class: "partitioned-gpu", Quota: 1}},
+		AcceleratorBindings: []domain.AcceleratorBinding{{
+			Class: "partitioned-gpu", ResourceName: "vendor.example/gpu-slice", Flavor: "slice",
+			Partition: &domain.AcceleratorPartition{Kind: "unknown", Profile: "small"},
 		}},
 	})
 	if err == nil {
-		t.Fatal("MIG allocation must fail closed until a MIG-aware projector is implemented")
+		t.Fatal("unknown partition kinds must fail closed")
 	}
 }
 
