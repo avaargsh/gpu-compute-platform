@@ -13,13 +13,15 @@ const (
 )
 
 type PlacementMigration struct {
-	Metadata        Metadata                `json:"metadata"`
-	PoolID          ID                      `json:"poolId"`
-	SourceClusterID ID                      `json:"sourceClusterId"`\n\tSourceGeneration int64                   `json:"sourceGeneration,omitempty"`\n\tTargetGeneration int64                   `json:"targetGeneration,omitempty"`
-	TargetClusterID ID                      `json:"targetClusterId"`
-	Phase           PlacementMigrationPhase `json:"phase"`
-	Conditions      []Condition             `json:"conditions,omitempty"`
-	EvidenceRefs    []string                `json:"evidenceRefs,omitempty"`
+	Metadata         Metadata                `json:"metadata"`
+	PoolID           ID                      `json:"poolId"`
+	SourceClusterID  ID                      `json:"sourceClusterId"`
+	SourceGeneration int64                   `json:"sourceGeneration,omitempty"`
+	TargetClusterID  ID                      `json:"targetClusterId"`
+	TargetGeneration int64                   `json:"targetGeneration,omitempty"`
+	Phase            PlacementMigrationPhase `json:"phase"`
+	Conditions       []Condition             `json:"conditions,omitempty"`
+	EvidenceRefs     []string                `json:"evidenceRefs,omitempty"`
 }
 
 func (m PlacementMigration) ValidateRequest() bool {
