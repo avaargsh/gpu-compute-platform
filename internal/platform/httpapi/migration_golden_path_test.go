@@ -17,7 +17,7 @@ func TestPlacementMigrationCrashReplayGoldenPath(t *testing.T) {
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
 		"migration-1": {
 			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
-			PoolID: "pool-1", SourceClusterID: "cluster-a", SourceGeneration: 7,
+			PoolID:   "pool-1", SourceClusterID: "cluster-a", SourceGeneration: 7,
 			TargetClusterID: "cluster-b", Phase: domain.PlacementMigrationProjecting,
 		},
 	}
@@ -34,7 +34,7 @@ func TestPlacementMigrationCrashReplayGoldenPath(t *testing.T) {
 		}
 		if err := resources.Report(ctx, cluster, []agent.Observation{{
 			Kind: "ComputePool", ID: "pool-1", ObservedGeneration: generation,
-			Conditions: []domain.Condition{{Type: "Ready", Status: "True"}},
+			Conditions:   []domain.Condition{{Type: "Ready", Status: "True"}},
 			EvidenceRefs: []string{"k8s://" + string(cluster) + "/pool-1"},
 		}}); err != nil {
 			t.Fatal(err)
