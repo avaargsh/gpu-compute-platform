@@ -50,6 +50,10 @@ func TestPostgresReconcileLeaseOwnershipAndExpiry(t *testing.T) {
 	if err != nil || !claimed {
 		t.Fatalf("initial claim: claimed=%t err=%v", claimed, err)
 	}
+	var initialEpoch int64
+	if err := db.QueryRowContext(ctx, `SELECT epoch FROM reconcile_leases WHERE cluster_id = 'cluster-a' AND kind = 'Workload' AND resource_id = 'train-1'`).Scan(&initialEpoch); err != nil {
+		t.Fatal(err)
+	}
 	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-b", 30)
 	if err != nil || claimed {
 		t.Fatalf("competing owner must be fenced: claimed=%t err=%v", claimed, err)
@@ -57,6 +61,13 @@ func TestPostgresReconcileLeaseOwnershipAndExpiry(t *testing.T) {
 	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 1)
 	if err != nil || !claimed {
 		t.Fatalf("same owner renew: claimed=%t err=%v", claimed, err)
+	}
+	var renewedEpoch int64
+	if err := db.QueryRowContext(ctx, `SELECT epoch FROM reconcile_leases WHERE cluster_id = 'cluster-a' AND kind = 'Workload' AND resource_id = 'train-1'`).Scan(&renewedEpoch); err != nil {
+		t.Fatal(err)
+	}
+	if renewedEpoch != initialEpoch {
+		t.Fatalf("same-owner renewal changed epoch: got=%d want=%d", renewedEpoch, initialEpoch)
 	}
 
 	if _, err := db.ExecContext(ctx, `
@@ -69,6 +80,13 @@ WHERE cluster_id = 'cluster-a' AND kind = 'Workload' AND resource_id = 'train-1'
 	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-b", 30)
 	if err != nil || !claimed {
 		t.Fatalf("expired lease takeover: claimed=%t err=%v", claimed, err)
+	}
+	var takeoverEpoch int64
+	if err := db.QueryRowContext(ctx, `SELECT epoch FROM reconcile_leases WHERE cluster_id = 'cluster-a' AND kind = 'Workload' AND resource_id = 'train-1'`).Scan(&takeoverEpoch); err != nil {
+		t.Fatal(err)
+	}
+	if takeoverEpoch != initialEpoch+1 {
+		t.Fatalf("takeover epoch=%d, want %d", takeoverEpoch, initialEpoch+1)
 	}
 
 	if err := store.ReleaseReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a"); err != nil {
