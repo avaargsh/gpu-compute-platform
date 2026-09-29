@@ -70,7 +70,7 @@ func TestRetireSourceUsesDeletionLifecycleBeforeSuccess(t *testing.T) {
 	if migration.Phase != domain.PlacementMigrationSucceeded {
 		t.Fatalf("phase=%s, want Succeeded", migration.Phase)
 	}
-	if len(migration.EvidenceRefs) != 1 || migration.EvidenceRefs[0] != "control-plane://placement-migration/source-gone" {
+	if len(migration.EvidenceRefs) != 1 || migration.EvidenceRefs[0] != "control-plane://placement-migration/source-finalized/generation/7" {
 		t.Fatalf("evidence=%#v", migration.EvidenceRefs)
 	}
 }
@@ -94,5 +94,42 @@ func TestRetireSourceRejectsBeforeTargetVerification(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status=%d, want 409", resp.StatusCode)
+	}
+}
+
+
+func TestRetireSourceWaitsForFinalizationEvidence(t *testing.T) {
+	ctx := t.Context()
+	bindings := NewMemoryPlacementResolver()
+	bindings.pools["pool-1"] = Placement{ClusterID: "cluster-b", Provider: "kueue"}
+	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
+		"migration-1": {
+			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
+			PoolID: "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
+			Phase: domain.PlacementMigrationRetiring,
+		},
+	}
+	resources := agentstore.NewMemory()
+	server := httptest.NewServer(NewRouterWithDependencies(resources, bindings))
+	defer server.Close()
+
+	resp, err := server.Client().Post(
+		server.URL+"/api/v1/compute-pools/pool-1/migrations/migration-1/retire-source",
+		"application/json",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d, want 202 without finalization tombstone", resp.StatusCode)
+	}
+	migration, _ := bindings.GetPlacementMigration(ctx, "pool-1", "migration-1")
+	if migration.Phase != domain.PlacementMigrationRetiring {
+		t.Fatalf("phase=%s, want Retiring without finalization evidence", migration.Phase)
+	}
+	if len(migration.EvidenceRefs) != 0 {
+		t.Fatalf("unexpected evidence=%#v", migration.EvidenceRefs)
 	}
 }
