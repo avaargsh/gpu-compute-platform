@@ -39,6 +39,10 @@ func (a *MigrationAPI) RetireSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if found {
+		if migration.SourceGeneration > 0 && desired.Generation != migration.SourceGeneration {
+			http.Error(w, agentstore.ErrPlacementSourceGenerationMismatch.Error(), http.StatusConflict)
+			return
+		}
 		if desired.DeletionTimestamp == nil {
 			if err := a.resources.MarkDesiredDeleting(r.Context(), migration.SourceClusterID, "ComputePool", poolID, time.Now().UTC()); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -66,6 +70,10 @@ func (a *MigrationAPI) RetireSource(w http.ResponseWriter, r *http.Request) {
 	}
 	if !finalized {
 		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	if migration.SourceGeneration > 0 && finalizedGeneration != migration.SourceGeneration {
+		http.Error(w, agentstore.ErrPlacementSourceGenerationMismatch.Error(), http.StatusConflict)
 		return
 	}
 
