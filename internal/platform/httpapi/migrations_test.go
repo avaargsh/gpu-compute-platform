@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	"github.com/avaargsh/gpu-compute-platform/internal/agent"\n\t"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
@@ -19,7 +19,13 @@ func TestPlacementMigrationCreateDoesNotMutateBinding(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewRouterWithDependencies(agentstore.NewMemory(), bindings))
+	resources := agentstore.NewMemory()
+	if err := resources.UpsertDesired(t.Context(), "cluster-a", agent.DesiredResource{
+		Kind: "ComputePool", ID: "pool-1", Generation: 7, Spec: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewRouterWithDependencies(resources, bindings))
 	defer server.Close()
 
 	body := []byte(`{"metadata":{"id":"migration-1","generation":1},"poolId":"pool-1","sourceClusterId":"cluster-a","targetClusterId":"cluster-b"}`)
@@ -65,7 +71,13 @@ func TestPlacementMigrationRequiresCurrentSource(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewRouterWithDependencies(agentstore.NewMemory(), bindings))
+	resources := agentstore.NewMemory()
+	if err := resources.UpsertDesired(t.Context(), "cluster-a", agent.DesiredResource{
+		Kind: "ComputePool", ID: "pool-1", Generation: 7, Spec: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewRouterWithDependencies(resources, bindings))
 	defer server.Close()
 
 	body := []byte(`{"metadata":{"id":"migration-1","generation":1},"poolId":"pool-1","sourceClusterId":"cluster-x","targetClusterId":"cluster-b"}`)
@@ -87,7 +99,13 @@ func TestPlacementMigrationCreateIsIdempotent(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewRouterWithDependencies(agentstore.NewMemory(), bindings))
+	resources := agentstore.NewMemory()
+	if err := resources.UpsertDesired(t.Context(), "cluster-a", agent.DesiredResource{
+		Kind: "ComputePool", ID: "pool-1", Generation: 7, Spec: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(NewRouterWithDependencies(resources, bindings))
 	defer server.Close()
 
 	body := []byte(`{"metadata":{"id":"migration-1","generation":1},"poolId":"pool-1","sourceClusterId":"cluster-a","targetClusterId":"cluster-b"}`)
