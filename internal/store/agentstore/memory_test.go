@@ -174,41 +174,41 @@ func TestMemoryReconcileLeaseLifecycle(t *testing.T) {
 	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
 	store.now = func() time.Time { return now }
 
-	claimed, err := store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
-	if err != nil || !claimed {
-		t.Fatalf("initial claim: claimed=%t err=%v", claimed, err)
+	grant, err := store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
+	if err != nil || !grant.Claimed {
+		t.Fatalf("initial claim: claimed=%t err=%v", grant.Claimed, err)
 	}
-	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-b", 30)
-	if err != nil || claimed {
-		t.Fatalf("competing claim must fail: claimed=%t err=%v", claimed, err)
+	grant, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-b", 30)
+	if err != nil || grant.Claimed {
+		t.Fatalf("competing claim must fail: claimed=%t err=%v", grant.Claimed, err)
 	}
 
 	now = now.Add(10 * time.Second)
-	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
-	if err != nil || !claimed {
-		t.Fatalf("owner renew: claimed=%t err=%v", claimed, err)
+	grant, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
+	if err != nil || !grant.Claimed {
+		t.Fatalf("owner renew: claimed=%t err=%v", grant.Claimed, err)
 	}
 
 	now = now.Add(31 * time.Second)
-	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-b", 30)
-	if err != nil || !claimed {
-		t.Fatalf("expired lease takeover: claimed=%t err=%v", claimed, err)
+	grant, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-b", 30)
+	if err != nil || !grant.Claimed {
+		t.Fatalf("expired lease takeover: claimed=%t err=%v", grant.Claimed, err)
 	}
 
 	if err := store.ReleaseReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a"); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
-	if err != nil || claimed {
-		t.Fatalf("non-owner release must not clear lease: claimed=%t err=%v", claimed, err)
+	grant, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
+	if err != nil || grant.Claimed {
+		t.Fatalf("non-owner release must not clear lease: claimed=%t err=%v", grant.Claimed, err)
 	}
 
 	if err := store.ReleaseReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-b"); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
-	if err != nil || !claimed {
-		t.Fatalf("owner release must clear lease: claimed=%t err=%v", claimed, err)
+	grant, err = store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
+	if err != nil || !grant.Claimed {
+		t.Fatalf("owner release must clear lease: claimed=%t err=%v", grant.Claimed, err)
 	}
 }
 
@@ -330,9 +330,9 @@ func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
 	if err := store.MarkDesiredDeleting(ctx, clusterID, "Workload", "train-1", time.Date(2026, 9, 29, 3, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimReconcileLease(ctx, clusterID, "Workload", "train-1", "worker-a", 120)
-	if err != nil || !claimed {
-		t.Fatalf("claim before finalize: claimed=%t err=%v", claimed, err)
+	grant, err := store.ClaimReconcileLease(ctx, clusterID, "Workload", "train-1", "worker-a", 120)
+	if err != nil || !grant.Claimed {
+		t.Fatalf("claim before finalize: claimed=%t err=%v", grant.Claimed, err)
 	}
 
 	if err := store.FinalizeDesired(ctx, clusterID, "Workload", "train-1", 4); err != nil {
@@ -341,9 +341,9 @@ func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
 	if _, ok, err := store.GetObservation(ctx, clusterID, "Workload", "train-1"); err != nil || ok {
 		t.Fatalf("finalize must clean observation: ok=%t err=%v", ok, err)
 	}
-	claimed, err = store.ClaimReconcileLease(ctx, clusterID, "Workload", "train-1", "worker-b", 120)
-	if err != nil || !claimed {
-		t.Fatalf("finalize must clean lease: claimed=%t err=%v", claimed, err)
+	grant, err = store.ClaimReconcileLease(ctx, clusterID, "Workload", "train-1", "worker-b", 120)
+	if err != nil || !grant.Claimed {
+		t.Fatalf("finalize must clean lease: claimed=%t err=%v", grant.Claimed, err)
 	}
 
 	if err := store.Report(ctx, clusterID, []agent.Observation{{
