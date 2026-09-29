@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 )
@@ -26,19 +25,21 @@ func (s *Store) ClaimReconcileLease(
 		return false, fmt.Errorf("reconcile lease ttl must be positive")
 	}
 
-	now := time.Now().UTC()
-	until := now.Add(time.Duration(ttlSeconds) * time.Second)
 	result, err := s.db.ExecContext(ctx, `
 INSERT INTO reconcile_leases
-    (cluster_id, kind, resource_id, owner, lease_until)
-VALUES ($1, $2, $3, $4, $5)
+    (cluster_id, kind, resource_id, owner, lease_until, epoch)
+VALUES ($1, $2, $3, $4, now() + ($5 * interval '1 second'), 1)
 ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
     owner = EXCLUDED.owner,
-    lease_until = EXCLUDED.lease_until,
+    lease_until = now() + ($5 * interval '1 second'),
+    epoch = CASE
+        WHEN reconcile_leases.owner = EXCLUDED.owner THEN reconcile_leases.epoch
+        ELSE reconcile_leases.epoch + 1
+    END,
     updated_at = now()
-WHERE reconcile_leases.lease_until <= $6
+WHERE reconcile_leases.lease_until <= now()
    OR reconcile_leases.owner = EXCLUDED.owner
-`, clusterID, kind, resourceID, owner, until, now)
+`, clusterID, kind, resourceID, owner, ttlSeconds)
 	if err != nil {
 		return false, err
 	}
