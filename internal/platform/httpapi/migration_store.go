@@ -14,7 +14,7 @@ type MigrationStore interface {
 	ResolvePool(context.Context, domain.ID) (Placement, error)
 	CreatePlacementMigration(context.Context, domain.PlacementMigration) (domain.PlacementMigration, bool, error)
 	GetPlacementMigration(context.Context, domain.ID, domain.ID) (domain.PlacementMigration, error)
-	UpdatePlacementMigration(context.Context, domain.ID, domain.ID, domain.PlacementMigrationPhase, []domain.Condition, []string) (domain.PlacementMigration, error)
+	UpdatePlacementMigration(context.Context, domain.ID, domain.ID, domain.PlacementMigrationPhase, []domain.Condition, []string) (domain.PlacementMigration, error)\n\tSetPlacementMigrationTargetGeneration(context.Context, domain.ID, domain.ID, int64) (domain.PlacementMigration, error)
 	CutoverPlacementMigration(context.Context, domain.ID, domain.ID) (domain.PlacementMigration, error)
 }
 
@@ -76,6 +76,29 @@ func sameMigrationIntent(a, b domain.PlacementMigration) bool {
 func isMigrationConflict(err error) bool {
 	return errors.Is(err, agentstore.ErrPlacementSourceMismatch) ||
 		errors.Is(err, agentstore.ErrPlacementMigrationConflict)
+}
+
+func (r *MemoryPlacementResolver) SetPlacementMigrationTargetGeneration(_ context.Context, poolID, migrationID domain.ID, generation int64) (domain.PlacementMigration, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	items := r.migrations[poolID]
+	if items == nil {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationNotFound
+	}
+	current, ok := items[migrationID]
+	if !ok {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationNotFound
+	}
+	if current.Phase != domain.PlacementMigrationProjecting {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationTransition
+	}
+	if current.TargetGeneration != 0 && current.TargetGeneration != generation {
+		return domain.PlacementMigration{}, agentstore.ErrPlacementTargetGenerationMismatch
+	}
+	current.TargetGeneration = generation
+	current.Metadata.UpdatedAt = time.Now().UTC()
+	items[migrationID] = current
+	return current, nil
 }
 
 func (r *MemoryPlacementResolver) UpdatePlacementMigration(_ context.Context, poolID, migrationID domain.ID, phase domain.PlacementMigrationPhase, conditions []domain.Condition, evidenceRefs []string) (domain.PlacementMigration, error) {
