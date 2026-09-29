@@ -77,3 +77,48 @@ func TestProjectPoolRejectsInvalidQuota(t *testing.T) {
 		t.Fatal("expected invalid quota to fail")
 	}
 }
+
+
+func TestProjectPoolDefaultsAllocationModeToExtendedResource(t *testing.T) {
+	got, err := ProjectPool(provider.PoolProjection{
+		PoolID: "pool-h100", ClusterID: "cluster-a", Namespace: "project-1",
+		Accelerators: []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 4}},
+		AcceleratorBindings: []domain.AcceleratorBinding{{
+			Class: "h100-80g", ResourceName: "nvidia.com/gpu", Flavor: "h100",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("legacy binding must remain compatible: %v", err)
+	}
+	if len(got.Flavors) != 1 || got.Flavors[0].ResourceName != "nvidia.com/gpu" {
+		t.Fatalf("unexpected projection: %#v", got)
+	}
+}
+
+func TestProjectPoolFailsClosedForMIGAllocationMode(t *testing.T) {
+	_, err := ProjectPool(provider.PoolProjection{
+		PoolID: "pool-mig", ClusterID: "cluster-a", Namespace: "project-1",
+		Accelerators: []domain.AcceleratorRequest{{Class: "a100-1g-10gb", Quota: 4}},
+		AcceleratorBindings: []domain.AcceleratorBinding{{
+			Class: "a100-1g-10gb", AllocationMode: domain.AcceleratorAllocationMIG,
+			ResourceName: "nvidia.com/mig-1g.10gb", Flavor: "a100-mig-1g-10gb",
+		}},
+	})
+	if err == nil {
+		t.Fatal("MIG allocation must fail closed until a MIG-aware projector is implemented")
+	}
+}
+
+func TestProjectPoolFailsClosedForDRAAllocationMode(t *testing.T) {
+	_, err := ProjectPool(provider.PoolProjection{
+		PoolID: "pool-dra", ClusterID: "cluster-a", Namespace: "project-1",
+		Accelerators: []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 1}},
+		AcceleratorBindings: []domain.AcceleratorBinding{{
+			Class: "h100-80g", AllocationMode: domain.AcceleratorAllocationDRA,
+			ResourceName: "gpu.nvidia.com", Flavor: "h100-dra",
+		}},
+	})
+	if err == nil {
+		t.Fatal("DRA allocation must fail closed until a DRA-aware projector is implemented")
+	}
+}
