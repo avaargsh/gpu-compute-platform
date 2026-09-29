@@ -112,6 +112,13 @@ func (r *MemoryPlacementResolver) CutoverPlacementMigration(_ context.Context, p
 	if !ok {
 		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationNotFound
 	}
+	if migration.Phase == domain.PlacementMigrationCutover {
+		current, ok := r.pools[poolID]
+		if !ok || current.ClusterID != migration.TargetClusterID {
+			return domain.PlacementMigration{}, agentstore.ErrPlacementSourceMismatch
+		}
+		return migration, nil
+	}
 	if migration.Phase != domain.PlacementMigrationReadyToCutover {
 		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationTransition
 	}
