@@ -17,7 +17,7 @@ func TestRetireSourceUsesDeletionLifecycleBeforeSuccess(t *testing.T) {
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
 		"migration-1": {
 			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
-			PoolID: "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
+			PoolID:   "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
 			Phase: domain.PlacementMigrationRetiring,
 		},
 	}
@@ -39,7 +39,9 @@ func TestRetireSourceUsesDeletionLifecycleBeforeSuccess(t *testing.T) {
 	url := server.URL + "/api/v1/compute-pools/pool-1/migrations/migration-1/retire-source"
 
 	resp, err := server.Client().Post(url, "application/json", nil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("first retire status=%d, want 202", resp.StatusCode)
@@ -57,7 +59,9 @@ func TestRetireSourceUsesDeletionLifecycleBeforeSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp, err = server.Client().Post(url, "application/json", nil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("final retire status=%d, want 200", resp.StatusCode)
@@ -77,14 +81,16 @@ func TestRetireSourceRejectsBeforeTargetVerification(t *testing.T) {
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
 		"migration-1": {
 			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
-			PoolID: "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
+			PoolID:   "pool-1", SourceClusterID: "cluster-a", TargetClusterID: "cluster-b",
 			Phase: domain.PlacementMigrationCutover,
 		},
 	}
 	server := httptest.NewServer(NewRouterWithDependencies(agentstore.NewMemory(), bindings))
 	defer server.Close()
 	resp, err := server.Client().Post(server.URL+"/api/v1/compute-pools/pool-1/migrations/migration-1/retire-source", "application/json", nil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status=%d, want 409", resp.StatusCode)
