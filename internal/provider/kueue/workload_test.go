@@ -104,10 +104,10 @@ func TestProjectDRAWorkloadUsesDeviceClassWithoutExtendedResource(t *testing.T) 
 	got, err := ProjectWorkload(baseprovider.WorkloadProjection{
 		WorkloadID: "workload-dra", PoolID: "pool-dra", Namespace: "project-1",
 		Image: "example/train:latest", Accelerator: domain.AcceleratorRequest{Class: "h100-dra", Quota: 2},
-		AcceleratorBindings: []domain.AcceleratorBinding{{
+		AcceleratorBinding: domain.AcceleratorBinding{
 			Class: "h100-dra", AllocationMode: domain.AcceleratorAllocationDRA, Flavor: "h100-dra",
 			DRA: &domain.DRAAllocation{DeviceClassName: "gpu.nvidia.com"},
-		}},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,9 +124,9 @@ func TestProjectDRAWorkloadRequiresDeviceClass(t *testing.T) {
 	_, err := ProjectWorkload(baseprovider.WorkloadProjection{
 		WorkloadID: "workload-dra", PoolID: "pool-dra", Namespace: "project-1",
 		Image: "example/train:latest", Accelerator: domain.AcceleratorRequest{Class: "h100-dra", Quota: 1},
-		AcceleratorBindings: []domain.AcceleratorBinding{{
+		AcceleratorBinding: domain.AcceleratorBinding{
 			Class: "h100-dra", AllocationMode: domain.AcceleratorAllocationDRA, Flavor: "h100-dra",
-		}},
+		},
 	})
 	if err == nil {
 		t.Fatal("DRA projection must fail closed without a device class")
