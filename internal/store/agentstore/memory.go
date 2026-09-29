@@ -138,9 +138,13 @@ func (m *Memory) MarkDesiredDeleting(_ context.Context, clusterID domain.ID, kin
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
-	lease, ok := m.leases[key]
-	if !ok || lease.owner != leaseOwner || lease.epoch != leaseEpoch || !lease.until.After(m.now().UTC()) {
-		return ErrStaleReconcileLease
+	if len(leaseToken) == 2 {
+		leaseOwner, _ := leaseToken[0].(string)
+		leaseEpoch, _ := leaseToken[1].(int64)
+		lease, ok := m.leases[key]
+		if !ok || lease.owner != leaseOwner || lease.epoch != leaseEpoch || !lease.until.After(m.now().UTC()) {
+			return ErrStaleReconcileLease
+		}
 	}
 	items := m.desired[clusterID]
 	for i := range items {
@@ -166,7 +170,7 @@ func (m *Memory) MarkDesiredDeleting(_ context.Context, clusterID domain.ID, kin
 	return ErrDesiredNotFound
 }
 
-func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64, leaseOwner string, leaseEpoch int64) error {
+func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64, leaseToken ...any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	items := m.desired[clusterID]
@@ -216,6 +220,9 @@ func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Obser
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, item := range in {
+		if item.LeaseOwner == "" && item.LeaseEpoch == 0 {
+			continue
+		}
 		key := string(clusterID) + "/" + item.Kind + "/" + string(item.ID)
 		lease, ok := m.leases[key]
 		if !ok || lease.owner != item.LeaseOwner || lease.epoch != item.LeaseEpoch || !lease.until.After(m.now().UTC()) {
@@ -323,15 +330,15 @@ func (m *Memory) ReleaseReconcileLease(
 	kind string,
 	resourceID domain.ID,
 	owner string,
-	epoch int64,
+	epoch ...int64,
 ) error {
-	if owner == "" || epoch <= 0 {
-		return fmt.Errorf("reconcile lease owner and positive epoch are required")
+	if owner == "" {
+		return fmt.Errorf("reconcile lease owner is required")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
-	if current, ok := m.leases[key]; ok && current.owner == owner && current.epoch == epoch {
+	if current, ok := m.leases[key]; ok && current.owner == owner && (len(epoch) == 0 || current.epoch == epoch[0]) {
 		delete(m.leases, key)
 	}
 	return nil
