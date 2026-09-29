@@ -33,9 +33,9 @@ func TestPostgresFinalizeDesiredAtomicallyCleansRuntimeState(t *testing.T) {
 	if err := store.MarkDesiredDeleting(ctx, clusterID, "Workload", resourceID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimReconcileLease(ctx, clusterID, "Workload", resourceID, "worker-a", 120)
-	if err != nil || !claimed {
-		t.Fatalf("claim before finalize: claimed=%t err=%v", claimed, err)
+	grant, err := store.ClaimReconcileLease(ctx, clusterID, "Workload", resourceID, "worker-a", 120)
+	if err != nil || !grant.Claimed {
+		t.Fatalf("claim before finalize: claimed=%t err=%v", grant.Claimed, err)
 	}
 
 	if err := store.FinalizeDesired(ctx, clusterID, "Workload", resourceID, generation); err != nil {
