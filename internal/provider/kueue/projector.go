@@ -24,6 +24,12 @@ func ProjectPool(in provider.PoolProjection) (PoolResources, error) {
 
 	bindings := make(map[string]domain.AcceleratorBinding, len(in.AcceleratorBindings))
 	for _, binding := range in.AcceleratorBindings {
+		if binding.AllocationMode == "" {
+			binding.AllocationMode = domain.AcceleratorAllocationExtendedResource
+		}
+		if binding.AllocationMode != domain.AcceleratorAllocationExtendedResource {
+			return PoolResources{}, fmt.Errorf("accelerator allocation mode %q is not supported by the Kueue extended-resource provider", binding.AllocationMode)
+		}
 		if binding.Class == "" || binding.ResourceName == "" || binding.Flavor == "" {
 			return PoolResources{}, fmt.Errorf("accelerator binding class, resource name and flavor are required")
 		}
