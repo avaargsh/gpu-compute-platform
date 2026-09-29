@@ -154,6 +154,9 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 	if len(control.reported) != 2 {
 		t.Fatalf("reported=%d, want 2", len(control.reported))
 	}
+	if control.reported[0].LeaseOwner == "" || control.reported[0].LeaseEpoch != 1 || control.reported[1].LeaseOwner == "" || control.reported[1].LeaseEpoch != 1 {
+		t.Fatalf("runner must attach lease fencing tokens: %#v", control.reported)
+	}
 	if control.reported[0].ObservedGeneration != 3 || control.reported[1].ObservedGeneration != 4 {
 		t.Fatalf("unexpected generations: %#v", control.reported)
 	}
