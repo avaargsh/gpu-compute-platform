@@ -78,7 +78,6 @@ func TestProjectPoolRejectsInvalidQuota(t *testing.T) {
 	}
 }
 
-
 func TestProjectPoolDefaultsAllocationModeToExtendedResource(t *testing.T) {
 	got, err := ProjectPool(provider.PoolProjection{
 		PoolID: "pool-h100", ClusterID: "cluster-a", Namespace: "project-1",
