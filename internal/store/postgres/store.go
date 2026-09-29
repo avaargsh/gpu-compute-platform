@@ -261,7 +261,7 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	return nil
 }
 
-func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64) error {
+func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64, leaseOwner string, leaseEpoch int64) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
@@ -270,6 +270,10 @@ func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind s
 		return err
 	}
 	defer tx.Rollback()
+
+	if err := validateLeaseTx(ctx, tx, clusterID, kind, resourceID, leaseOwner, leaseEpoch); err != nil {
+		return err
+	}
 
 	var currentGeneration int64
 	var deletionTimestamp sql.NullTime
@@ -364,6 +368,9 @@ func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []
 	defer tx.Rollback()
 
 	for _, item := range observations {
+		if err := validateLeaseTx(ctx, tx, clusterID, item.Kind, item.ID, item.LeaseOwner, item.LeaseEpoch); err != nil {
+			return err
+		}
 		var desiredGeneration int64
 		err := tx.QueryRowContext(ctx, `
 SELECT generation
@@ -436,4 +443,34 @@ ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
 		}
 	}
 	return tx.Commit()
+}
+
+
+func validateLeaseTx(ctx context.Context, tx *sql.Tx, clusterID domain.ID, kind string, resourceID domain.ID, owner string, epoch int64) error {
+	if owner == "" || epoch <= 0 {
+		return agentstore.ErrStaleReconcileLease
+	}
+	var currentOwner string
+	var currentEpoch int64
+	var leaseUntil time.Time
+	err := tx.QueryRowContext(ctx, `
+SELECT owner, epoch, lease_until
+FROM reconcile_leases
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
+`, clusterID, kind, resourceID).Scan(&currentOwner, &currentEpoch, &leaseUntil)
+	if err == sql.ErrNoRows {
+		return agentstore.ErrStaleReconcileLease
+	}
+	if err != nil {
+		return err
+	}
+	var valid bool
+	if err := tx.QueryRowContext(ctx, `SELECT $1 > now()`, leaseUntil).Scan(&valid); err != nil {
+		return err
+	}
+	if currentOwner != owner || currentEpoch != epoch || !valid {
+		return agentstore.ErrStaleReconcileLease
+	}
+	return nil
 }
