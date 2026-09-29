@@ -83,6 +83,7 @@ kubectl apply --server-side -f "https://github.com/kubernetes-sigs/kueue/release
 kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout="${TIMEOUT_SECONDS}s"
 
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
+kubectl label node "$node" topology.kubernetes.io/zone=gpu-zone-a ai.compute/rack=rack-a01 --overwrite
 bash scripts/e2e/install-fake-gpu.sh
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
@@ -95,7 +96,7 @@ AGENT_PID=$!
 
 put "/api/v1/projects/$PROJECT_ID/binding" "{\"metadata\":{\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"clusterId\":\"$CLUSTER_ID\",\"namespace\":\"$NAMESPACE\"}"
 put "/api/v1/compute-pools/$POOL_ID/binding" "{\"metadata\":{\"generation\":1},\"poolId\":\"$POOL_ID\",\"clusterId\":\"$CLUSTER_ID\",\"provider\":\"kueue\"}"
-put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"h100-80g\",\"quota\":4}],\"acceleratorBindings\":[{\"class\":\"h100-80g\",\"resourceName\":\"$ACCELERATOR_RESOURCE\",\"flavor\":\"$ACCELERATOR_FLAVOR\",\"nodeLabels\":{\"nvidia.com/gpu.product\":\"NVIDIA-H100-80GB-HBM3\"}}],\"scheduling\":{\"mode\":\"default\"}}}"
+put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"h100-80g\",\"quota\":4}],\"acceleratorBindings\":[{\"class\":\"h100-80g\",\"resourceName\":\"$ACCELERATOR_RESOURCE\",\"flavor\":\"$ACCELERATOR_FLAVOR\",\"nodeLabels\":{\"nvidia.com/gpu.product\":\"NVIDIA-H100-80GB-HBM3\",\"topology.kubernetes.io/zone\":\"gpu-zone-a\",\"ai.compute/rack\":\"rack-a01\"}}],\"scheduling\":{\"mode\":\"default\"}}}"
 put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"h100-80g\",\"quota\":1}}}"
 
 result="$(wait_workload)"
@@ -104,6 +105,12 @@ requested="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.s
 [[ "$requested" == "1" ]] || { echo "expected $ACCELERATOR_RESOURCE request=1, got $requested" >&2; exit 1; }
 flavor_label="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o jsonpath='{.spec.nodeLabels.nvidia\.com/gpu\.product}')"
 [[ "$flavor_label" == "NVIDIA-H100-80GB-HBM3" ]] || { echo "unexpected H100 flavor node label: $flavor_label" >&2; exit 1; }
+flavor_zone="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o json | python -c 'import json,sys; print(json.load(sys.stdin)["spec"]["nodeLabels"].get("topology.kubernetes.io/zone", ""))')"
+flavor_rack="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o json | python -c 'import json,sys; print(json.load(sys.stdin)["spec"]["nodeLabels"].get("ai.compute/rack", ""))')"
+[[ "$flavor_zone" == "gpu-zone-a" ]] || { echo "unexpected H100 flavor zone: $flavor_zone" >&2; exit 1; }
+[[ "$flavor_rack" == "rack-a01" ]] || { echo "unexpected H100 flavor rack: $flavor_rack" >&2; exit 1; }
+scheduled_node="$(kubectl get pod -n "$NAMESPACE" -l "ai.compute/workload=job-$WORKLOAD_ID" -o jsonpath='{.items[0].spec.nodeName}')"
+[[ "$scheduled_node" == "$node" ]] || { echo "workload escaped topology-aware H100 flavor: $scheduled_node" >&2; exit 1; }
 
 # Replaying desired state must not drift the resolved Kubernetes projection.
 before="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o json)"

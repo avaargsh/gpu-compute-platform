@@ -21,7 +21,11 @@ func TestProjectPoolResolvesPortableAcceleratorBinding(t *testing.T) {
 			Class:        "h100-80g",
 			ResourceName: "nvidia.com/gpu",
 			Flavor:       "h100",
-			NodeLabels:   map[string]string{"nvidia.com/gpu.product": "H100-SXM5-80GB"},
+			NodeLabels: map[string]string{
+				"nvidia.com/gpu.product":      "H100-SXM5-80GB",
+				"topology.kubernetes.io/zone": "gpu-zone-a",
+				"ai.compute/rack":             "rack-a01",
+			},
 		}},
 	})
 	if err != nil {
@@ -37,8 +41,10 @@ func TestProjectPoolResolvesPortableAcceleratorBinding(t *testing.T) {
 	if len(got.Flavors) != 1 || got.Flavors[0].ResourceName != "nvidia.com/gpu" || got.Flavors[0].Name != "h100" {
 		t.Fatalf("unexpected flavors: %#v", got.Flavors)
 	}
-	if got.Flavors[0].NodeLabels["nvidia.com/gpu.product"] != "H100-SXM5-80GB" {
-		t.Fatalf("node selector was not preserved: %#v", got.Flavors[0].NodeLabels)
+	if got.Flavors[0].NodeLabels["nvidia.com/gpu.product"] != "H100-SXM5-80GB" ||
+		got.Flavors[0].NodeLabels["topology.kubernetes.io/zone"] != "gpu-zone-a" ||
+		got.Flavors[0].NodeLabels["ai.compute/rack"] != "rack-a01" {
+		t.Fatalf("accelerator and topology selectors were not preserved: %#v", got.Flavors[0].NodeLabels)
 	}
 	if len(got.ClusterQueue.Quotas) != 1 || got.ClusterQueue.Quotas[0].Nominal != 8 {
 		t.Fatalf("unexpected quotas: %#v", got.ClusterQueue.Quotas)
