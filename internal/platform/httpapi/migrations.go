@@ -166,7 +166,16 @@ func (a *MigrationAPI) PrepareCutover(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, agentstore.ErrPlacementTargetNotReady.Error(), http.StatusConflict)
 		return
 	}
-	migration, err = a.store.SetPlacementMigrationTargetGeneration(r.Context(), poolID, migrationID, desired.Generation)
+	confirmedDesired, found, err := a.resources.GetDesired(r.Context(), migration.TargetClusterID, "ComputePool", poolID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found || confirmedDesired.Generation != desired.Generation {
+		http.Error(w, agentstore.ErrPlacementTargetGenerationMismatch.Error(), http.StatusConflict)
+		return
+	}
+	migration, err = a.store.SetPlacementMigrationTargetGeneration(r.Context(), poolID, migrationID, confirmedDesired.Generation)
 	if err != nil {
 		if errors.Is(err, agentstore.ErrPlacementMigrationTransition) ||
 			errors.Is(err, agentstore.ErrPlacementTargetGenerationMismatch) {
