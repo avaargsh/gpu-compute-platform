@@ -3,6 +3,7 @@ package kueue
 import (
 	"fmt"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
 )
 
@@ -30,6 +31,12 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 	binding := in.AcceleratorBinding
 	if binding.Class == "" || binding.ResourceName == "" || binding.Flavor == "" {
 		return Job{}, fmt.Errorf("accelerator binding is required")
+	}
+	if binding.AllocationMode != "" && binding.AllocationMode != domain.AcceleratorAllocationExtendedResource {
+		return Job{}, fmt.Errorf("accelerator allocation mode %q is not supported by the Kueue extended-resource workload projector", binding.AllocationMode)
+	}
+	if binding.Partition != nil && (binding.Partition.Kind != domain.AcceleratorPartitionMIG || binding.Partition.Profile == "") {
+		return Job{}, fmt.Errorf("unsupported accelerator partition: %#v", binding.Partition)
 	}
 	if binding.Class != in.Accelerator.Class {
 		return Job{}, fmt.Errorf("accelerator binding class mismatch: %s", in.Accelerator.Class)

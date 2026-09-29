@@ -41,19 +41,26 @@ type AcceleratorRequest struct {
 
 const (
 	AcceleratorAllocationExtendedResource = "extended-resource"
-	AcceleratorAllocationMIG              = "mig"
 	AcceleratorAllocationDRA              = "dra"
 )
 
 // AcceleratorBinding resolves a portable accelerator class into the concrete
 // allocation mechanism, resource and Kueue flavor exposed by a compute pool.
 type AcceleratorBinding struct {
-	Class          string            `json:"class"`
-	AllocationMode string            `json:"allocationMode,omitempty"`
-	ResourceName   string            `json:"resourceName"`
-	Flavor         string            `json:"flavor"`
-	NodeLabels     map[string]string `json:"nodeLabels,omitempty"`
+	Class          string                `json:"class"`
+	AllocationMode string                `json:"allocationMode,omitempty"`
+	ResourceName   string                `json:"resourceName"`
+	Flavor         string                `json:"flavor"`
+	NodeLabels     map[string]string     `json:"nodeLabels,omitempty"`
+	Partition      *AcceleratorPartition `json:"partition,omitempty"`
 }
+
+type AcceleratorPartition struct {
+	Kind    string `json:"kind"`
+	Profile string `json:"profile"`
+}
+
+const AcceleratorPartitionMIG = "mig"
 
 type SchedulingPolicy struct {
 	Mode string `json:"mode"`
