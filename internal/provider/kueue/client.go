@@ -1,0 +1,26 @@
+package kueue
+
+import "context"
+
+type JobObservation struct {
+	Phase         string
+	WorkloadName  string
+	QuotaReserved bool
+	Admitted      bool
+	PodsReady     bool
+	Succeeded     bool
+	Failed        bool
+	Message       string
+}
+
+type Client interface {
+	ApplyResourceFlavor(context.Context, ResourceFlavor) error
+	ApplyClusterQueue(context.Context, ClusterQueue) error
+	ApplyLocalQueue(context.Context, LocalQueue) error
+	ApplyJob(context.Context, Job) error
+	ObserveJob(context.Context, string, string) (JobObservation, error)
+	DeleteJob(context.Context, string, string) (bool, error)
+	DeleteResourceFlavor(context.Context, string) (bool, error)
+	DeleteClusterQueue(context.Context, string) (bool, error)
+	DeleteLocalQueue(context.Context, string, string) (bool, error)
+}

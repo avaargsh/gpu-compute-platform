@@ -1,63 +1,28 @@
-# GPU Compute Platform Dockerfile
-# Multi-stage build for optimized image size
+# AI Compute Control Plane image.
+# Phase 0 deliberately has no frontend or CUDA dependency. Accelerator runtime
+# integration belongs to Kubernetes nodes/providers, not the control-plane API.
 
-# Stage 1: Build frontend
-FROM node:20-alpine AS frontend-builder
+FROM python:3.12-slim AS python-base
 
-WORKDIR /app/frontend
-
-# Copy frontend package files
-COPY frontend/package*.json ./
-RUN npm ci --omit=dev
-
-# Copy frontend source and build
-COPY frontend/ ./
-RUN npm run build
-
-# Stage 2: Python base with GPU support
-FROM nvidia/cuda:12.1-runtime-ubuntu22.04 AS python-base
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    python3.12 \
-    python3.12-venv \
-    python3-pip \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     build-essential \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv package manager
-RUN pip3 install uv
+RUN pip install --no-cache-dir uv
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app && \
-    chown -R appuser:appuser /app
-
+RUN useradd -m -u 1000 appuser && mkdir -p /app && chown -R appuser:appuser /app
 USER appuser
 WORKDIR /app
 
-# Stage 3: Dependencies
 FROM python-base AS deps
+COPY --chown=appuser:appuser pyproject.toml README.md ./
+RUN uv venv .venv && . .venv/bin/activate && uv pip install -e .
 
-# Copy Python project configuration
-COPY --chown=appuser:appuser pyproject.toml ./
-COPY --chown=appuser:appuser README.md ./
-
-# Install Python dependencies with uv
-RUN uv venv .venv && \
-    . .venv/bin/activate && \
-    uv pip install -e .
-
-# Stage 4: Application
 FROM python-base AS app
-
-# Copy virtual environment from deps stage
 COPY --from=deps --chown=appuser:appuser /app/.venv /app/.venv
-
-# Copy application code
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser alembic/ ./alembic/
 COPY --chown=appuser:appuser alembic.ini ./
@@ -67,28 +32,18 @@ COPY --chown=appuser:appuser examples/ ./examples/
 COPY --chown=appuser:appuser tests/ ./tests/
 COPY --chown=appuser:appuser pytest.ini ./
 
-# Copy built frontend from frontend-builder
-COPY --from=frontend-builder --chown=appuser:appuser /app/frontend/dist ./frontend/dist
+RUN find scripts -type f -name '*.sh' -exec chmod +x {} +
 
-# Make scripts executable
-RUN chmod +x scripts/*.sh
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app" \
+    ENVIRONMENT="production" \
+    DATABASE_URL="postgresql+asyncpg://postgres:postgres@postgres:5432/gpu_platform" \
+    CELERY_BROKER_URL="redis://redis:6379/0" \
+    CELERY_RESULT_BACKEND="redis://redis:6379/0" \
+    REDIS_URL="redis://redis:6379/0"
 
-# Set environment variables
-ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app"
-ENV ENVIRONMENT="production"
-ENV DATABASE_URL="postgresql://postgres:postgres@postgres:5432/gpu_platform"
-ENV CELERY_BROKER_URL="redis://redis:6379/0"
-ENV CELERY_RESULT_BACKEND="redis://redis:6379/0"
-ENV REDIS_URL="redis://redis:6379/0"
-ENV MLFLOW_TRACKING_URI="http://mlflow:5000"
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
+    CMD curl -f http://localhost:8000/healthz || exit 1
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Expose port
 EXPOSE 8000
-
-# Default command
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

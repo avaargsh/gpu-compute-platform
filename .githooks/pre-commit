@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+bash scripts/go-format.sh
+
+if ! git diff --quiet -- cmd internal; then
+  echo "gofmt changed Go files. Review and stage the formatted changes, then commit again."
+  git diff --stat -- cmd internal
+  exit 1
+fi

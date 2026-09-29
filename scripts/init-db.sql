@@ -1,14 +1,6 @@
--- Initialize databases for GPU Compute Platform
-
--- Create database for MLflow if not exists
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'mlflow') THEN
-        PERFORM dblink_exec('dbname=' || current_database(), 'CREATE DATABASE mlflow');
-    END IF;
-END
-$$;
-
--- Grant permissions
-GRANT ALL PRIVILEGES ON DATABASE gpu_platform TO postgres;
-GRANT ALL PRIVILEGES ON DATABASE mlflow TO postgres;
+-- Legacy optional-service bootstrap intentionally left empty.
+-- Phase 0 AI Compute Control Plane owns only the gpu_platform database declared
+-- by POSTGRES_DB. Schema creation is exclusively managed by Alembic.
+--
+-- Optional services such as MLflow must provision their own database/schema in
+-- their Compose profile or deployment chart; they are not part of P0 startup.

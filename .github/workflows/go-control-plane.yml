@@ -1,0 +1,92 @@
+name: Go Control Plane
+
+concurrency:
+  group: go-control-plane-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - feat/control-plane-v2-go
+  pull_request:
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "Dockerfile.control-plane"
+      - "Makefile"
+      - "scripts/go-format.sh"
+      - "scripts/e2e/go-kind-kueue-golden.sh"
+      - "scripts/e2e/install-fake-gpu.sh"
+      - "internal/**/*.sql"
+      - ".github/workflows/go-control-plane.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gpu
+          POSTGRES_PASSWORD: gpu
+          POSTGRES_DB: gpu_platform_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gpu -d gpu_platform_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_DSN: postgres://gpu:gpu@localhost:5432/gpu_platform_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - name: Dependencies
+        run: go mod tidy
+      - name: Module files clean
+        run: |
+          if [ -n "$(git status --porcelain -- go.mod go.sum)" ]; then
+            echo "go.mod/go.sum are not tidy:"
+            git status --short -- go.mod go.sum
+            git diff -- go.mod go.sum
+            exit 1
+          fi
+      - name: Format check
+        run: make fmt-check
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Build binaries
+        run: |
+          go build ./cmd/control-plane
+          go build ./cmd/cluster-agent
+      - name: Build container targets
+        run: |
+          docker build -f Dockerfile.control-plane --target control-plane -t gpu-control-plane:test .
+          docker build -f Dockerfile.control-plane --target cluster-agent -t gpu-cluster-agent:test .
+
+  golden-path:
+    name: Golden Path / kind + Kueue
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - uses: azure/setup-helm@v4
+      - name: Install kind
+        run: |
+          curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+      - name: Run Go Golden Path
+        run: bash scripts/e2e/go-kind-kueue-golden.sh

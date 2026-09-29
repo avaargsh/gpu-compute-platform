@@ -9,8 +9,10 @@ from alembic import context
 
 # Import your models here for autogenerate support
 from app.core.database import Base
-from app.models.user import User  # Import all your models
-from app.models.task import GpuTask, TaskLog, TaskMetric  # Import task models
+from app.models.user import User
+from app.models.tenancy import Project, ProjectMember, Tenant
+from app.models.control_plane_resource import ControlPlaneResource
+from app.models.control_plane_revision import ControlPlaneResourceRevision
 from app.core.config import settings
 
 # this is the Alembic Config object, which provides

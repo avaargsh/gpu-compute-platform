@@ -11,33 +11,32 @@ services:
       - "8000:8000"
     environment:
       - ENVIRONMENT=development
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gpu_platform
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/gpu_platform
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/0
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - SECRET_KEY=dev-secret-key-change-in-production
       - DEBUG=true
+      - CONTROL_PLANE_SCHEDULER_PROVIDER=${CONTROL_PLANE_SCHEDULER_PROVIDER:-disabled}
+      - CONTROL_PLANE_KUEUE_NAMESPACE=${CONTROL_PLANE_KUEUE_NAMESPACE:-default}
+      - CONTROL_PLANE_KUEUE_LOCAL_QUEUE=${CONTROL_PLANE_KUEUE_LOCAL_QUEUE:-default}
+      - CONTROL_PLANE_KUBECONFIG=/root/.kube/config
     volumes:
       - ./app:/app/app:ro
       - ./scripts:/app/scripts:ro
       - ./examples:/app/examples:ro
       - ./alembic:/app/alembic:ro
+      - ${CONTROL_PLANE_KUBECONFIG:-./.kubeconfig-unused}:/root/.kube/config:ro
       - gpu_data:/app/data
     depends_on:
-      - postgres
-      - redis
-      - mlflow
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - gpu-platform
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   # Celery worker for background tasks
   celery-worker:
@@ -45,32 +44,31 @@ services:
       context: .
       dockerfile: Dockerfile
       target: app
-    command: celery -A app.core.celery_app.celery_app worker -Q default,gpu_tasks -l info --concurrency=4
+    command: celery -A app.core.celery_app.celery_app worker -Q control_plane -l info --concurrency=4
     environment:
       - ENVIRONMENT=development
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/gpu_platform
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/gpu_platform
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/0
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - SECRET_KEY=dev-secret-key-change-in-production
+      - CONTROL_PLANE_SCHEDULER_PROVIDER=${CONTROL_PLANE_SCHEDULER_PROVIDER:-disabled}
+      - CONTROL_PLANE_KUEUE_NAMESPACE=${CONTROL_PLANE_KUEUE_NAMESPACE:-default}
+      - CONTROL_PLANE_KUEUE_LOCAL_QUEUE=${CONTROL_PLANE_KUEUE_LOCAL_QUEUE:-default}
+      - CONTROL_PLANE_KUBECONFIG=/root/.kube/config
     volumes:
       - ./app:/app/app:ro
+      - ${CONTROL_PLANE_KUBECONFIG:-./.kubeconfig-unused}:/root/.kube/config:ro
       - gpu_data:/app/data
     depends_on:
-      - postgres
-      - redis
-      - mlflow
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - gpu-platform
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
 
   # PostgreSQL database
   postgres:
@@ -81,7 +79,6 @@ services:
       - POSTGRES_PASSWORD=postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     ports:
       - "5432:5432"
     restart: unless-stopped
@@ -109,8 +106,10 @@ services:
       timeout: 3s
       retries: 5
 
-  # MLflow for experiment tracking
+  # MLflow is optional and intentionally outside the Phase 0 control-plane path.
   mlflow:
+    profiles:
+      - mlops
     image: python:3.12-slim
     working_dir: /mlflow
     command: >
