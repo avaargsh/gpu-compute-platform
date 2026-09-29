@@ -28,8 +28,8 @@ func (s *Store) CreatePlacementMigration(ctx context.Context, in domain.Placemen
 
 	result, err := s.db.ExecContext(ctx, `
 INSERT INTO placement_migrations
-    (migration_id, pool_id, source_cluster_id, target_cluster_id, generation, phase, conditions, evidence_refs)
-SELECT $1, $2, $3, $4, $5, $6, $7, $8
+    (migration_id, pool_id, source_cluster_id, source_generation, target_cluster_id, target_generation, generation, phase, conditions, evidence_refs)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 FROM cluster_bindings
 WHERE pool_id = $2 AND cluster_id = $3
 ON CONFLICT (migration_id) DO NOTHING
@@ -66,6 +66,7 @@ SELECT cluster_id FROM cluster_bindings WHERE pool_id = $1
 	}
 	if existing.Metadata.Generation == in.Metadata.Generation &&
 		existing.SourceClusterID == in.SourceClusterID &&
+		existing.SourceGeneration == in.SourceGeneration &&
 		existing.TargetClusterID == in.TargetClusterID {
 		return existing, false, nil
 	}
@@ -88,7 +89,9 @@ WHERE pool_id = $1 AND migration_id = $2
 		&out.Metadata.ID,
 		&out.PoolID,
 		&out.SourceClusterID,
+		&out.SourceGeneration,
 		&out.TargetClusterID,
+		&out.TargetGeneration,
 		&out.Metadata.Generation,
 		&out.Phase,
 		&conditions,
