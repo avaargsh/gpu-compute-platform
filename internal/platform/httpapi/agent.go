@@ -101,12 +101,12 @@ func (a *AgentAPI) ClaimReconcileLease(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
-	claimed, err := a.store.ClaimReconcileLease(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Owner, in.TTLSeconds)
+	grant, err := a.store.ClaimReconcileLease(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Owner, in.TTLSeconds)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, agent.ReconcileLeaseResponse{Claimed: claimed})
+	writeJSON(w, http.StatusOK, grant)
 }
 
 func (a *AgentAPI) ReleaseReconcileLease(w http.ResponseWriter, r *http.Request) {
