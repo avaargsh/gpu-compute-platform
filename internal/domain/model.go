@@ -41,7 +41,6 @@ type AcceleratorRequest struct {
 
 const (
 	AcceleratorAllocationExtendedResource = "extended-resource"
-	AcceleratorAllocationMIG              = "mig"
 	AcceleratorAllocationDRA              = "dra"
 )
 
@@ -53,7 +52,15 @@ type AcceleratorBinding struct {
 	ResourceName   string            `json:"resourceName"`
 	Flavor         string            `json:"flavor"`
 	NodeLabels     map[string]string `json:"nodeLabels,omitempty"`
+	Partition      *AcceleratorPartition `json:"partition,omitempty"`
 }
+
+type AcceleratorPartition struct {
+	Kind    string `json:"kind"`
+	Profile string `json:"profile"`
+}
+
+const AcceleratorPartitionMIG = "mig"
 
 type SchedulingPolicy struct {
 	Mode string `json:"mode"`
