@@ -53,6 +53,7 @@ type AcceleratorBinding struct {
 	Flavor         string                `json:"flavor"`
 	NodeLabels     map[string]string     `json:"nodeLabels,omitempty"`
 	Partition      *AcceleratorPartition `json:"partition,omitempty"`
+	DRA            *DRAAllocation        `json:"dra,omitempty"`
 }
 
 type AcceleratorPartition struct {
@@ -61,6 +62,10 @@ type AcceleratorPartition struct {
 }
 
 const AcceleratorPartitionMIG = "mig"
+
+type DRAAllocation struct {
+	DeviceClassName string `json:"deviceClassName"`
+}
 
 type SchedulingPolicy struct {
 	Mode string `json:"mode"`

@@ -42,6 +42,29 @@ func (c *KubeClient) ApplyLocalQueue(ctx context.Context, in LocalQueue) error {
 	return c.apply(ctx, localQueueGVR, in.Namespace, localQueueObject(in))
 }
 
+func (c *KubeClient) ApplyResourceClaim(ctx context.Context, in Job) error {
+	if in.DRA == nil {
+		return nil
+	}
+	if c.core == nil {
+		return fmt.Errorf("kubernetes client is required")
+	}
+	claim, err := resourceClaimObject(in)
+	if err != nil {
+		return err
+	}
+	claims := c.core.ResourceV1().ResourceClaims(in.Namespace)
+	_, err = claims.Get(ctx, claim.Name, metav1.GetOptions{})
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	_, err = claims.Create(ctx, claim, metav1.CreateOptions{})
+	return err
+}
+
 func (c *KubeClient) ApplyJob(ctx context.Context, in Job) error {
 	if c.core == nil {
 		return fmt.Errorf("kubernetes client is required")
@@ -140,6 +163,25 @@ func (c *KubeClient) DeleteJob(ctx context.Context, namespace, name string) (boo
 		return false, err
 	}
 	_, err = jobs.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+func (c *KubeClient) DeleteResourceClaim(ctx context.Context, namespace, name string) (bool, error) {
+	if c.core == nil {
+		return false, fmt.Errorf("kubernetes client is required")
+	}
+	claims := c.core.ResourceV1().ResourceClaims(namespace)
+	err := claims.Delete(ctx, name, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	_, err = claims.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return true, nil
 	}

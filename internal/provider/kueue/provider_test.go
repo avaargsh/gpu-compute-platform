@@ -27,6 +27,11 @@ func (f *fakeClient) ApplyLocalQueue(_ context.Context, v LocalQueue) error {
 	return nil
 }
 
+func (f *fakeClient) ApplyResourceClaim(_ context.Context, v Job) error {
+	f.order = append(f.order, "claim:"+v.DRA.ClaimName)
+	return nil
+}
+
 func (f *fakeClient) ApplyJob(_ context.Context, v Job) error {
 	f.order = append(f.order, "job:"+v.Name)
 	return nil
@@ -37,6 +42,10 @@ func (f *fakeClient) ObserveJob(_ context.Context, _, _ string) (JobObservation,
 }
 func (f *fakeClient) DeleteJob(_ context.Context, namespace, name string) (bool, error) {
 	f.order = append(f.order, "delete-job:"+namespace+"/"+name)
+	return true, nil
+}
+func (f *fakeClient) DeleteResourceClaim(_ context.Context, namespace, name string) (bool, error) {
+	f.order = append(f.order, "delete-claim:"+namespace+"/"+name)
 	return true, nil
 }
 func (f *fakeClient) DeleteResourceFlavor(_ context.Context, name string) (bool, error) {

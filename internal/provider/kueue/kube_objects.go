@@ -5,6 +5,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -85,6 +86,14 @@ func localQueueObject(in LocalQueue) *unstructured.Unstructured {
 }
 
 func jobObject(in Job) (*batchv1.Job, error) {
+	if in.DRA != nil {
+		if len(in.Resources) != 0 || in.DRA.ClaimName == "" || in.DRA.DeviceClassName == "" || in.DRA.Count <= 0 {
+			return nil, fmt.Errorf("valid DRA request must not include extended resources")
+		}
+		jobLabels := cloneStringMap(in.Labels)
+		jobLabels["ai.compute/workload"] = in.Name
+		return &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: in.Name, Namespace: in.Namespace, Annotations: cloneStringMap(in.Annotations), Labels: jobLabels}, Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"ai.compute/workload": in.Name}}, Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, ResourceClaims: []corev1.PodResourceClaim{{Name: "accelerator", ResourceClaimName: &in.DRA.ClaimName}}, Containers: []corev1.Container{{Name: "workload", Image: in.Image, Command: append([]string(nil), in.Command...)}}}}}}, nil
+	}
 	if len(in.Resources) != 1 {
 		return nil, fmt.Errorf("exactly one positive accelerator resource is required")
 	}
@@ -133,6 +142,14 @@ func jobObject(in Job) (*batchv1.Job, error) {
 			},
 		},
 	}, nil
+}
+
+func resourceClaimObject(in Job) (*resourcev1.ResourceClaim, error) {
+	if in.DRA == nil || in.DRA.ClaimName == "" || in.DRA.DeviceClassName == "" || in.DRA.Count <= 0 {
+		return nil, fmt.Errorf("valid DRA request is required")
+	}
+	count := in.DRA.Count
+	return &resourcev1.ResourceClaim{TypeMeta: metav1.TypeMeta{APIVersion: "resource.k8s.io/v1", Kind: "ResourceClaim"}, ObjectMeta: metav1.ObjectMeta{Name: in.DRA.ClaimName, Namespace: in.Namespace}, Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{{Name: "accelerator", Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: in.DRA.DeviceClassName, AllocationMode: resourcev1.DeviceAllocationModeExactCount, Count: count}}}}}}, nil
 }
 
 func stringMapAny(in map[string]string) map[string]any {

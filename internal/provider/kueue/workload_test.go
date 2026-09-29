@@ -99,3 +99,36 @@ func TestPodsReadyReasonDistinguishesTerminalJobs(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectDRAWorkloadUsesDeviceClassWithoutExtendedResource(t *testing.T) {
+	got, err := ProjectWorkload(baseprovider.WorkloadProjection{
+		WorkloadID: "workload-dra", PoolID: "pool-dra", Namespace: "project-1",
+		Image: "example/train:latest", Accelerator: domain.AcceleratorRequest{Class: "h100-dra", Quota: 2},
+		AcceleratorBinding: domain.AcceleratorBinding{
+			Class: "h100-dra", AllocationMode: domain.AcceleratorAllocationDRA, Flavor: "h100-dra",
+			DRA: &domain.DRAAllocation{DeviceClassName: "gpu.nvidia.com"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DRA == nil || got.DRA.DeviceClassName != "gpu.nvidia.com" || got.DRA.Count != 2 {
+		t.Fatalf("unexpected DRA projection: %#v", got.DRA)
+	}
+	if len(got.Resources) != 0 {
+		t.Fatalf("DRA projection must not request extended resources: %#v", got.Resources)
+	}
+}
+
+func TestProjectDRAWorkloadRequiresDeviceClass(t *testing.T) {
+	_, err := ProjectWorkload(baseprovider.WorkloadProjection{
+		WorkloadID: "workload-dra", PoolID: "pool-dra", Namespace: "project-1",
+		Image: "example/train:latest", Accelerator: domain.AcceleratorRequest{Class: "h100-dra", Quota: 1},
+		AcceleratorBinding: domain.AcceleratorBinding{
+			Class: "h100-dra", AllocationMode: domain.AcceleratorAllocationDRA, Flavor: "h100-dra",
+		},
+	})
+	if err == nil {
+		t.Fatal("DRA projection must fail closed without a device class")
+	}
+}
