@@ -26,7 +26,7 @@ func TestCutoverRetryReturnsSuccessAfterLostResponse(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		resp, err := server.Client().Post(url, "application/json", nil)
-		if err != nil { t.Fatal(err) }
+		if err != nil {\n\t\t\tt.Fatal(err)\n\t\t}
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("attempt %d status=%d, want 200", i+1, resp.StatusCode)
@@ -51,7 +51,7 @@ func TestRetireRetryReturnsSucceededMigration(t *testing.T) {
 	server := httptest.NewServer(NewRouterWithDependencies(agentstore.NewMemory(), bindings))
 	defer server.Close()
 	resp, err := server.Client().Post(server.URL+"/api/v1/compute-pools/pool-1/migrations/migration-1/retire-source", "application/json", nil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {\n\t\tt.Fatal(err)\n\t}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d, want 200", resp.StatusCode)
