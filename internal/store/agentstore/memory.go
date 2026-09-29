@@ -12,6 +12,7 @@ import (
 
 type memoryLease struct {
 	owner string
+	epoch int64
 	until time.Time
 }
 
@@ -277,12 +278,12 @@ func (m *Memory) ClaimReconcileLease(
 	resourceID domain.ID,
 	owner string,
 	ttlSeconds int64,
-) (bool, error) {
+) (agent.ReconcileLeaseGrant, error) {
 	if clusterID == "" || kind == "" || resourceID == "" || owner == "" {
-		return false, fmt.Errorf("reconcile lease identity is required")
+		return agent.ReconcileLeaseGrant{}, fmt.Errorf("reconcile lease identity is required")
 	}
 	if ttlSeconds <= 0 {
-		return false, fmt.Errorf("reconcile lease ttl must be positive")
+		return agent.ReconcileLeaseGrant{}, fmt.Errorf("reconcile lease ttl must be positive")
 	}
 
 	m.mu.Lock()
@@ -291,13 +292,18 @@ func (m *Memory) ClaimReconcileLease(
 	now := m.now().UTC()
 	current, ok := m.leases[key]
 	if ok && current.owner != owner && current.until.After(now) {
-		return false, nil
+		return agent.ReconcileLeaseGrant{}, nil
 	}
-	m.leases[key] = memoryLease{
-		owner: owner,
-		until: now.Add(time.Duration(ttlSeconds) * time.Second),
+	epoch := int64(1)
+	if ok {
+		epoch = current.epoch
+		if current.owner != owner {
+			epoch++
+		}
 	}
-	return true, nil
+	expiresAt := now.Add(time.Duration(ttlSeconds) * time.Second)
+	m.leases[key] = memoryLease{owner: owner, epoch: epoch, until: expiresAt}
+	return agent.ReconcileLeaseGrant{Claimed: true, Owner: owner, Epoch: epoch, ExpiresAt: expiresAt}, nil
 }
 
 func (m *Memory) ReleaseReconcileLease(
