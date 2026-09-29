@@ -451,7 +451,6 @@ ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
 	return tx.Commit()
 }
 
-
 func validateLeaseTx(ctx context.Context, tx *sql.Tx, clusterID domain.ID, kind string, resourceID domain.ID, owner string, epoch int64) error {
 	if owner == "" || epoch <= 0 {
 		return agentstore.ErrStaleReconcileLease
