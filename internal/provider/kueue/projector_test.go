@@ -22,9 +22,9 @@ func TestProjectPoolResolvesPortableAcceleratorBinding(t *testing.T) {
 			ResourceName: "nvidia.com/gpu",
 			Flavor:       "h100",
 			NodeLabels: map[string]string{
-				"nvidia.com/gpu.product":       "H100-SXM5-80GB",
+				"nvidia.com/gpu.product":      "H100-SXM5-80GB",
 				"topology.kubernetes.io/zone": "gpu-zone-a",
-				"ai.compute/rack":              "rack-a01",
+				"ai.compute/rack":             "rack-a01",
 			},
 		}},
 	})
