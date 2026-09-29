@@ -23,6 +23,11 @@ func (a *MigrationAPI) RetireSource(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if migration.Phase == domain.PlacementMigrationSucceeded {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(migration)
+		return
+	}
 	if migration.Phase != domain.PlacementMigrationRetiring {
 		http.Error(w, agentstore.ErrPlacementMigrationTransition.Error(), http.StatusConflict)
 		return
