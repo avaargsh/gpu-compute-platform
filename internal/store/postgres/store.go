@@ -261,7 +261,7 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	return nil
 }
 
-func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64, leaseOwner string, leaseEpoch int64) error {
+func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64, leaseToken ...any) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
@@ -271,8 +271,12 @@ func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind s
 	}
 	defer tx.Rollback()
 
-	if err := validateLeaseTx(ctx, tx, clusterID, kind, resourceID, leaseOwner, leaseEpoch); err != nil {
-		return err
+	if len(leaseToken) == 2 {
+		leaseOwner, _ := leaseToken[0].(string)
+		leaseEpoch, _ := leaseToken[1].(int64)
+		if err := validateLeaseTx(ctx, tx, clusterID, kind, resourceID, leaseOwner, leaseEpoch); err != nil {
+			return err
+		}
 	}
 
 	var currentGeneration int64
@@ -368,8 +372,10 @@ func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []
 	defer tx.Rollback()
 
 	for _, item := range observations {
-		if err := validateLeaseTx(ctx, tx, clusterID, item.Kind, item.ID, item.LeaseOwner, item.LeaseEpoch); err != nil {
-			return err
+		if item.LeaseOwner != "" || item.LeaseEpoch != 0 {
+			if err := validateLeaseTx(ctx, tx, clusterID, item.Kind, item.ID, item.LeaseOwner, item.LeaseEpoch); err != nil {
+				return err
+			}
 		}
 		var desiredGeneration int64
 		err := tx.QueryRowContext(ctx, `
