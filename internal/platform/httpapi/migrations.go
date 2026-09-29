@@ -39,6 +39,16 @@ func (a *MigrationAPI) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Phase = domain.PlacementMigrationRequested
+	sourceDesired, found, err := a.resources.GetDesired(r.Context(), in.SourceClusterID, "ComputePool", poolID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, agentstore.ErrDesiredNotFound.Error(), http.StatusConflict)
+		return
+	}
+	in.SourceGeneration = sourceDesired.Generation
 
 	out, created, err := a.store.CreatePlacementMigration(r.Context(), in)
 	if err != nil {
