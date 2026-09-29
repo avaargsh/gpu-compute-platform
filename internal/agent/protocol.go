@@ -35,8 +35,11 @@ type ReconcileLeaseRequest struct {
 	TTLSeconds int64     `json:"ttlSeconds"`
 }
 
-type ReconcileLeaseResponse struct {
-	Claimed bool `json:"claimed"`
+type ReconcileLeaseGrant struct {
+	Claimed   bool      `json:"claimed"`
+	Owner     string    `json:"owner,omitempty"`
+	Epoch     int64     `json:"epoch,omitempty"`
+	ExpiresAt time.Time `json:"expiresAt,omitempty"`
 }
 
 type FinalizeDesiredRequest struct {
