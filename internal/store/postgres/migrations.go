@@ -176,6 +176,25 @@ FOR UPDATE
 	if err != nil {
 		return domain.PlacementMigration{}, err
 	}
+	if phase == domain.PlacementMigrationCutover {
+		var currentClusterID domain.ID
+		err = tx.QueryRowContext(ctx, `
+SELECT cluster_id
+FROM cluster_bindings
+WHERE pool_id = $1
+FOR UPDATE
+`, poolID).Scan(&currentClusterID)
+		if err != nil {
+			return domain.PlacementMigration{}, err
+		}
+		if currentClusterID != targetClusterID {
+			return domain.PlacementMigration{}, agentstore.ErrPlacementSourceMismatch
+		}
+		if err = tx.Commit(); err != nil {
+			return domain.PlacementMigration{}, err
+		}
+		return s.getPlacementMigration(ctx, poolID, migrationID)
+	}
 	if phase != domain.PlacementMigrationReadyToCutover {
 		return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationTransition
 	}
