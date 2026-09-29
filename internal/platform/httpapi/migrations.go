@@ -166,6 +166,16 @@ func (a *MigrationAPI) PrepareCutover(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, agentstore.ErrPlacementTargetNotReady.Error(), http.StatusConflict)
 		return
 	}
+	migration, err = a.store.SetPlacementMigrationTargetGeneration(r.Context(), poolID, migrationID, desired.Generation)
+	if err != nil {
+		if errors.Is(err, agentstore.ErrPlacementMigrationTransition) ||
+			errors.Is(err, agentstore.ErrPlacementTargetGenerationMismatch) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	evidence := append([]string(nil), migration.EvidenceRefs...)
 	evidence = append(evidence, observation.EvidenceRefs...)
 	out, err := a.store.UpdatePlacementMigration(
@@ -263,6 +273,10 @@ func (a *MigrationAPI) VerifyTarget(w http.ResponseWriter, r *http.Request) {
 	}
 	if !observed || observation.ObservedGeneration != desired.Generation || !conditionTrue(observation.Conditions, "Ready") {
 		http.Error(w, agentstore.ErrPlacementTargetNotReady.Error(), http.StatusConflict)
+		return
+	}
+	if migration.TargetGeneration > 0 && desired.Generation != migration.TargetGeneration {
+		http.Error(w, agentstore.ErrPlacementTargetGenerationMismatch.Error(), http.StatusConflict)
 		return
 	}
 	evidence := append([]string(nil), migration.EvidenceRefs...)
