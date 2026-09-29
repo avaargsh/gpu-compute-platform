@@ -17,7 +17,7 @@ func TestVerifyTargetRejectsGenerationChangeAfterPrepare(t *testing.T) {
 	bindings.migrations["pool-1"] = map[domain.ID]domain.PlacementMigration{
 		"migration-1": {
 			Metadata: domain.Metadata{ID: "migration-1", Generation: 1},
-			PoolID: "pool-1", SourceClusterID: "cluster-a", SourceGeneration: 7,
+			PoolID:   "pool-1", SourceClusterID: "cluster-a", SourceGeneration: 7,
 			TargetClusterID: "cluster-b", TargetGeneration: 3,
 			Phase: domain.PlacementMigrationCutover,
 		},
