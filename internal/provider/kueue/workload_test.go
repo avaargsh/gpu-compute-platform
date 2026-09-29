@@ -100,7 +100,6 @@ func TestPodsReadyReasonDistinguishesTerminalJobs(t *testing.T) {
 	}
 }
 
-
 func TestProjectDRAWorkloadUsesDeviceClassWithoutExtendedResource(t *testing.T) {
 	got, err := ProjectWorkload(provider.WorkloadProjection{
 		WorkloadID: "workload-dra", PoolID: "pool-dra", Namespace: "project-1",
