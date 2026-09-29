@@ -3,7 +3,8 @@ package httpapi
 import (
 	"net/http"
 	"net/http/httptest"
-	"testing"\n\t"time"
+	"testing"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
