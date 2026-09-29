@@ -33,7 +33,7 @@ SELECT $1, $2, $3, $4, $5, $6, $7, $8
 FROM cluster_bindings
 WHERE pool_id = $2 AND cluster_id = $3
 ON CONFLICT (migration_id) DO NOTHING
-`, in.Metadata.ID, in.PoolID, in.SourceClusterID, in.SourceGeneration, in.TargetClusterID, in.Metadata.Generation, in.Phase, conditions, evidence)
+`, in.Metadata.ID, in.PoolID, in.SourceClusterID, in.SourceGeneration, in.TargetClusterID, in.TargetGeneration, in.Metadata.Generation, in.Phase, conditions, evidence)
 	if err != nil {
 		return domain.PlacementMigration{}, false, err
 	}
@@ -80,7 +80,7 @@ func (s *Store) getPlacementMigration(ctx context.Context, poolID, migrationID d
 	var out domain.PlacementMigration
 	var conditions, evidence []byte
 	err := s.db.QueryRowContext(ctx, `
-SELECT migration_id, pool_id, source_cluster_id, source_generation, target_cluster_id, generation, phase,
+SELECT migration_id, pool_id, source_cluster_id, source_generation, target_cluster_id, target_generation, generation, phase,
        conditions, evidence_refs, created_at, updated_at
 FROM placement_migrations
 WHERE pool_id = $1 AND migration_id = $2
@@ -109,6 +109,37 @@ WHERE pool_id = $1 AND migration_id = $2
 		return domain.PlacementMigration{}, err
 	}
 	return out, nil
+}
+
+func (s *Store) SetPlacementMigrationTargetGeneration(ctx context.Context, poolID, migrationID domain.ID, generation int64) (domain.PlacementMigration, error) {
+	if s.db == nil {
+		return domain.PlacementMigration{}, fmt.Errorf("postgres database is required")
+	}
+	result, err := s.db.ExecContext(ctx, `
+UPDATE placement_migrations
+SET target_generation = $3, updated_at = now()
+WHERE pool_id = $1 AND migration_id = $2
+  AND phase = $4
+  AND (target_generation = 0 OR target_generation = $3)
+`, poolID, migrationID, generation, domain.PlacementMigrationProjecting)
+	if err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return domain.PlacementMigration{}, err
+	}
+	if affected == 0 {
+		current, getErr := s.getPlacementMigration(ctx, poolID, migrationID)
+		if getErr != nil {
+			return domain.PlacementMigration{}, getErr
+		}
+		if current.Phase != domain.PlacementMigrationProjecting {
+			return domain.PlacementMigration{}, agentstore.ErrPlacementMigrationTransition
+		}
+		return domain.PlacementMigration{}, agentstore.ErrPlacementTargetGenerationMismatch
+	}
+	return s.getPlacementMigration(ctx, poolID, migrationID)
 }
 
 func (s *Store) UpdatePlacementMigration(ctx context.Context, poolID, migrationID domain.ID, phase domain.PlacementMigrationPhase, conditions []domain.Condition, evidenceRefs []string) (domain.PlacementMigration, error) {
