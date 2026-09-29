@@ -76,6 +76,10 @@ func (a *AgentAPI) Report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.store.Report(r.Context(), in.ClusterID, in.Observations); err != nil {
+		if err == agentstore.ErrStaleReconcileLease {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -114,7 +118,7 @@ func (a *AgentAPI) ReleaseReconcileLease(w http.ResponseWriter, r *http.Request)
 	if !decodeJSON(w, r, &in) {
 		return
 	}
-	if err := a.store.ReleaseReconcileLease(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Owner); err != nil {
+	if err := a.store.ReleaseReconcileLease(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Owner, in.Epoch); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -130,11 +134,11 @@ func (a *AgentAPI) FinalizeDesired(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "clusterId, kind, resourceId and positive generation are required", http.StatusBadRequest)
 		return
 	}
-	if err := a.store.FinalizeDesired(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Generation); err != nil {
+	if err := a.store.FinalizeDesired(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Generation, in.LeaseOwner, in.LeaseEpoch); err != nil {
 		switch err {
 		case agentstore.ErrDesiredNotFound:
 			http.Error(w, err.Error(), http.StatusNotFound)
-		case agentstore.ErrStaleGeneration, agentstore.ErrDesiredNotDeleting:
+		case agentstore.ErrStaleGeneration, agentstore.ErrDesiredNotDeleting, agentstore.ErrStaleReconcileLease:
 			http.Error(w, err.Error(), http.StatusConflict)
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
