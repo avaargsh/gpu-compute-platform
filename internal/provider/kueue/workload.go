@@ -36,11 +36,14 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 		return Job{}, fmt.Errorf("accelerator class and positive count are required")
 	}
 	binding := in.AcceleratorBinding
-	if binding.Class == "" || binding.ResourceName == "" || binding.Flavor == "" {
+	if binding.Class == "" || binding.Flavor == "" {
 		return Job{}, fmt.Errorf("accelerator binding is required")
 	}
 	if binding.AllocationMode != "" && binding.AllocationMode != domain.AcceleratorAllocationExtendedResource && binding.AllocationMode != domain.AcceleratorAllocationDRA {
 		return Job{}, fmt.Errorf("unsupported accelerator allocation mode %q", binding.AllocationMode)
+	}
+	if binding.Class != in.Accelerator.Class {
+		return Job{}, fmt.Errorf("accelerator binding class mismatch: %s", in.Accelerator.Class)
 	}
 	if binding.AllocationMode == domain.AcceleratorAllocationDRA {
 		if binding.DRA == nil || binding.DRA.DeviceClassName == "" {
@@ -55,13 +58,12 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 			DRA:         &DRARequest{ClaimName: resourceName("accelerator", string(in.WorkloadID)), DeviceClassName: binding.DRA.DeviceClassName, Count: in.Accelerator.Quota},
 		}, nil
 	}
+	if binding.ResourceName == "" {
+		return Job{}, fmt.Errorf("extended-resource allocation requires resource name")
+	}
 	if binding.Partition != nil && (binding.Partition.Kind != domain.AcceleratorPartitionMIG || binding.Partition.Profile == "") {
 		return Job{}, fmt.Errorf("unsupported accelerator partition: %#v", binding.Partition)
 	}
-	if binding.Class != in.Accelerator.Class {
-		return Job{}, fmt.Errorf("accelerator binding class mismatch: %s", in.Accelerator.Class)
-	}
-
 	return Job{
 		Name:      resourceName("job", string(in.WorkloadID)),
 		Namespace: in.Namespace,
