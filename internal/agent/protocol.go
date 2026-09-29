@@ -33,6 +33,7 @@ type ReconcileLeaseRequest struct {
 	ResourceID domain.ID `json:"resourceId"`
 	Owner      string    `json:"owner"`
 	TTLSeconds int64     `json:"ttlSeconds"`
+	Epoch      int64     `json:"epoch,omitempty"`
 }
 
 type ReconcileLeaseGrant struct {
@@ -47,6 +48,8 @@ type FinalizeDesiredRequest struct {
 	Kind       string    `json:"kind"`
 	ResourceID domain.ID `json:"resourceId"`
 	Generation int64     `json:"generation"`
+	LeaseOwner string    `json:"leaseOwner"`
+	LeaseEpoch int64     `json:"leaseEpoch"`
 }
 
 type Observation struct {
@@ -55,6 +58,8 @@ type Observation struct {
 	ObservedGeneration int64              `json:"observedGeneration"`
 	Conditions         []domain.Condition `json:"conditions,omitempty"`
 	EvidenceRefs       []string           `json:"evidenceRefs,omitempty"`
+	LeaseOwner         string             `json:"leaseOwner,omitempty"`
+	LeaseEpoch         int64              `json:"leaseEpoch,omitempty"`
 }
 
 type ControlPlane interface {
