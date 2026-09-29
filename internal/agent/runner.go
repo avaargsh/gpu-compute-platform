@@ -75,11 +75,11 @@ func (r *Runner) Sync(ctx context.Context) error {
 			ClusterID: r.clusterID, Kind: item.Kind, ResourceID: item.ID,
 			Owner: r.leaseOwner, TTLSeconds: 120,
 		}
-		claimed, err := r.control.ClaimReconcileLease(ctx, lease)
+		grant, err := r.control.ClaimReconcileLease(ctx, lease)
 		if err != nil {
 			return fmt.Errorf("claim reconcile lease for %s: %w", key, err)
 		}
-		if !claimed {
+		if !grant.Claimed {
 			continue
 		}
 
