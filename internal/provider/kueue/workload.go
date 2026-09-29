@@ -49,10 +49,10 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 		return Job{
 			Name: resourceName("job", string(in.WorkloadID)), Namespace: in.Namespace,
 			QueueName: resourceName("lq", string(in.PoolID)), Image: in.Image,
-			Command: append([]string(nil), in.Command...),
-			Labels: map[string]string{"kueue.x-k8s.io/queue-name": resourceName("lq", string(in.PoolID))},
+			Command:     append([]string(nil), in.Command...),
+			Labels:      map[string]string{"kueue.x-k8s.io/queue-name": resourceName("lq", string(in.PoolID))},
 			Annotations: map[string]string{"ai.compute/accelerator-class": in.Accelerator.Class, "ai.compute/accelerator-flavor": binding.Flavor},
-			DRA: &DRARequest{ClaimName: resourceName("accelerator", string(in.WorkloadID)), DeviceClassName: binding.DRA.DeviceClassName, Count: in.Accelerator.Quota},
+			DRA:         &DRARequest{ClaimName: resourceName("accelerator", string(in.WorkloadID)), DeviceClassName: binding.DRA.DeviceClassName, Count: in.Accelerator.Quota},
 		}, nil
 	}
 	if binding.Partition != nil && (binding.Partition.Kind != domain.AcceleratorPartitionMIG || binding.Partition.Profile == "") {
