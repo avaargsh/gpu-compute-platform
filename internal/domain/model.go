@@ -47,11 +47,11 @@ const (
 // AcceleratorBinding resolves a portable accelerator class into the concrete
 // allocation mechanism, resource and Kueue flavor exposed by a compute pool.
 type AcceleratorBinding struct {
-	Class          string            `json:"class"`
-	AllocationMode string            `json:"allocationMode,omitempty"`
-	ResourceName   string            `json:"resourceName"`
-	Flavor         string            `json:"flavor"`
-	NodeLabels     map[string]string `json:"nodeLabels,omitempty"`
+	Class          string                `json:"class"`
+	AllocationMode string                `json:"allocationMode,omitempty"`
+	ResourceName   string                `json:"resourceName"`
+	Flavor         string                `json:"flavor"`
+	NodeLabels     map[string]string     `json:"nodeLabels,omitempty"`
 	Partition      *AcceleratorPartition `json:"partition,omitempty"`
 }
 
