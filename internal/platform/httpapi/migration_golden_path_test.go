@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
@@ -102,6 +101,4 @@ func TestPlacementMigrationCrashReplayGoldenPath(t *testing.T) {
 	if finalized, ok, err := resources.FinalizedGeneration(ctx, "cluster-a", "ComputePool", "pool-1"); err != nil || !ok || finalized != 7 {
 		t.Fatalf("finalized generation=%d ok=%v err=%v", finalized, ok, err)
 	}
-
-	_ = time.Second
 }
