@@ -79,3 +79,23 @@ func TestDeleteWorkloadDoesNotRequireAcceleratorBinding(t *testing.T) {
 		t.Fatalf("unexpected cleanup identity: %#v", client.order)
 	}
 }
+
+func TestPodsReadyReasonDistinguishesTerminalJobs(t *testing.T) {
+	tests := []struct {
+		name  string
+		state JobObservation
+		want  string
+	}{
+		{name: "waiting", state: JobObservation{}, want: "AwaitingPods"},
+		{name: "ready", state: JobObservation{PodsReady: true}, want: "PodsReady"},
+		{name: "succeeded", state: JobObservation{Succeeded: true}, want: "JobCompleted"},
+		{name: "failed", state: JobObservation{Failed: true}, want: "JobFailed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := podsReadyReason(tt.state); got != tt.want {
+				t.Fatalf("podsReadyReason()=%q, want %q", got, tt.want)
+			}
+		})
+	}
+}
