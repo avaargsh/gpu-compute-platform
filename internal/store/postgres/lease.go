@@ -2,7 +2,10 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+
+	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 )
@@ -14,18 +17,20 @@ func (s *Store) ClaimReconcileLease(
 	resourceID domain.ID,
 	owner string,
 	ttlSeconds int64,
-) (bool, error) {
+) (agent.ReconcileLeaseGrant, error) {
 	if s.db == nil {
-		return false, fmt.Errorf("postgres database is required")
+		return agent.ReconcileLeaseGrant{}, fmt.Errorf("postgres database is required")
 	}
 	if clusterID == "" || kind == "" || resourceID == "" || owner == "" {
-		return false, fmt.Errorf("reconcile lease identity is required")
+		return agent.ReconcileLeaseGrant{}, fmt.Errorf("reconcile lease identity is required")
 	}
 	if ttlSeconds <= 0 {
-		return false, fmt.Errorf("reconcile lease ttl must be positive")
+		return agent.ReconcileLeaseGrant{}, fmt.Errorf("reconcile lease ttl must be positive")
 	}
 
-	result, err := s.db.ExecContext(ctx, `
+	var grant agent.ReconcileLeaseGrant
+	grant.Claimed = true
+	err := s.db.QueryRowContext(ctx, `
 INSERT INTO reconcile_leases
     (cluster_id, kind, resource_id, owner, lease_until, epoch)
 VALUES ($1, $2, $3, $4, now() + ($5 * interval '1 second'), 1)
@@ -39,15 +44,15 @@ ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
     updated_at = now()
 WHERE reconcile_leases.lease_until <= now()
    OR reconcile_leases.owner = EXCLUDED.owner
-`, clusterID, kind, resourceID, owner, ttlSeconds)
-	if err != nil {
-		return false, err
+RETURNING owner, epoch, lease_until
+`, clusterID, kind, resourceID, owner, ttlSeconds).Scan(&grant.Owner, &grant.Epoch, &grant.ExpiresAt)
+	if err == sql.ErrNoRows {
+		return agent.ReconcileLeaseGrant{}, nil
 	}
-	affected, err := result.RowsAffected()
 	if err != nil {
-		return false, err
+		return agent.ReconcileLeaseGrant{}, err
 	}
-	return affected == 1, nil
+	return grant, nil
 }
 
 func (s *Store) ReleaseReconcileLease(
