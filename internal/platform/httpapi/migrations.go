@@ -120,6 +120,11 @@ func (a *MigrationAPI) PrepareCutover(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if migration.Phase == domain.PlacementMigrationReadyToCutover {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(migration)
+		return
+	}
 	if migration.Phase != domain.PlacementMigrationProjecting {
 		http.Error(w, agentstore.ErrPlacementMigrationTransition.Error(), http.StatusConflict)
 		return
@@ -203,6 +208,11 @@ func (a *MigrationAPI) VerifyTarget(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if migration.Phase == domain.PlacementMigrationRetiring {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(migration)
 		return
 	}
 	if migration.Phase != domain.PlacementMigrationCutover {
