@@ -4,6 +4,7 @@ Frozen software baseline on 2026-09-30.
 
 - Branch: `feat/control-plane-v2-go`.
 - Verified code revision: `b3d3b0a119bb2c099c3803f0f137a595cda14c01`.
+- [Captured final deletion states](finalizer-deletion-proof.json) retain the three actual Golden Path tombstone responses.
 - Exact-revision [push workflow](https://github.com/avaargsh/gpu-compute-platform/actions/runs/36686628367).
 - Preceding frozen [P0.5 durability baseline](p0.5-reconcile-durability.md):
   `1f45cc15ca1e7571441dbe72dd160d0c067310f2`.
