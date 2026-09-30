@@ -33,7 +33,13 @@ wait_http() {
 }
 
 put() {
-  curl -fsS -X PUT "$BASE_URL$1" -H 'Content-Type: application/json' -d "$2" >/dev/null
+  local path="$1" body="$2" code
+  code="$(curl -sS -o /tmp/golden-put.out -w '%{http_code}' -X PUT     "$BASE_URL$path" -H 'Content-Type: application/json' -d "$body")"
+  if [[ "$code" != "204" ]]; then
+    echo "PUT $path returned HTTP $code" >&2
+    cat /tmp/golden-put.out >&2 || true
+    return 1
+  fi
 }
 
 condition_true() {
