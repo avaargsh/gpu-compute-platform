@@ -229,6 +229,16 @@ func (m *Memory) finalizeDesiredLocked(
 	requireLease bool,
 ) error {
 	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
+	if finalizedGeneration, ok := m.tombstones[key]; ok {
+		switch {
+		case generation == finalizedGeneration:
+			return nil
+		case generation < finalizedGeneration:
+			return ErrStaleGeneration
+		default:
+			return ErrDesiredNotFound
+		}
+	}
 	if requireLease {
 		current, ok := m.leases[key]
 		if !ok || current.owner != owner || !current.until.After(m.now().UTC()) {
