@@ -336,28 +336,27 @@ func (s *Store) finalizeDesired(
 	}
 	defer tx.Rollback()
 
-	var finalizedGeneration int64
-	finalizedErr := tx.QueryRowContext(ctx, `
+	if requireLease {
+		var finalizedGeneration int64
+		finalizedErr := tx.QueryRowContext(ctx, `
 SELECT generation
 FROM deletion_tombstones
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 FOR UPDATE
 `, clusterID, kind, resourceID).Scan(&finalizedGeneration)
-	if finalizedErr != nil && finalizedErr != sql.ErrNoRows {
-		return finalizedErr
-	}
-	if finalizedErr == nil {
-		switch {
-		case generation == finalizedGeneration:
-			return tx.Commit()
-		case generation < finalizedGeneration:
-			return agentstore.ErrStaleGeneration
-		default:
-			return agentstore.ErrDesiredNotFound
+		if finalizedErr != nil && finalizedErr != sql.ErrNoRows {
+			return finalizedErr
 		}
-	}
-
-	if requireLease {
+		if finalizedErr == nil {
+			switch {
+			case generation == finalizedGeneration:
+				return tx.Commit()
+			case generation < finalizedGeneration:
+				return agentstore.ErrStaleGeneration
+			default:
+				return agentstore.ErrDesiredNotFound
+			}
+		}
 		var currentOwner string
 		var leaseValid bool
 		err = tx.QueryRowContext(ctx, `
