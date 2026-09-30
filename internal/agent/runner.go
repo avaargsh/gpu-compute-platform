@@ -117,6 +117,7 @@ func (r *Runner) Sync(ctx context.Context) error {
 				Kind:               item.Kind,
 				ID:                 item.ID,
 				ObservedGeneration: item.Generation,
+				LeaseOwner:         r.leaseOwner,
 				Conditions: []domain.Condition{{
 					Type: "Ready", Status: "False", Reason: "Deleted",
 					Message: "provider resources are gone",
@@ -128,7 +129,8 @@ func (r *Runner) Sync(ctx context.Context) error {
 				return fmt.Errorf("report final observation for %s: %w", key, err)
 			}
 			if err := r.control.FinalizeDesired(ctx, FinalizeDesiredRequest{
-				ClusterID: r.clusterID, Kind: item.Kind, ResourceID: item.ID, Generation: item.Generation,
+				ClusterID: r.clusterID, Kind: item.Kind, ResourceID: item.ID,
+				Generation: item.Generation, Owner: r.leaseOwner,
 			}); err != nil {
 				_ = r.control.ReleaseReconcileLease(ctx, lease)
 				return fmt.Errorf("finalize desired resource %s: %w", key, err)
@@ -157,6 +159,7 @@ func (r *Runner) Sync(ctx context.Context) error {
 			}
 		}
 
+		observation.LeaseOwner = r.leaseOwner
 		reportErr := r.control.Report(ctx, r.clusterID, []Observation{observation})
 		releaseErr := r.control.ReleaseReconcileLease(ctx, lease)
 		if reportErr != nil {

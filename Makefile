@@ -20,7 +20,7 @@ build:
 
 acceptance-contract:
 	go test ./internal/agent -run 'TestRunner(RestartReplaysDesiredSafely|BacksOffRetryableFailureAndResetsOnNewGeneration|SkipsProviderWhenLeaseIsContended|DeletionReplaysAfterFinalObservationFailure|DeletionReplaysAfterFinalizeFailure)$$'
-	go test ./internal/store/postgres -run 'TestPostgres(ReconcileLeaseOwnershipAndExpiry|FinalizeDesiredAtomicallyCleansRuntimeState|TombstoneFencesOldGenerationAndAllowsNewerRecreate|StateSurvivesStoreReconstruction)$$'
+	go test ./internal/store/postgres -run 'TestPostgres(ReconcileLeaseOwnershipAndExpiry|LeaseTakeoverFencesStaleReportAndFinalize|FinalizeDesiredAtomicallyCleansRuntimeState|TombstoneFencesOldGenerationAndAllowsNewerRecreate|StateSurvivesStoreReconstruction)$$'
 	go test ./internal/platform/httpapi -run 'TestResourceAPI(RequiresDeleteRecreateForWorkloadChanges|RejectsStaleWorkloadGenerationWithoutRollback)$$'
 
 kind-up:

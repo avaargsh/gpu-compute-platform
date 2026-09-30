@@ -44,12 +44,14 @@ type FinalizeDesiredRequest struct {
 	Kind       string    `json:"kind"`
 	ResourceID domain.ID `json:"resourceId"`
 	Generation int64     `json:"generation"`
+	Owner      string    `json:"owner"`
 }
 
 type Observation struct {
 	Kind               string             `json:"kind"`
 	ID                 domain.ID          `json:"id"`
 	ObservedGeneration int64              `json:"observedGeneration"`
+	LeaseOwner         string             `json:"leaseOwner,omitempty"`
 	Conditions         []domain.Condition `json:"conditions,omitempty"`
 	EvidenceRefs       []string           `json:"evidenceRefs,omitempty"`
 }

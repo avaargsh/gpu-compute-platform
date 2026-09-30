@@ -3,11 +3,15 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"testing"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"github.com/avaargsh/gpu-compute-platform/internal/agent"
+	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
 func openContractDB(t *testing.T) *sql.DB {
@@ -91,5 +95,104 @@ func TestPostgresLeaseInputValidation(t *testing.T) {
 	}
 	if err := store.ReleaseReconcileLease(ctx, "cluster-a", "Workload", "train-1", ""); err == nil {
 		t.Fatal("missing owner must fail")
+	}
+}
+
+func TestPostgresLeaseTakeoverFencesStaleReportAndFinalize(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+
+	if err := store.UpsertDesired(ctx, "cluster-a", agent.DesiredResource{
+		Kind:       "Workload",
+		ID:         "train-fenced",
+		Generation: 7,
+		Spec:       map[string]any{"image": "example/train:v7"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := store.ClaimReconcileLease(
+		ctx, "cluster-a", "Workload", "train-fenced", "agent-a", 30,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("agent-a claim: claimed=%t err=%v", claimed, err)
+	}
+
+	if err := store.Report(ctx, "cluster-a", []agent.Observation{{
+		Kind:               "Workload",
+		ID:                 "train-fenced",
+		ObservedGeneration: 7,
+		LeaseOwner:         "agent-a",
+		EvidenceRefs:       []string{"evidence://agent-a"},
+	}}); err != nil {
+		t.Fatalf("agent-a report while lease is live: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+UPDATE reconcile_leases
+SET lease_until = now() - interval '1 second'
+WHERE cluster_id = 'cluster-a'
+  AND kind = 'Workload'
+  AND resource_id = 'train-fenced'
+`); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err = store.ClaimReconcileLease(
+		ctx, "cluster-a", "Workload", "train-fenced", "agent-b", 30,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("agent-b takeover: claimed=%t err=%v", claimed, err)
+	}
+
+	err = store.Report(ctx, "cluster-a", []agent.Observation{{
+		Kind:               "Workload",
+		ID:                 "train-fenced",
+		ObservedGeneration: 7,
+		LeaseOwner:         "agent-a",
+		EvidenceRefs:       []string{"evidence://stale-agent-a"},
+	}})
+	if !errors.Is(err, agentstore.ErrLeaseLost) {
+		t.Fatalf("stale agent report err=%v, want ErrLeaseLost", err)
+	}
+
+	if err := store.Report(ctx, "cluster-a", []agent.Observation{{
+		Kind:               "Workload",
+		ID:                 "train-fenced",
+		ObservedGeneration: 7,
+		LeaseOwner:         "agent-b",
+		EvidenceRefs:       []string{"evidence://agent-b"},
+	}}); err != nil {
+		t.Fatalf("takeover owner report: %v", err)
+	}
+
+	observed, found, err := store.GetObservation(
+		ctx, "cluster-a", "Workload", "train-fenced",
+	)
+	if err != nil || !found {
+		t.Fatalf("get observation: found=%t err=%v", found, err)
+	}
+	if len(observed.EvidenceRefs) != 1 || observed.EvidenceRefs[0] != "evidence://agent-b" {
+		t.Fatalf("stale writer changed evidence: %#v", observed.EvidenceRefs)
+	}
+
+	if err := store.MarkDesiredDeleting(
+		ctx, "cluster-a", "Workload", "train-fenced", time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	err = store.FinalizeDesiredOwned(
+		ctx, "cluster-a", "Workload", "train-fenced", 7, "agent-a",
+	)
+	if !errors.Is(err, agentstore.ErrLeaseLost) {
+		t.Fatalf("stale agent finalize err=%v, want ErrLeaseLost", err)
+	}
+
+	if err := store.FinalizeDesiredOwned(
+		ctx, "cluster-a", "Workload", "train-fenced", 7, "agent-b",
+	); err != nil {
+		t.Fatalf("takeover owner finalize: %v", err)
 	}
 }

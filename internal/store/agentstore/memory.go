@@ -160,9 +160,64 @@ func (m *Memory) MarkDesiredDeleting(_ context.Context, clusterID domain.ID, kin
 	return ErrDesiredNotFound
 }
 
-func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64) error {
+func (m *Memory) FinalizeDesired(
+	_ context.Context,
+	clusterID domain.ID,
+	kind string,
+	resourceID domain.ID,
+	generation int64,
+) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.finalizeDesiredLocked(
+		clusterID,
+		kind,
+		resourceID,
+		generation,
+		"",
+		false,
+	)
+}
+
+func (m *Memory) FinalizeDesiredOwned(
+	_ context.Context,
+	clusterID domain.ID,
+	kind string,
+	resourceID domain.ID,
+	generation int64,
+	owner string,
+) error {
+	if owner == "" {
+		return ErrLeaseLost
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.finalizeDesiredLocked(
+		clusterID,
+		kind,
+		resourceID,
+		generation,
+		owner,
+		true,
+	)
+}
+
+func (m *Memory) finalizeDesiredLocked(
+	clusterID domain.ID,
+	kind string,
+	resourceID domain.ID,
+	generation int64,
+	owner string,
+	requireLease bool,
+) error {
+	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
+	if requireLease {
+		current, ok := m.leases[key]
+		if !ok || current.owner != owner || !current.until.After(m.now().UTC()) {
+			return ErrLeaseLost
+		}
+	}
+
 	items := m.desired[clusterID]
 	out := items[:0]
 	found := false
@@ -184,7 +239,6 @@ func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind st
 	}
 	m.desired[clusterID] = append([]agent.DesiredResource(nil), out...)
 
-	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
 	m.tombstones[key] = generation
 	delete(m.leases, key)
 
@@ -218,6 +272,14 @@ func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Obser
 	out := append([]agent.Observation(nil), in...)
 	filtered := out[:0]
 	for i := range out {
+		if out[i].LeaseOwner != "" {
+			key := string(clusterID) + "/" + out[i].Kind + "/" + string(out[i].ID)
+			current, ok := m.leases[key]
+			if !ok || current.owner != out[i].LeaseOwner || !current.until.After(m.now().UTC()) {
+				return ErrLeaseLost
+			}
+		}
+
 		currentGeneration := int64(0)
 		for _, desired := range m.desired[clusterID] {
 			if desired.Kind == out[i].Kind && desired.ID == out[i].ID {

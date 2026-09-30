@@ -261,7 +261,55 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	return nil
 }
 
-func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64) error {
+func (s *Store) FinalizeDesired(
+	ctx context.Context,
+	clusterID domain.ID,
+	kind string,
+	resourceID domain.ID,
+	generation int64,
+) error {
+	return s.finalizeDesired(
+		ctx,
+		clusterID,
+		kind,
+		resourceID,
+		generation,
+		"",
+		false,
+	)
+}
+
+func (s *Store) FinalizeDesiredOwned(
+	ctx context.Context,
+	clusterID domain.ID,
+	kind string,
+	resourceID domain.ID,
+	generation int64,
+	owner string,
+) error {
+	if owner == "" {
+		return agentstore.ErrLeaseLost
+	}
+	return s.finalizeDesired(
+		ctx,
+		clusterID,
+		kind,
+		resourceID,
+		generation,
+		owner,
+		true,
+	)
+}
+
+func (s *Store) finalizeDesired(
+	ctx context.Context,
+	clusterID domain.ID,
+	kind string,
+	resourceID domain.ID,
+	generation int64,
+	owner string,
+	requireLease bool,
+) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
@@ -270,6 +318,26 @@ func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind s
 		return err
 	}
 	defer tx.Rollback()
+
+	if requireLease {
+		var currentOwner string
+		var leaseValid bool
+		err = tx.QueryRowContext(ctx, `
+SELECT owner, lease_until > now()
+FROM reconcile_leases
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
+`, clusterID, kind, resourceID).Scan(&currentOwner, &leaseValid)
+		if err == sql.ErrNoRows {
+			return agentstore.ErrLeaseLost
+		}
+		if err != nil {
+			return err
+		}
+		if currentOwner != owner || !leaseValid {
+			return agentstore.ErrLeaseLost
+		}
+	}
 
 	var currentGeneration int64
 	var deletionTimestamp sql.NullTime
@@ -364,6 +432,26 @@ func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []
 	defer tx.Rollback()
 
 	for _, item := range observations {
+		if item.LeaseOwner != "" {
+			var currentOwner string
+			var leaseValid bool
+			err := tx.QueryRowContext(ctx, `
+SELECT owner, lease_until > now()
+FROM reconcile_leases
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
+`, clusterID, item.Kind, item.ID).Scan(&currentOwner, &leaseValid)
+			if err == sql.ErrNoRows {
+				return agentstore.ErrLeaseLost
+			}
+			if err != nil {
+				return err
+			}
+			if currentOwner != item.LeaseOwner || !leaseValid {
+				return agentstore.ErrLeaseLost
+			}
+		}
+
 		var desiredGeneration int64
 		err := tx.QueryRowContext(ctx, `
 SELECT generation
