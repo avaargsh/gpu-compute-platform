@@ -353,7 +353,6 @@ func TestApplyExistingJobPreservesControllerStatus(t *testing.T) {
 	}
 }
 
-
 func TestApplyExistingJobRejectsStaleGeneration(t *testing.T) {
 	ctx := context.Background()
 	coreClient := kubefake.NewSimpleClientset()
