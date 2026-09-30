@@ -553,13 +553,12 @@ func TestMemoryLeaseCannotPreclaimMissingDesiredIdentity(t *testing.T) {
 	}
 }
 
-
 func TestMemoryCreateWorkloadDesiredPreservesReplayAfterPoolDeleting(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemory()
 	pool := agent.DesiredResource{
-		Kind: "ComputePool",
-		ID:   "pool-1",
+		Kind:       "ComputePool",
+		ID:         "pool-1",
 		Generation: 1,
 		Spec: map[string]any{
 			"acceleratorBindings": []domain.AcceleratorBinding{{
@@ -573,8 +572,8 @@ func TestMemoryCreateWorkloadDesiredPreservesReplayAfterPoolDeleting(t *testing.
 		t.Fatal(err)
 	}
 	workload := agent.DesiredResource{
-		Kind: "Workload",
-		ID:   "train-1",
+		Kind:       "Workload",
+		ID:         "train-1",
 		Generation: 1,
 		Spec: map[string]any{
 			"poolID": "pool-1",
@@ -615,8 +614,8 @@ func TestMemoryCreateWorkloadDesiredRejectsCrossClusterIdentityRace(t *testing.T
 	store := NewMemory()
 	for _, clusterID := range []domain.ID{"cluster-a", "cluster-b"} {
 		if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
-			Kind: "ComputePool",
-			ID:   "pool-1",
+			Kind:       "ComputePool",
+			ID:         "pool-1",
 			Generation: 1,
 			Spec: map[string]any{
 				"acceleratorBindings": []domain.AcceleratorBinding{{
