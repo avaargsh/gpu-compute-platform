@@ -320,7 +320,6 @@ func mustRequest(t *testing.T, method, url string, body []byte) *http.Request {
 	return req
 }
 
-
 func TestResourceAPIPreservesIdenticalReplayAfterPoolDeletionStarts(t *testing.T) {
 	store := agentstore.NewMemory()
 	server := httptest.NewServer(boundRouter(store, "cluster-a", "cluster-a"))
