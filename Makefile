@@ -19,9 +19,9 @@ build:
 	go build ./cmd/cluster-agent
 
 acceptance-contract:
-	go test ./internal/agent -run 'TestRunner(RestartReplaysDesiredSafely|BacksOffRetryableFailureAndResetsOnNewGeneration|SkipsProviderWhenLeaseIsContended|DeletionReplaysAfterFinalObservationFailure|DeletionReplaysAfterFinalizeFailure)$'
-	go test ./internal/store/postgres -run 'TestPostgres(ReconcileLeaseOwnershipAndExpiry|FinalizeDesiredAtomicallyCleansRuntimeState|TombstoneFencesOldGenerationAndAllowsNewerRecreate|StateSurvivesStoreReconstruction)$'
-	go test ./internal/platform/httpapi -run 'TestResourceAPI(RequiresDeleteRecreateForWorkloadChanges|RejectsStaleWorkloadGenerationWithoutRollback)$'
+	go test ./internal/agent -run 'TestRunner(RestartReplaysDesiredSafely|BacksOffRetryableFailureAndResetsOnNewGeneration|SkipsProviderWhenLeaseIsContended|DeletionReplaysAfterFinalObservationFailure|DeletionReplaysAfterFinalizeFailure)$$'
+	go test ./internal/store/postgres -run 'TestPostgres(ReconcileLeaseOwnershipAndExpiry|FinalizeDesiredAtomicallyCleansRuntimeState|TombstoneFencesOldGenerationAndAllowsNewerRecreate|StateSurvivesStoreReconstruction)$$'
+	go test ./internal/platform/httpapi -run 'TestResourceAPI(RequiresDeleteRecreateForWorkloadChanges|RejectsStaleWorkloadGenerationWithoutRollback)$$'
 
 kind-up:
 	kind get clusters | grep -qx kind-golden || kind create cluster --name kind-golden --wait 120s
