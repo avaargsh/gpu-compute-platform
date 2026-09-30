@@ -54,7 +54,7 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 		}
 		return Job{
 			Generation: in.Generation,
-			Name: resourceName("job", string(in.WorkloadID)), Namespace: in.Namespace,
+			Name:       resourceName("job", string(in.WorkloadID)), Namespace: in.Namespace,
 			QueueName: resourceName("lq", string(in.PoolID)), Image: in.Image,
 			Command:     append([]string(nil), in.Command...),
 			Labels:      map[string]string{"kueue.x-k8s.io/queue-name": resourceName("lq", string(in.PoolID))},
@@ -70,11 +70,11 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 	}
 	return Job{
 		Generation: in.Generation,
-		Name:      resourceName("job", string(in.WorkloadID)),
-		Namespace: in.Namespace,
-		QueueName: resourceName("lq", string(in.PoolID)),
-		Image:     in.Image,
-		Command:   append([]string(nil), in.Command...),
+		Name:       resourceName("job", string(in.WorkloadID)),
+		Namespace:  in.Namespace,
+		QueueName:  resourceName("lq", string(in.PoolID)),
+		Image:      in.Image,
+		Command:    append([]string(nil), in.Command...),
 		Resources: map[string]int64{
 			binding.ResourceName: in.Accelerator.Quota,
 		},
