@@ -7,7 +7,10 @@ import (
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
 )
 
+const generationAnnotation = "ai.compute/generation"
+
 type Job struct {
+	Generation  int64
 	Name        string
 	Namespace   string
 	QueueName   string
@@ -50,6 +53,7 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 			return Job{}, fmt.Errorf("DRA allocation requires device class name")
 		}
 		return Job{
+			Generation: in.Generation,
 			Name: resourceName("job", string(in.WorkloadID)), Namespace: in.Namespace,
 			QueueName: resourceName("lq", string(in.PoolID)), Image: in.Image,
 			Command:     append([]string(nil), in.Command...),
@@ -65,6 +69,7 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 		return Job{}, fmt.Errorf("unsupported accelerator partition: %#v", binding.Partition)
 	}
 	return Job{
+		Generation: in.Generation,
 		Name:      resourceName("job", string(in.WorkloadID)),
 		Namespace: in.Namespace,
 		QueueName: resourceName("lq", string(in.PoolID)),
