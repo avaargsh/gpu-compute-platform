@@ -149,4 +149,3 @@ func TestPostgresRestartPreservesDeletionIntentAndTombstoneFence(t *testing.T) {
 		t.Fatal("successful newer recreate must consume restarted tombstone")
 	}
 }
-
