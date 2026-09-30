@@ -267,25 +267,25 @@ replacement_code="$(curl -sS -o /tmp/workload-replacement.out -w '%{http_code}' 
 generation="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.ai\.compute/generation}')"
 [[ "$generation" == "1" ]] || { echo "rejected replacement changed provider generation to $generation" >&2; exit 1; }
 
-# An unbound portable class must fail closed before any Kubernetes Job is created.
-put "/api/v1/workloads/$INVALID_WORKLOAD_ID" "{\"metadata\":{\"id\":\"$INVALID_WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"exit 0\"],\"accelerator\":{\"class\":\"a100-invalid\",\"quota\":1}}}"
-invalid_deadline=$((SECONDS + 30))
-while (( SECONDS < invalid_deadline )); do
-  invalid="$(curl -fsS "$BASE_URL/api/v1/workloads/$INVALID_WORKLOAD_ID")"
-  [[ "$invalid" == *"ReconcileFailed"* ]] && break
-  sleep 1
-done
-invalid="$(curl -fsS "$BASE_URL/api/v1/workloads/$INVALID_WORKLOAD_ID")"
-PAYLOAD="$invalid" python - <<'PY'
-import json, os
-data=json.loads(os.environ["PAYLOAD"])
-conditions=(data.get("status") or {}).get("conditions") or []
-failed=[c for c in conditions if c.get("type")=="Ready" and c.get("status")=="False" and c.get("reason")=="ReconcileFailed"]
-assert failed, conditions
-assert "accelerator binding not found: a100-invalid" in (failed[0].get("message") or ""), failed[0]
-PY
+# An unbound portable class must be rejected at the control-plane admission
+# boundary. Invalid intent must never enter desired state or reach Kubernetes.
+invalid_code="$(curl -sS -o /tmp/invalid-workload.out -w '%{http_code}' -X PUT \
+  "$BASE_URL/api/v1/workloads/$INVALID_WORKLOAD_ID" \
+  -H 'Content-Type: application/json' \
+  -d "{\"metadata\":{\"id\":\"$INVALID_WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"exit 0\"],\"accelerator\":{\"class\":\"a100-invalid\",\"quota\":1}}}")"
+[[ "$invalid_code" == "409" ]] || {
+  echo "unbound accelerator admission returned HTTP $invalid_code" >&2
+  cat /tmp/invalid-workload.out >&2
+  exit 1
+}
+invalid_read_code="$(curl -sS -o /dev/null -w '%{http_code}' \
+  "$BASE_URL/api/v1/workloads/$INVALID_WORKLOAD_ID" || true)"
+[[ "$invalid_read_code" == "404" ]] || {
+  echo "rejected workload leaked into desired state: HTTP $invalid_read_code" >&2
+  exit 1
+}
 if kubectl get job "job-$INVALID_WORKLOAD_ID" -n "$NAMESPACE" >/dev/null 2>&1; then
-  echo "fail-closed violated: invalid accelerator workload created a Job" >&2
+  echo "fail-closed violated: rejected accelerator workload created a Job" >&2
   exit 1
 fi
 
@@ -307,11 +307,6 @@ wait_api_gone() {
   echo "timeout waiting for API resource to disappear: $path" >&2
   return 1
 }
-
-# Deletion lifecycle: failed projections must still be deletable because cleanup
-# identity is independent of accelerator resolution.
-delete_desired "Workload" "$INVALID_WORKLOAD_ID"
-wait_api_gone "/api/v1/workloads/$INVALID_WORKLOAD_ID"
 
 # A realized workload must be cleaned at the provider before desired state is
 # finalized. The finalization transaction also removes observation and lease.
