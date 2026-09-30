@@ -100,3 +100,98 @@ func TestPostgresTombstoneFencesOldGenerationAndAllowsNewerRecreate(t *testing.T
 		t.Fatal("newer generation recreate must consume the old tombstone")
 	}
 }
+
+
+func TestPostgresUpsertSameGenerationIsIdempotentButImmutable(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-a")
+	resourceID := domain.ID("pool-generation-fence")
+
+	original := agent.DesiredResource{
+		Kind: "ComputePool",
+		ID: resourceID,
+		Generation: 5,
+		Spec: map[string]any{
+			"namespace": "project-1",
+			"quota": 8,
+		},
+	}
+	if err := store.UpsertDesired(ctx, clusterID, original); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertDesired(ctx, clusterID, original); err != nil {
+		t.Fatalf("identical replay must be accepted: %v", err)
+	}
+
+	mutated := original
+	mutated.Spec = map[string]any{
+		"namespace": "project-1",
+		"quota": 16,
+	}
+	if err := store.UpsertDesired(ctx, clusterID, mutated); !errors.Is(err, agentstore.ErrStaleGeneration) {
+		t.Fatalf("same-generation mutation err=%v, want ErrStaleGeneration", err)
+	}
+
+	got, found, err := store.GetDesired(ctx, clusterID, "ComputePool", resourceID)
+	if err != nil || !found {
+		t.Fatalf("desired missing: found=%t err=%v", found, err)
+	}
+	if got.Spec["quota"] != float64(8) {
+		t.Fatalf("same-generation mutation changed desired spec: %#v", got.Spec)
+	}
+}
+
+func TestPostgresFailedRecreateDoesNotConsumeTombstone(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-a")
+	resourceID := domain.ID("train-tombstone-atomic")
+	const generation int64 = 11
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: resourceID, Generation: generation, Spec: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkDesiredDeleting(ctx, clusterID, "Workload", resourceID, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinalizeDesired(ctx, clusterID, "Workload", resourceID, generation); err != nil {
+		t.Fatal(err)
+	}
+
+	err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload",
+		ID: resourceID,
+		Generation: generation + 1,
+		Spec: map[string]any{
+			"invalid": func() {},
+		},
+	})
+	if err == nil {
+		t.Fatal("invalid desired spec must fail")
+	}
+
+	finalizedGeneration, found, err := store.FinalizedGeneration(
+		ctx, clusterID, "Workload", resourceID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || finalizedGeneration != generation {
+		t.Fatalf(
+			"failed recreate consumed tombstone: generation=%d found=%t",
+			finalizedGeneration,
+			found,
+		)
+	}
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: resourceID, Generation: generation, Spec: map[string]any{},
+	}); !errors.Is(err, agentstore.ErrStaleGeneration) {
+		t.Fatalf("tombstone fence lost after failed recreate: %v", err)
+	}
+}
