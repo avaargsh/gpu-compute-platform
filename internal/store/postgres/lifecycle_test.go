@@ -442,7 +442,6 @@ func TestPostgresFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
 	}
 }
 
-
 func TestPostgresUpsertRejectsHigherGenerationWhileDeleting(t *testing.T) {
 	db := openContractDB(t)
 	store := New(db)
