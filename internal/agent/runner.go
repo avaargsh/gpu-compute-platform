@@ -148,9 +148,12 @@ func (r *Runner) Sync(ctx context.Context) error {
 		delete(r.retries, key)
 		if reconcileErr != nil {
 			observation = Observation{
-				Kind:               item.Kind,
-				ID:                 item.ID,
-				ObservedGeneration: item.Generation,
+				Kind: item.Kind,
+				ID:   item.ID,
+				// A failed provider reconciliation has not observed the desired
+				// generation. Reporting it as observed would let stale provider
+				// objects masquerade as converged desired state.
+				ObservedGeneration: 0,
 				Conditions: []domain.Condition{
 					{Type: "Ready", Status: "False", Reason: "ReconcileFailed", Message: reconcileErr.Error()},
 				},
