@@ -502,7 +502,6 @@ func desiredSpecEqual(left, right map[string]any) (bool, error) {
 	return bytes.Equal(leftJSON, rightJSON), nil
 }
 
-
 func acceleratorBindingExists(
 	spec map[string]any,
 	acceleratorClass string,
