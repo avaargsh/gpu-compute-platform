@@ -395,3 +395,50 @@ func TestPostgresCreateWorkloadDesiredPreservesLostAckReplay(t *testing.T) {
 		t.Fatalf("identical lost-ACK replay must succeed: %v", err)
 	}
 }
+
+
+func TestPostgresFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-finalize-replay")
+	resourceID := domain.ID("train-finalize-replay")
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: resourceID, Generation: 4, Spec: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkDesiredDeleting(
+		ctx, clusterID, "Workload", resourceID, time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimReconcileLease(
+		ctx, clusterID, "Workload", resourceID, "agent-a", 30,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim: claimed=%t err=%v", claimed, err)
+	}
+
+	if err := store.FinalizeDesiredOwned(
+		ctx, clusterID, "Workload", resourceID, 4, "agent-a",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinalizeDesiredOwned(
+		ctx, clusterID, "Workload", resourceID, 4, "agent-a",
+	); err != nil {
+		t.Fatalf("same-generation finalize replay must succeed: %v", err)
+	}
+	if err := store.FinalizeDesiredOwned(
+		ctx, clusterID, "Workload", resourceID, 3, "agent-a",
+	); !errors.Is(err, agentstore.ErrStaleGeneration) {
+		t.Fatalf("older replay err=%v, want ErrStaleGeneration", err)
+	}
+	if err := store.FinalizeDesiredOwned(
+		ctx, clusterID, "Workload", resourceID, 5, "agent-a",
+	); !errors.Is(err, agentstore.ErrDesiredNotFound) {
+		t.Fatalf("future replay err=%v, want ErrDesiredNotFound", err)
+	}
+}
