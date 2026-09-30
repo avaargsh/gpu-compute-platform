@@ -20,6 +20,7 @@ type fakeControlPlane struct {
 	reportBeforeRelease bool
 	reportErr           error
 	finalizeErr         error
+	finalizeRequests    []FinalizeDesiredRequest
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }
@@ -51,6 +52,7 @@ func (f *fakeControlPlane) ReleaseReconcileLease(_ context.Context, _ ReconcileL
 	return nil
 }
 func (f *fakeControlPlane) FinalizeDesired(_ context.Context, in FinalizeDesiredRequest) error {
+	f.finalizeRequests = append(f.finalizeRequests, in)
 	if f.finalizeErr != nil {
 		err := f.finalizeErr
 		f.finalizeErr = nil
@@ -156,6 +158,12 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 	}
 	if control.reported[0].ObservedGeneration != 3 || control.reported[1].ObservedGeneration != 4 {
 		t.Fatalf("unexpected generations: %#v", control.reported)
+	}
+	if control.reported[0].LeaseOwner == "" || control.reported[1].LeaseOwner == "" {
+		t.Fatalf("reported observations must carry lease owner: %#v", control.reported)
+	}
+	if control.reported[0].LeaseOwner != control.reported[1].LeaseOwner {
+		t.Fatalf("one runner must use one lease owner: %#v", control.reported)
 	}
 	if runtime.workload.AcceleratorBinding.ResourceName != "vendor.example/gpu" {
 		t.Fatalf("workload binding was not resolved: %#v", runtime.workload.AcceleratorBinding)
@@ -283,6 +291,14 @@ func TestRunnerDeletionCleansDependentsBeforePoolAndFinalizesAfterGone(t *testin
 	}
 	if len(control.reported) != 1 || control.reported[0].Conditions[0].Reason != "Deleted" {
 		t.Fatalf("final deletion evidence must be reported before finalize: %#v", control.reported)
+	}
+
+	if len(control.finalizeRequests) != 1 || control.finalizeRequests[0].Owner == "" {
+		t.Fatalf("finalize must carry active lease owner: %#v", control.finalizeRequests)
+	}
+	if control.finalizeRequests[0].Owner != control.reported[0].LeaseOwner {
+		t.Fatalf("report/finalize lease owner mismatch: report=%q finalize=%q",
+			control.reported[0].LeaseOwner, control.finalizeRequests[0].Owner)
 	}
 
 	if err := runner.Sync(context.Background()); err != nil {
