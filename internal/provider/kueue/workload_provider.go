@@ -149,26 +149,34 @@ func (p *Provider) DeleteWorkload(ctx context.Context, projection baseprovider.W
 	if projection.WorkloadID == "" || projection.Namespace == "" {
 		return baseprovider.DeletionObservation{}, fmt.Errorf("workload and namespace are required")
 	}
+
 	jobName := resourceName("job", string(projection.WorkloadID))
+	evidenceRefs := []string{
+		fmt.Sprintf("k8s://%s/namespaces/%s/jobs/%s", projection.ClusterID, projection.Namespace, jobName),
+	}
+
 	gone, err := p.client.DeleteJob(ctx, projection.Namespace, jobName)
 	if err != nil {
 		return baseprovider.DeletionObservation{}, fmt.Errorf("delete job: %w", classifyProviderError(err))
 	}
 	if !gone {
-		return baseprovider.DeletionObservation{Gone: false, EvidenceRefs: []string{fmt.Sprintf("k8s://%s/namespaces/%s/jobs/%s", projection.ClusterID, projection.Namespace, jobName)}}, nil
+		return baseprovider.DeletionObservation{Gone: false, EvidenceRefs: evidenceRefs}, nil
 	}
+
 	if projection.AcceleratorBinding.AllocationMode == domain.AcceleratorAllocationDRA {
 		claimName := resourceName("accelerator", string(projection.WorkloadID))
+		evidenceRefs = append(evidenceRefs,
+			fmt.Sprintf("k8s://%s/namespaces/%s/resourceclaims/%s", projection.ClusterID, projection.Namespace, claimName),
+		)
 		claimGone, err := p.client.DeleteResourceClaim(ctx, projection.Namespace, claimName)
 		if err != nil {
 			return baseprovider.DeletionObservation{}, fmt.Errorf("delete resource claim: %w", classifyProviderError(err))
 		}
 		gone = claimGone
 	}
+
 	return baseprovider.DeletionObservation{
-		Gone: gone,
-		EvidenceRefs: []string{
-			fmt.Sprintf("k8s://%s/namespaces/%s/jobs/%s", projection.ClusterID, projection.Namespace, jobName),
-		},
+		Gone:         gone,
+		EvidenceRefs: evidenceRefs,
 	}, nil
 }
