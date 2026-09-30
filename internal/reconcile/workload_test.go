@@ -19,7 +19,7 @@ func (f *fakeWorkloadProvider) DeleteWorkload(_ context.Context, p provider.Work
 	f.deleteCalls++
 	f.deleteLast = p
 	return provider.DeletionObservation{
-		Gone: true,
+		Gone:         true,
 		EvidenceRefs: []string{"k8s://cluster-a/namespaces/project-1/jobs/job-train-1"},
 	}, nil
 }
@@ -116,7 +116,6 @@ func TestWorkloadReconcilerDoesNotCallProviderWhenPoolObservationIsStale(t *test
 	}
 }
 
-
 func TestWorkloadDeleteProjectsDRAReleaseAndPreservesEvidence(t *testing.T) {
 	fp := &fakeWorkloadProvider{}
 	r := NewWorkloadReconciler(fp)
@@ -149,7 +148,7 @@ func TestWorkloadDeleteProjectsDRAReleaseAndPreservesEvidence(t *testing.T) {
 		Status: domain.ResourceStatus{
 			ObservedGeneration: 1,
 			Conditions: []domain.Condition{{
-				Type: "Ready",
+				Type:   "Ready",
 				Status: "False",
 			}},
 		},
@@ -165,9 +164,9 @@ func TestWorkloadDeleteProjectsDRAReleaseAndPreservesEvidence(t *testing.T) {
 			Namespace: "project-1",
 		},
 		domain.ClusterBinding{
-			PoolID: "pool-1",
+			PoolID:    "pool-1",
 			ClusterID: "cluster-a",
-			Provider: "kueue",
+			Provider:  "kueue",
 		},
 	)
 	if err != nil {
@@ -196,26 +195,26 @@ func TestWorkloadDeleteDoesNotRequireReadyPool(t *testing.T) {
 	_, err := r.Delete(
 		context.Background(),
 		domain.Workload{
-			Metadata: domain.Metadata{ID: "train-1"},
+			Metadata:  domain.Metadata{ID: "train-1"},
 			ProjectID: "project-1",
-			PoolID: "pool-1",
+			PoolID:    "pool-1",
 			Spec: domain.WorkloadSpec{
 				Accelerator: domain.AcceleratorRequest{Class: "h100-80g", Quota: 1},
 			},
 		},
 		domain.ComputePool{
-			Metadata: domain.Metadata{ID: "pool-1", Generation: 2},
+			Metadata:  domain.Metadata{ID: "pool-1", Generation: 2},
 			ProjectID: "project-1",
 			Spec: domain.ComputePoolSpec{
 				AcceleratorBindings: []domain.AcceleratorBinding{{
-					Class: "h100-80g",
+					Class:        "h100-80g",
 					ResourceName: "nvidia.com/gpu",
-					Flavor: "h100-80g",
+					Flavor:       "h100-80g",
 				}},
 			},
 			Status: domain.ResourceStatus{
 				ObservedGeneration: 1,
-				Conditions: []domain.Condition{{Type: "Ready", Status: "False"}},
+				Conditions:         []domain.Condition{{Type: "Ready", Status: "False"}},
 			},
 		},
 		domain.ProjectBinding{ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "project-1"},
