@@ -109,6 +109,35 @@ assert data.get("claimed") is True, data
 PY
 }
 
+release_workload_lease() {
+  local owner="$1"
+  curl -fsS -X POST "$BASE_URL/api/v1/agent/reconcile-lease/release" \
+    -H 'Content-Type: application/json' \
+    -d "{\"clusterId\":\"$CLUSTER_ID\",\"kind\":\"Workload\",\"resourceId\":\"$WORKLOAD_ID\",\"owner\":\"$owner\"}" \
+    >/dev/null
+}
+
+wait_workload_lease_free() {
+  local deadline=$((SECONDS + TIMEOUT_SECONDS)) response claimed
+  while (( SECONDS < deadline )); do
+    response="$(curl -fsS -X POST "$BASE_URL/api/v1/agent/reconcile-lease/claim" \
+      -H 'Content-Type: application/json' \
+      -d "{\"clusterId\":\"$CLUSTER_ID\",\"kind\":\"Workload\",\"resourceId\":\"$WORKLOAD_ID\",\"owner\":\"golden-lease-probe\",\"ttlSeconds\":5}")"
+    claimed="$(RESPONSE="$response" python - <<'PY'
+import json, os
+print("true" if json.loads(os.environ["RESPONSE"]).get("claimed") is True else "false")
+PY
+)"
+    if [[ "$claimed" == "true" ]]; then
+      release_workload_lease "golden-lease-probe"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "timeout waiting for original workload lease release" >&2
+  return 1
+}
+
 kind get clusters | grep -qx "$CLUSTER_ID" || kind create cluster --name "$CLUSTER_ID" --image kindest/node:v1.34.0 --wait 120s
 kubectl apply --server-side -f "https://github.com/kubernetes-sigs/kueue/releases/download/${KUEUE_VERSION}/manifests.yaml"
 kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout="${TIMEOUT_SECONDS}s"
@@ -165,7 +194,10 @@ scheduled_node="$(kubectl get pod -n "$NAMESPACE" -l "ai.compute/workload=job-$W
 # reconciles the same immutable Kubernetes Job.
 before_uid="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.metadata.uid}')"
 wait_observation_owner "agent-a"
-
+# wait_workload observes the report, but Runner releases its lease just after
+# reporting. Synchronize on actual lease availability before installing the
+# short acceptance lease so A cannot delete a freshly renewed lease.
+wait_workload_lease_free
 claim_workload_lease "agent-a" 12
 
 AGENT_INSTANCE_ID=agent-b AGENT_SYNC_INTERVAL=1s \
@@ -193,6 +225,15 @@ owner_after_death="$(observation_owner)"
 }
 
 wait_observation_owner "agent-b"
+# Writer identity alone is insufficient: ReconcileFailed observations also
+# carry the current owner. Require the complete healthy Golden Path state from B.
+takeover_result="$(wait_workload)"
+condition_true "$takeover_result" "Admitted"
+owner_after_takeover="$(observation_owner)"
+[[ "$owner_after_takeover" == "agent-b" ]] || {
+  echo "healthy takeover observation was not written by agent-b: owner=$owner_after_takeover" >&2
+  exit 1
+}
 after_uid="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.metadata.uid}')"
 [[ "$before_uid" == "$after_uid" ]] || {
   echo "lease takeover replaced workload Job: before=$before_uid after=$after_uid" >&2
