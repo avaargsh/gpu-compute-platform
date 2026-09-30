@@ -38,3 +38,14 @@ func TestMergeConditionsUsesCurrentTimeOnStatusTransition(t *testing.T) {
 		t.Fatalf("transition must use current timestamp: %#v", got)
 	}
 }
+
+func TestMergeConditionsRepairsLegacyZeroTransitionTime(t *testing.T) {
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, time.UTC)
+	got := MergeConditions(
+		[]domain.Condition{{Type: "Ready", Status: "False", Reason: "Pending"}},
+		[]domain.Condition{{Type: "Ready", Status: "False", Reason: "Deleted", LastTransitionTime: now}},
+	)
+	if len(got) != 1 || !got[0].LastTransitionTime.Equal(now) {
+		t.Fatalf("legacy zero timestamp overwrote final evidence time: %#v", got)
+	}
+}

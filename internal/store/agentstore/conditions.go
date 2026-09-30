@@ -12,7 +12,7 @@ func MergeConditions(previous, current []domain.Condition) []domain.Condition {
 	}
 	out := make([]domain.Condition, len(current))
 	for i, condition := range current {
-		if old, ok := byType[condition.Type]; ok && old.Status == condition.Status {
+		if old, ok := byType[condition.Type]; ok && old.Status == condition.Status && !old.LastTransitionTime.IsZero() {
 			condition.LastTransitionTime = old.LastTransitionTime
 		}
 		out[i] = condition

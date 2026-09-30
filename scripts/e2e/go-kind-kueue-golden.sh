@@ -179,6 +179,8 @@ assert tombstone["generation"] == 1 and tombstone["finalizedAt"], tombstone
 assert tombstone["evidenceRefs"] and all(tombstone["evidenceRefs"]), tombstone
 assert any(c["type"] == "Ready" and c["status"] == "False" and c["reason"] == "Deleted"
            for c in tombstone["conditions"]), tombstone
+assert all(c.get("lastTransitionTime") and not c["lastTransitionTime"].startswith("0001-")
+           for c in tombstone["conditions"]), tombstone
 print(json.dumps(data, sort_keys=True))
 PY
 }

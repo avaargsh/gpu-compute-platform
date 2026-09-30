@@ -35,6 +35,9 @@ func TestDeletionWaitsForGoneAndClearsRetryAfterFinalize(t *testing.T) {
 	if len(control.desired) != 0 || len(control.reported) != 1 || len(runner.retries) != 0 || control.reported[0].Conditions[0].Reason != "Deleted" {
 		t.Fatalf("gone cleanup did not finalize and clear retries: desired=%#v observations=%#v retries=%#v", control.desired, control.reported, runner.retries)
 	}
+	if control.reported[0].Conditions[0].LastTransitionTime.IsZero() {
+		t.Fatal("final evidence requires a real condition transition timestamp")
+	}
 }
 
 func TestMissingDesiredClearsLocalRetry(t *testing.T) {

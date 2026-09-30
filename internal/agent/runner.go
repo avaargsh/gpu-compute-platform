@@ -129,7 +129,8 @@ func (r *Runner) Sync(ctx context.Context) error {
 				ObservedGeneration: item.Generation,
 				Conditions: []domain.Condition{{
 					Type: "Ready", Status: "False", Reason: "Deleted",
-					Message: "provider resources are gone",
+					Message:            "provider resources are gone",
+					LastTransitionTime: r.now().UTC(),
 				}},
 				EvidenceRefs: deletion.EvidenceRefs,
 			}
