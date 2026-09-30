@@ -194,3 +194,95 @@ func TestPostgresFailedRecreateDoesNotConsumeTombstone(t *testing.T) {
 		t.Fatalf("tombstone fence lost after failed recreate: %v", err)
 	}
 }
+
+
+func TestPostgresReportCannotPreseedFutureRecreate(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-a")
+	resourceID := domain.ID("train-observation-fence")
+	const generation int64 = 4
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: resourceID, Generation: generation, Spec: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Report(ctx, clusterID, []agent.Observation{{
+		Kind: "Workload", ID: resourceID, ObservedGeneration: generation,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "True", Reason: "Current"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkDesiredDeleting(
+		ctx,
+		clusterID,
+		"Workload",
+		resourceID,
+		time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinalizeDesired(
+		ctx,
+		clusterID,
+		"Workload",
+		resourceID,
+		generation,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.Report(ctx, clusterID, []agent.Observation{{
+		Kind: "Workload", ID: resourceID, ObservedGeneration: generation + 1,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "True", Reason: "Future"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.GetObservation(
+		ctx,
+		clusterID,
+		"Workload",
+		resourceID,
+	); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("future observation without desired state must not persist")
+	}
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: resourceID, Generation: generation + 1, Spec: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := store.GetObservation(
+		ctx,
+		clusterID,
+		"Workload",
+		resourceID,
+	); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("new desired generation inherited a pre-intent observation")
+	}
+
+	if err := store.Report(ctx, clusterID, []agent.Observation{{
+		Kind: "Workload", ID: resourceID, ObservedGeneration: generation + 1,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "True", Reason: "Reconciled"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := store.GetObservation(
+		ctx,
+		clusterID,
+		"Workload",
+		resourceID,
+	)
+	if err != nil || !found {
+		t.Fatalf("current observation missing: found=%t err=%v", found, err)
+	}
+	if got.ObservedGeneration != generation+1 {
+		t.Fatalf("observed generation=%d, want %d", got.ObservedGeneration, generation+1)
+	}
+}
