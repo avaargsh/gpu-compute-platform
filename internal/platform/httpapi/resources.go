@@ -99,45 +99,6 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	poolDesired, found, err := a.store.GetDesired(
-		r.Context(),
-		poolPlacement.ClusterID,
-		"ComputePool",
-		in.PoolID,
-	)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !found {
-		http.Error(w, "compute pool desired state not found", http.StatusConflict)
-		return
-	}
-	if poolDesired.DeletionTimestamp != nil {
-		http.Error(w, "compute pool is deleting", http.StatusConflict)
-		return
-	}
-	pool, err := projectComputePool(poolDesired)
-	if err != nil {
-		http.Error(w, "invalid compute pool desired state", http.StatusConflict)
-		return
-	}
-	bindingFound := false
-	for _, binding := range pool.Spec.AcceleratorBindings {
-		if binding.Class == in.Spec.Accelerator.Class {
-			bindingFound = true
-			break
-		}
-	}
-	if !bindingFound {
-		http.Error(
-			w,
-			"accelerator class is not bound by compute pool",
-			http.StatusConflict,
-		)
-		return
-	}
-
 	spec := map[string]any{
 		"projectID":   in.ProjectID,
 		"poolID":      in.PoolID,
@@ -147,6 +108,9 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		"accelerator": in.Spec.Accelerator,
 	}
 
+	// Fast-path an already committed workload before checking the current pool
+	// lifecycle. This preserves identical PUT replay after a lost ACK even if the
+	// parent pool has since entered deletion.
 	existingClusterID, existing, found, err := a.store.LocateDesired(r.Context(), "Workload", in.Metadata.ID)
 	if err != nil {
 		if errors.Is(err, agentstore.ErrIdentityConflict) {
@@ -182,10 +146,22 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.store.UpsertDesired(r.Context(), poolPlacement.ClusterID, agent.DesiredResource{
-		Kind: "Workload", ID: in.Metadata.ID, Generation: in.Metadata.Generation, Spec: spec,
-	}); err != nil {
-		if errors.Is(err, agentstore.ErrStaleGeneration) {
+	err = a.store.CreateWorkloadDesired(
+		r.Context(),
+		poolPlacement.ClusterID,
+		in.PoolID,
+		in.Spec.Accelerator.Class,
+		agent.DesiredResource{
+			Kind: "Workload", ID: in.Metadata.ID, Generation: in.Metadata.Generation, Spec: spec,
+		},
+	)
+	if err != nil {
+		if errors.Is(err, agentstore.ErrStaleGeneration) ||
+			errors.Is(err, agentstore.ErrIdentityConflict) ||
+			errors.Is(err, agentstore.ErrDesiredNotDeleting) ||
+			errors.Is(err, agentstore.ErrComputePoolNotFound) ||
+			errors.Is(err, agentstore.ErrComputePoolDeleting) ||
+			errors.Is(err, agentstore.ErrAcceleratorBindingNotFound) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
