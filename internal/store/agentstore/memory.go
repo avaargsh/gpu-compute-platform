@@ -122,6 +122,31 @@ func (m *Memory) CreateWorkloadDesired(
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	for candidateClusterID, items := range m.desired {
+		for _, existing := range items {
+			if existing.Kind != "Workload" || existing.ID != in.ID {
+				continue
+			}
+			if candidateClusterID != clusterID {
+				return ErrIdentityConflict
+			}
+			if existing.DeletionTimestamp != nil {
+				return ErrDesiredNotDeleting
+			}
+			if existing.Generation != in.Generation {
+				return ErrStaleGeneration
+			}
+			equal, err := desiredSpecEqual(existing.Spec, in.Spec)
+			if err != nil {
+				return err
+			}
+			if !equal {
+				return ErrStaleGeneration
+			}
+			return nil
+		}
+	}
+
 	var pool *agent.DesiredResource
 	items := m.desired[clusterID]
 	for i := range items {
