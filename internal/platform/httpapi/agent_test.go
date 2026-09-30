@@ -61,7 +61,6 @@ func TestAgentDesiredAndReportRoundTrip(t *testing.T) {
 
 }
 
-
 func TestAgentReportRejectsStaleLeaseOwner(t *testing.T) {
 	store := agentstore.NewMemory()
 	store.SetDesired("cluster-a", []agent.DesiredResource{{
