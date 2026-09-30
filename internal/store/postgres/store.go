@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -220,6 +221,55 @@ func (s *Store) CreateWorkloadDesired(
 		return err
 	}
 	defer tx.Rollback()
+
+	// Workload identity is globally canonical. Serialize competing creates even
+	// before a row exists so two clusters cannot race through LocateDesired.
+	if _, err := tx.ExecContext(
+		ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"Workload/"+string(in.ID),
+	); err != nil {
+		return err
+	}
+
+	incomingSpec, err := json.Marshal(in.Spec)
+	if err != nil {
+		return fmt.Errorf("marshal desired spec: %w", err)
+	}
+	var existingClusterID domain.ID
+	var existingGeneration int64
+	var existingSpec []byte
+	var existingDeletion sql.NullTime
+	existingErr := tx.QueryRowContext(ctx, `
+SELECT cluster_id, generation, spec, deletion_timestamp
+FROM desired_resources
+WHERE kind = 'Workload' AND resource_id = $1
+ORDER BY cluster_id
+LIMIT 1
+FOR UPDATE
+`, in.ID).Scan(
+		&existingClusterID,
+		&existingGeneration,
+		&existingSpec,
+		&existingDeletion,
+	)
+	if existingErr != nil && existingErr != sql.ErrNoRows {
+		return existingErr
+	}
+	if existingErr == nil {
+		if existingClusterID != clusterID {
+			return agentstore.ErrIdentityConflict
+		}
+		if existingDeletion.Valid {
+			return agentstore.ErrDesiredNotDeleting
+		}
+		if existingGeneration != in.Generation || !bytes.Equal(existingSpec, incomingSpec) {
+			return agentstore.ErrStaleGeneration
+		}
+		// Lost-ACK/idempotent replay: do not re-check parent lifecycle. The
+		// original workload is already canonical and may be blocking pool delete.
+		return tx.Commit()
+	}
 
 	var poolSpec []byte
 	var deletionTimestamp sql.NullTime
