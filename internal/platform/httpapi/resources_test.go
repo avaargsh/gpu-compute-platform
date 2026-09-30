@@ -18,16 +18,16 @@ func boundRouter(store agentstore.Store, projectCluster, poolCluster domain.ID) 
 	placement.BindProject(domain.ProjectBinding{ProjectID: "project-1", ClusterID: projectCluster, Namespace: "project-1"})
 	placement.BindPool(domain.ClusterBinding{PoolID: "pool-h100", ClusterID: poolCluster, Provider: "kueue"})
 	if err := store.UpsertDesired(context.Background(), poolCluster, agent.DesiredResource{
-		Kind: "ComputePool",
-		ID: "pool-h100",
+		Kind:       "ComputePool",
+		ID:         "pool-h100",
 		Generation: 1,
 		Spec: map[string]any{
 			"projectID": "project-1",
 			"namespace": "project-1",
 			"acceleratorBindings": []domain.AcceleratorBinding{{
-				Class: "h100-80g",
+				Class:        "h100-80g",
 				ResourceName: "nvidia.com/gpu",
-				Flavor: "h100",
+				Flavor:       "h100",
 			}},
 		},
 	}); err != nil {
@@ -251,7 +251,6 @@ func TestResourceAPIRequiresDeleteRecreateForWorkloadChanges(t *testing.T) {
 		t.Fatalf("recreated desired state=%#v", desired)
 	}
 }
-
 
 func TestResourceAPIRejectsWorkloadWhenPoolDesiredStateIsMissing(t *testing.T) {
 	store := agentstore.NewMemory()
