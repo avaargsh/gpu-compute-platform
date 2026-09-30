@@ -387,7 +387,6 @@ func TestRunnerDeletionReplaysAfterFinalizeFailure(t *testing.T) {
 	}
 }
 
-
 func TestRunnerDoesNotAcknowledgeDesiredGenerationOnProviderFailure(t *testing.T) {
 	control := &fakeControlPlane{desired: []DesiredResource{
 		{Kind: "ComputePool", ID: "pool-1", Generation: 1, Spec: map[string]any{
