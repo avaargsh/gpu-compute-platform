@@ -532,7 +532,6 @@ func TestMemoryUpsertSameGenerationIsIdempotentButImmutable(t *testing.T) {
 	}
 }
 
-
 func TestMemoryLeaseCannotPreclaimMissingDesiredIdentity(t *testing.T) {
 	store := NewMemory()
 	claimed, err := store.ClaimReconcileLease(
