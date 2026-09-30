@@ -328,11 +328,14 @@ FROM reconcile_leases
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 FOR UPDATE
 `, clusterID, kind, resourceID).Scan(&currentOwner, &leaseValid)
-		if err == sql.ErrNoRows || currentOwner != owner || !leaseValid {
+		if err == sql.ErrNoRows {
 			return agentstore.ErrLeaseLost
 		}
 		if err != nil {
 			return err
+		}
+		if currentOwner != owner || !leaseValid {
+			return agentstore.ErrLeaseLost
 		}
 	}
 
@@ -438,11 +441,14 @@ FROM reconcile_leases
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 FOR UPDATE
 `, clusterID, item.Kind, item.ID).Scan(&currentOwner, &leaseValid)
-			if err == sql.ErrNoRows || currentOwner != item.LeaseOwner || !leaseValid {
+			if err == sql.ErrNoRows {
 				return agentstore.ErrLeaseLost
 			}
 			if err != nil {
 				return err
+			}
+			if currentOwner != item.LeaseOwner || !leaseValid {
+				return agentstore.ErrLeaseLost
 			}
 		}
 
