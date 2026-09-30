@@ -441,3 +441,167 @@ func TestPostgresFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
 		t.Fatalf("future replay err=%v, want ErrDesiredNotFound", err)
 	}
 }
+
+
+func TestPostgresUpsertRejectsHigherGenerationWhileDeleting(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-delete-immutable")
+	resourceID := domain.ID("pool-delete-immutable")
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "ComputePool", ID: resourceID, Generation: 3,
+		Spec: map[string]any{"quota": 4},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkDesiredDeleting(
+		ctx, clusterID, "ComputePool", resourceID, time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "ComputePool", ID: resourceID, Generation: 4,
+		Spec: map[string]any{"quota": 8},
+	})
+	if !errors.Is(err, agentstore.ErrDesiredDeleting) {
+		t.Fatalf("update during deletion err=%v, want ErrDesiredDeleting", err)
+	}
+
+	got, found, err := store.GetDesired(
+		ctx, clusterID, "ComputePool", resourceID,
+	)
+	if err != nil || !found {
+		t.Fatalf("desired missing: found=%t err=%v", found, err)
+	}
+	if got.Generation != 3 || got.Spec["quota"] != float64(4) {
+		t.Fatalf("deleting desired state mutated: %#v", got)
+	}
+}
+
+func TestPostgresRecreateWaitsForFinalizationReceiptAndConsumesTombstone(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-finalize-recreate-serialized")
+	resourceID := domain.ID("train-finalize-recreate-serialized")
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: resourceID, Generation: 7,
+		Spec: map[string]any{"image": "example/v7"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := lockDesiredLifecycleTx(
+		ctx, tx, clusterID, "Workload", resourceID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO deletion_tombstones (cluster_id, kind, resource_id, generation)
+VALUES ($1, 'Workload', $2, 7)
+ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET generation = 7
+`, clusterID, resourceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+DELETE FROM desired_resources
+WHERE cluster_id = $1 AND kind = 'Workload' AND resource_id = $2
+`, clusterID, resourceID); err != nil {
+		t.Fatal(err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+			Kind: "Workload", ID: resourceID, Generation: 8,
+			Spec: map[string]any{"image": "example/v8"},
+		})
+	}()
+
+	select {
+	case err := <-result:
+		t.Fatalf("recreate crossed uncommitted finalization boundary: %v", err)
+	case <-time.After(150 * time.Millisecond):
+		// Expected: lifecycle advisory lock fences the recreate.
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("recreate after finalization commit: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for serialized recreate")
+	}
+
+	if _, found, err := store.FinalizedGeneration(
+		ctx, clusterID, "Workload", resourceID,
+	); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("successful newer-generation recreate must consume old tombstone")
+	}
+	got, found, err := store.GetDesired(
+		ctx, clusterID, "Workload", resourceID,
+	)
+	if err != nil || !found || got.Generation != 8 {
+		t.Fatalf("unexpected recreated desired: found=%t err=%v desired=%#v", found, err, got)
+	}
+}
+
+func TestPostgresOwnedFinalizePrefersCurrentDesiredOverOlderTombstone(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-legacy-coexist")
+	resourceID := domain.ID("train-legacy-coexist")
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: resourceID, Generation: 8,
+		Spec: map[string]any{"image": "example/v8"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO deletion_tombstones (cluster_id, kind, resource_id, generation)
+VALUES ($1, 'Workload', $2, 7)
+ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET generation = 7
+`, clusterID, resourceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkDesiredDeleting(
+		ctx, clusterID, "Workload", resourceID, time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimReconcileLease(
+		ctx, clusterID, "Workload", resourceID, "agent-new", 30,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim: claimed=%t err=%v", claimed, err)
+	}
+
+	if err := store.FinalizeDesiredOwned(
+		ctx, clusterID, "Workload", resourceID, 8, "agent-new",
+	); err != nil {
+		t.Fatalf("current desired must not be shadowed by older tombstone: %v", err)
+	}
+	finalized, found, err := store.FinalizedGeneration(
+		ctx, clusterID, "Workload", resourceID,
+	)
+	if err != nil || !found || finalized != 8 {
+		t.Fatalf("finalized generation=%d found=%t err=%v", finalized, found, err)
+	}
+}
