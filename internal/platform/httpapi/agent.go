@@ -75,7 +75,17 @@ func (a *AgentAPI) Report(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "clusterId is required", http.StatusBadRequest)
 		return
 	}
+	for _, observation := range in.Observations {
+		if observation.Kind == "" || observation.ID == "" || observation.LeaseOwner == "" {
+			http.Error(w, "observation kind, id and leaseOwner are required", http.StatusBadRequest)
+			return
+		}
+	}
 	if err := a.store.Report(r.Context(), in.ClusterID, in.Observations); err != nil {
+		if err == agentstore.ErrLeaseLost {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -126,15 +136,15 @@ func (a *AgentAPI) FinalizeDesired(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &in) {
 		return
 	}
-	if in.ClusterID == "" || in.Kind == "" || in.ResourceID == "" || in.Generation <= 0 {
-		http.Error(w, "clusterId, kind, resourceId and positive generation are required", http.StatusBadRequest)
+	if in.ClusterID == "" || in.Kind == "" || in.ResourceID == "" || in.Generation <= 0 || in.Owner == "" {
+		http.Error(w, "clusterId, kind, resourceId, owner and positive generation are required", http.StatusBadRequest)
 		return
 	}
-	if err := a.store.FinalizeDesired(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Generation); err != nil {
+	if err := a.store.FinalizeDesiredOwned(r.Context(), in.ClusterID, in.Kind, in.ResourceID, in.Generation, in.Owner); err != nil {
 		switch err {
 		case agentstore.ErrDesiredNotFound:
 			http.Error(w, err.Error(), http.StatusNotFound)
-		case agentstore.ErrStaleGeneration, agentstore.ErrDesiredNotDeleting:
+		case agentstore.ErrStaleGeneration, agentstore.ErrDesiredNotDeleting, agentstore.ErrLeaseLost:
 			http.Error(w, err.Error(), http.StatusConflict)
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
