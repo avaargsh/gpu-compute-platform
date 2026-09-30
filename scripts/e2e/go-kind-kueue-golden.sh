@@ -14,7 +14,8 @@ set -euo pipefail
 : "${ACCELERATOR_FLAVOR:=h100-80g}"
 
 cleanup() {
-  [[ -z "${AGENT_PID:-}" ]] || kill "$AGENT_PID" 2>/dev/null || true
+  [[ -z "${AGENT_A_PID:-}" ]] || kill "$AGENT_A_PID" 2>/dev/null || true
+  [[ -z "${AGENT_B_PID:-}" ]] || kill "$AGENT_B_PID" 2>/dev/null || true
   [[ -z "${CONTROL_PID:-}" ]] || kill "$CONTROL_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -74,8 +75,38 @@ PY
   [[ -z "$pod" ]] || kubectl describe pod "$pod" -n "$NAMESPACE" >&2 || true
   kubectl describe node "$node" >&2 || true
   [[ -z "${CONTROL_PID:-}" ]] || { echo "--- control-plane ---" >&2; cat /tmp/go-control-plane.log >&2 || true; }
-  [[ -z "${AGENT_PID:-}" ]] || { echo "--- cluster-agent ---" >&2; cat /tmp/go-cluster-agent.log >&2 || true; }
+  [[ -f /tmp/go-cluster-agent-a.log ]] && { echo "--- cluster-agent A ---" >&2; cat /tmp/go-cluster-agent-a.log >&2 || true; }
+  [[ -f /tmp/go-cluster-agent-b.log ]] && { echo "--- cluster-agent B ---" >&2; cat /tmp/go-cluster-agent-b.log >&2 || true; }
   return 1
+}
+
+observation_owner() {
+  curl -fsS "$BASE_URL/api/v1/internal/clusters/$CLUSTER_ID/state/Workload/$WORKLOAD_ID" |
+    python -c 'import json,sys; print(json.load(sys.stdin).get("observationLeaseOwner", ""))'
+}
+
+wait_observation_owner() {
+  local expected="$1"
+  local deadline=$((SECONDS + TIMEOUT_SECONDS)) current
+  while (( SECONDS < deadline )); do
+    current="$(observation_owner 2>/dev/null || true)"
+    [[ "$current" == "$expected" ]] && return 0
+    sleep 1
+  done
+  echo "timeout waiting for observation owner $expected; current=$(observation_owner 2>/dev/null || true)" >&2
+  return 1
+}
+
+claim_workload_lease() {
+  local owner="$1" ttl="$2" response
+  response="$(curl -fsS -X POST "$BASE_URL/api/v1/agent/reconcile-lease/claim" \
+    -H 'Content-Type: application/json' \
+    -d "{\"clusterId\":\"$CLUSTER_ID\",\"kind\":\"Workload\",\"resourceId\":\"$WORKLOAD_ID\",\"owner\":\"$owner\",\"ttlSeconds\":$ttl}")"
+  RESPONSE="$response" python - <<'PY'
+import json, os
+data=json.loads(os.environ["RESPONSE"])
+assert data.get("claimed") is True, data
+PY
 }
 
 kind get clusters | grep -qx "$CLUSTER_ID" || kind create cluster --name "$CLUSTER_ID" --image kindest/node:v1.34.0 --wait 120s
@@ -91,13 +122,17 @@ go run ./cmd/control-plane >/tmp/go-control-plane.log 2>&1 &
 CONTROL_PID=$!
 wait_http
 
-CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" go run ./cmd/cluster-agent >/tmp/go-cluster-agent.log 2>&1 &
-AGENT_PID=$!
+go build -o /tmp/gpu-cluster-agent ./cmd/cluster-agent
 
 put "/api/v1/projects/$PROJECT_ID/binding" "{\"metadata\":{\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"clusterId\":\"$CLUSTER_ID\",\"namespace\":\"$NAMESPACE\"}"
 put "/api/v1/compute-pools/$POOL_ID/binding" "{\"metadata\":{\"generation\":1},\"poolId\":\"$POOL_ID\",\"clusterId\":\"$CLUSTER_ID\",\"provider\":\"kueue\"}"
 put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"h100-80g\",\"quota\":4}],\"acceleratorBindings\":[{\"class\":\"h100-80g\",\"resourceName\":\"$ACCELERATOR_RESOURCE\",\"flavor\":\"$ACCELERATOR_FLAVOR\",\"nodeLabels\":{\"nvidia.com/gpu.product\":\"NVIDIA-H100-80GB-HBM3\",\"topology.kubernetes.io/zone\":\"gpu-zone-a\",\"ai.compute/rack\":\"rack-a01\"}}],\"scheduling\":{\"mode\":\"default\"}}}"
 put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"h100-80g\",\"quota\":1}}}"
+
+AGENT_INSTANCE_ID=agent-a AGENT_SYNC_INTERVAL=60s \
+  CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" \
+  /tmp/gpu-cluster-agent >/tmp/go-cluster-agent-a.log 2>&1 &
+AGENT_A_PID=$!
 
 result="$(wait_workload)"
 condition_true "$result" "Admitted"
@@ -124,17 +159,45 @@ flavor_rack="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o json | python
 scheduled_node="$(kubectl get pod -n "$NAMESPACE" -l "ai.compute/workload=job-$WORKLOAD_ID" -o jsonpath='{.items[0].spec.nodeName}')"
 [[ "$scheduled_node" == "$node" ]] || { echo "workload escaped topology-aware H100 flavor: $scheduled_node" >&2; exit 1; }
 
-# Restarting the cluster agent must safely replay the same desired state without
-# replacing the immutable execution object.
+# Process-level HA proof. Agent A is kept alive but idle after its initial
+# reconciliation. A short explicit lease then fences Agent B until expiry.
+# Killing A must not erase the lease; after expiry B takes ownership and
+# reconciles the same immutable Kubernetes Job.
 before_uid="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.metadata.uid}')"
-kill "$AGENT_PID"
-wait "$AGENT_PID" 2>/dev/null || true
-AGENT_PID=""
-CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" go run ./cmd/cluster-agent >/tmp/go-cluster-agent.log 2>&1 &
-AGENT_PID=$!
-replayed="$(wait_workload)"
+wait_observation_owner "agent-a"
+
+claim_workload_lease "agent-a" 12
+
+AGENT_INSTANCE_ID=agent-b AGENT_SYNC_INTERVAL=1s \
+  CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" \
+  /tmp/gpu-cluster-agent >/tmp/go-cluster-agent-b.log 2>&1 &
+AGENT_B_PID=$!
+
+sleep 3
+owner_before_expiry="$(observation_owner)"
+[[ "$owner_before_expiry" == "agent-a" ]] || {
+  echo "agent B wrote before A lease expired: owner=$owner_before_expiry" >&2
+  exit 1
+}
+
+kill "$AGENT_A_PID"
+wait "$AGENT_A_PID" 2>/dev/null || true
+AGENT_A_PID=""
+
+# Process death must not implicitly release the durable resource lease.
+sleep 3
+owner_after_death="$(observation_owner)"
+[[ "$owner_after_death" == "agent-a" ]] || {
+  echo "A lease disappeared before expiry after process death: owner=$owner_after_death" >&2
+  exit 1
+}
+
+wait_observation_owner "agent-b"
 after_uid="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.metadata.uid}')"
-[[ "$before_uid" == "$after_uid" ]] || { echo "agent restart replaced workload Job: before=$before_uid after=$after_uid" >&2; exit 1; }
+[[ "$before_uid" == "$after_uid" ]] || {
+  echo "lease takeover replaced workload Job: before=$before_uid after=$after_uid" >&2
+  exit 1
+}
 
 # Replaying desired state must not drift the resolved Kubernetes projection.
 before="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o json)"
@@ -238,4 +301,4 @@ if ! kubectl get resourceflavor "$ACCELERATOR_FLAVOR" >/dev/null 2>&1; then
 fi
 
 echo "$result"
-echo "GO GOLDEN PASS: Control Plane -> Agent -> kind -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete"
+echo "GO GOLDEN PASS: Control Plane -> Agent A/B lease fence -> kind -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete"
