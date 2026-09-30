@@ -285,3 +285,114 @@ func TestPostgresReportCannotPreseedFutureRecreate(t *testing.T) {
 		t.Fatalf("observed generation=%d, want %d", got.ObservedGeneration, generation+1)
 	}
 }
+
+
+func TestPostgresCreateWorkloadDesiredRejectsConcurrentPoolDelete(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-parent-race")
+	poolID := domain.ID("pool-parent-race")
+	workloadID := domain.ID("train-parent-race")
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "ComputePool",
+		ID:   poolID,
+		Generation: 1,
+		Spec: map[string]any{
+			"acceleratorBindings": []domain.AcceleratorBinding{{
+				Class: "h100", ResourceName: "nvidia.com/gpu", Flavor: "h100",
+			}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `
+UPDATE desired_resources
+SET deletion_timestamp = now()
+WHERE cluster_id = $1 AND kind = 'ComputePool' AND resource_id = $2
+`, clusterID, poolID); err != nil {
+		t.Fatal(err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		result <- store.CreateWorkloadDesired(
+			ctx,
+			clusterID,
+			poolID,
+			"h100",
+			agent.DesiredResource{
+				Kind: "Workload", ID: workloadID, Generation: 1,
+				Spec: map[string]any{"poolID": poolID},
+			},
+		)
+	}()
+
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-result:
+		if !errors.Is(err, agentstore.ErrComputePoolDeleting) {
+			t.Fatalf("create err=%v, want ErrComputePoolDeleting", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for concurrent workload admission")
+	}
+
+	if _, found, err := store.GetDesired(
+		ctx, clusterID, "Workload", workloadID,
+	); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("concurrent pool delete admitted orphan workload")
+	}
+}
+
+func TestPostgresCreateWorkloadDesiredPreservesLostAckReplay(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-replay")
+	poolID := domain.ID("pool-replay")
+	workload := agent.DesiredResource{
+		Kind: "Workload", ID: "train-replay", Generation: 1,
+		Spec: map[string]any{"poolID": poolID, "image": "example/train:v1"},
+	}
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "ComputePool",
+		ID:   poolID,
+		Generation: 1,
+		Spec: map[string]any{
+			"acceleratorBindings": []domain.AcceleratorBinding{{
+				Class: "h100", ResourceName: "nvidia.com/gpu", Flavor: "h100",
+			}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkloadDesired(
+		ctx, clusterID, poolID, "h100", workload,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkDesiredDeleting(
+		ctx, clusterID, "ComputePool", poolID, time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkloadDesired(
+		ctx, clusterID, poolID, "h100", workload,
+	); err != nil {
+		t.Fatalf("identical lost-ACK replay must succeed: %v", err)
+	}
+}
