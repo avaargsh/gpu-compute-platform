@@ -31,7 +31,9 @@ func (s *Store) ClaimReconcileLease(
 	result, err := s.db.ExecContext(ctx, `
 INSERT INTO reconcile_leases
     (cluster_id, kind, resource_id, owner, lease_until)
-VALUES ($1, $2, $3, $4, $5)
+SELECT $1, $2, $3, $4, $5
+FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
     owner = EXCLUDED.owner,
     lease_until = EXCLUDED.lease_until,
