@@ -163,8 +163,8 @@ func TestPostgresFailedRecreateDoesNotConsumeTombstone(t *testing.T) {
 	}
 
 	err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
-		Kind: "Workload",
-		ID: resourceID,
+		Kind:       "Workload",
+		ID:         resourceID,
 		Generation: generation + 1,
 		Spec: map[string]any{
 			"invalid": func() {},
