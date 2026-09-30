@@ -298,7 +298,7 @@ func TestMemoryUpsertCannotCancelDeletionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
-		Kind: "Workload", ID: "train-1", Generation: 3, Spec: map[string]any{"image": "new"},
+		Kind: "Workload", ID: "train-1", Generation: 4, Spec: map[string]any{"image": "new"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -464,5 +464,43 @@ func TestMemoryLeaseTakeoverFencesStaleWrites(t *testing.T) {
 		ctx, "cluster-a", "Workload", "train-fenced", 7, "agent-b",
 	); err != nil {
 		t.Fatalf("takeover owner finalize: %v", err)
+	}
+}
+
+func TestMemoryUpsertSameGenerationIsIdempotentButImmutable(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	clusterID := domain.ID("cluster-a")
+	original := agent.DesiredResource{
+		Kind:       "ComputePool",
+		ID:         "pool-1",
+		Generation: 7,
+		Spec: map[string]any{
+			"namespace": "project-1",
+			"quota":     float64(8),
+		},
+	}
+	if err := store.UpsertDesired(ctx, clusterID, original); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.UpsertDesired(ctx, clusterID, original); err != nil {
+		t.Fatalf("identical replay must be accepted: %v", err)
+	}
+	mutated := original
+	mutated.Spec = map[string]any{
+		"namespace": "project-1",
+		"quota":     float64(16),
+	}
+	if err := store.UpsertDesired(ctx, clusterID, mutated); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("same-generation mutation err=%v, want ErrStaleGeneration", err)
+	}
+
+	got, found, err := store.GetDesired(ctx, clusterID, "ComputePool", "pool-1")
+	if err != nil || !found {
+		t.Fatalf("desired missing: found=%t err=%v", found, err)
+	}
+	if got.Spec["quota"] != float64(8) {
+		t.Fatalf("same-generation mutation changed desired spec: %#v", got.Spec)
 	}
 }

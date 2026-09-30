@@ -1,7 +1,9 @@
 package agentstore
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -108,11 +110,12 @@ func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := string(clusterID) + "/" + in.Kind + "/" + string(in.ID)
+	consumeTombstone := false
 	if tombstoneGeneration, ok := m.tombstones[key]; ok {
 		if in.Generation <= tombstoneGeneration {
 			return ErrStaleGeneration
 		}
-		delete(m.tombstones, key)
+		consumeTombstone = true
 	}
 	items := m.desired[clusterID]
 	for i := range items {
@@ -120,16 +123,31 @@ func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.
 			if in.Generation < items[i].Generation {
 				return ErrStaleGeneration
 			}
+			if in.Generation == items[i].Generation {
+				equal, err := desiredSpecEqual(items[i].Spec, in.Spec)
+				if err != nil {
+					return err
+				}
+				if !equal {
+					return ErrStaleGeneration
+				}
+			}
 			if items[i].DeletionTimestamp != nil {
 				in.DeletionTimestamp = items[i].DeletionTimestamp
 				in.Finalizers = append([]string(nil), items[i].Finalizers...)
 			}
 			items[i] = in
 			m.desired[clusterID] = items
+			if consumeTombstone {
+				delete(m.tombstones, key)
+			}
 			return nil
 		}
 	}
 	m.desired[clusterID] = append(items, in)
+	if consumeTombstone {
+		delete(m.tombstones, key)
+	}
 	return nil
 }
 
@@ -388,4 +406,16 @@ func containsFinalizer(finalizers []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func desiredSpecEqual(left, right map[string]any) (bool, error) {
+	leftJSON, err := json.Marshal(left)
+	if err != nil {
+		return false, fmt.Errorf("marshal existing desired spec: %w", err)
+	}
+	rightJSON, err := json.Marshal(right)
+	if err != nil {
+		return false, fmt.Errorf("marshal incoming desired spec: %w", err)
+	}
+	return bytes.Equal(leftJSON, rightJSON), nil
 }
