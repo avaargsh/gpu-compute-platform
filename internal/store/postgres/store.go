@@ -164,10 +164,10 @@ func (s *Store) GetObservation(ctx context.Context, clusterID domain.ID, kind st
 	var item agent.Observation
 	var conditions, evidence []byte
 	err := s.db.QueryRowContext(ctx, `
-SELECT kind, resource_id, observed_generation, conditions, evidence_refs
+SELECT kind, resource_id, observed_generation, lease_owner, conditions, evidence_refs
 FROM resource_observations
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
-`, clusterID, kind, resourceID).Scan(&item.Kind, &item.ID, &item.ObservedGeneration, &conditions, &evidence)
+`, clusterID, kind, resourceID).Scan(&item.Kind, &item.ID, &item.ObservedGeneration, &item.LeaseOwner, &conditions, &evidence)
 	if err == sql.ErrNoRows {
 		return agent.Observation{}, false, nil
 	}
@@ -512,14 +512,15 @@ FOR UPDATE
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO resource_observations
-    (cluster_id, kind, resource_id, observed_generation, conditions, evidence_refs)
-VALUES ($1, $2, $3, $4, $5, $6)
+    (cluster_id, kind, resource_id, observed_generation, lease_owner, conditions, evidence_refs)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
     observed_generation = EXCLUDED.observed_generation,
+    lease_owner = EXCLUDED.lease_owner,
     conditions = EXCLUDED.conditions,
     evidence_refs = EXCLUDED.evidence_refs,
     observed_at = now()
-`, clusterID, item.Kind, item.ID, item.ObservedGeneration, conditions, evidence); err != nil {
+`, clusterID, item.Kind, item.ID, item.ObservedGeneration, item.LeaseOwner, conditions, evidence); err != nil {
 			return err
 		}
 	}
