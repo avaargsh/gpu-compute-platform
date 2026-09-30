@@ -58,7 +58,6 @@ func (r *WorkloadReconciler) Reconcile(
 	})
 }
 
-
 func (r *WorkloadReconciler) Delete(
 	ctx context.Context,
 	workload domain.Workload,
