@@ -83,6 +83,19 @@ Run the real acceptance path:
 make e2e-golden
 ```
 
-The Golden Path creates a kind cluster, installs Kueue and Fake GPU Operator, configures a stable H100 profile, and validates Control Plane -> Agent -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete, including agent restart replay, generation fencing, evidence completeness, and immutable workload replacement.
+For HA/debugging, a cluster-agent process may use an explicit lease identity and
+sync interval:
+
+```bash
+AGENT_INSTANCE_ID=agent-a AGENT_SYNC_INTERVAL=1s \
+  CLUSTER_ID=kind-golden CONTROL_PLANE_URL=http://127.0.0.1:8080 \
+  ./cluster-agent
+```
+
+If `AGENT_INSTANCE_ID` is omitted, the Runner generates a random process lease
+owner. These settings do not introduce cluster-wide leader election; leases
+remain resource-scoped.
+
+The Golden Path creates a kind cluster, installs Kueue and Fake GPU Operator, configures a stable H100 profile, and validates Control Plane -> Agent -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete. It also runs two real cluster-agent processes to prove lease fencing before expiry, takeover after process death/expiry, stable Job UID across takeover, generation fencing, evidence completeness, and immutable workload replacement.
 
 See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract, [docs/WORKLOAD_LIFECYCLE.md](docs/WORKLOAD_LIFECYCLE.md) for the Reserve → Allocate → Bind → Release → Audit workload lifecycle, and [docs/RELEASE_ACCEPTANCE_V0_1.md](docs/RELEASE_ACCEPTANCE_V0_1.md) for the v0.1 release gate.
