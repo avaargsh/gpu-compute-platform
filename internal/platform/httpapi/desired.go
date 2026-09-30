@@ -44,7 +44,8 @@ func (a *DesiredAPI) Upsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.store.UpsertDesired(r.Context(), clusterID, in); err != nil {
-		if errors.Is(err, agentstore.ErrStaleGeneration) {
+		if errors.Is(err, agentstore.ErrStaleGeneration) ||
+			errors.Is(err, agentstore.ErrDesiredDeleting) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}

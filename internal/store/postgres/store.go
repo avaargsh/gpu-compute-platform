@@ -260,7 +260,7 @@ FOR UPDATE
 			return agentstore.ErrIdentityConflict
 		}
 		if existingDeletion.Valid {
-			return agentstore.ErrDesiredNotDeleting
+			return agentstore.ErrDesiredDeleting
 		}
 		if existingGeneration != in.Generation || !existingSpecMatches {
 			return agentstore.ErrStaleGeneration
@@ -317,6 +317,42 @@ func (s *Store) upsertDesiredTx(
 	clusterID domain.ID,
 	in agent.DesiredResource,
 ) error {
+	spec, err := json.Marshal(in.Spec)
+	if err != nil {
+		return fmt.Errorf("marshal desired spec: %w", err)
+	}
+	if err := lockDesiredLifecycleTx(
+		ctx, tx, clusterID, in.Kind, in.ID,
+	); err != nil {
+		return err
+	}
+
+	var currentGeneration int64
+	var currentSpecMatches bool
+	currentErr := tx.QueryRowContext(ctx, `
+SELECT generation, spec = $4::jsonb
+FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
+`, clusterID, in.Kind, in.ID, spec).Scan(
+		&currentGeneration,
+		&currentSpecMatches,
+	)
+	if currentErr != nil && currentErr != sql.ErrNoRows {
+		return currentErr
+	}
+	if currentErr == nil {
+		switch {
+		case in.Generation < currentGeneration:
+			return agentstore.ErrStaleGeneration
+		case in.Generation == currentGeneration:
+			if !currentSpecMatches {
+				return agentstore.ErrStaleGeneration
+			}
+			return nil
+		}
+	}
+
 	var tombstoneGeneration int64
 	tombstoneErr := tx.QueryRowContext(ctx, `
 SELECT generation
@@ -331,35 +367,16 @@ FOR UPDATE
 		return agentstore.ErrStaleGeneration
 	}
 
-	spec, err := json.Marshal(in.Spec)
-	if err != nil {
-		return fmt.Errorf("marshal desired spec: %w", err)
-	}
-	result, err := tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 INSERT INTO desired_resources (cluster_id, kind, resource_id, generation, spec)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
     generation = EXCLUDED.generation,
     spec = EXCLUDED.spec,
-    updated_at = CASE
-        WHEN desired_resources.generation < EXCLUDED.generation THEN now()
-        ELSE desired_resources.updated_at
-    END
-WHERE desired_resources.generation < EXCLUDED.generation
-   OR (
-       desired_resources.generation = EXCLUDED.generation
-       AND desired_resources.spec = EXCLUDED.spec
-   )
+    updated_at = now()
 `, clusterID, in.Kind, in.ID, in.Generation, spec)
 	if err != nil {
 		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return agentstore.ErrStaleGeneration
 	}
 
 	if tombstoneErr == nil {
@@ -373,11 +390,28 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	return nil
 }
 
-func (s *Store) MarkDesiredDeleting(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, at time.Time) error {
+func (s *Store) MarkDesiredDeleting(
+	ctx context.Context,
+	clusterID domain.ID,
+	kind string,
+	resourceID domain.ID,
+	at time.Time,
+) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	result, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := lockDesiredLifecycleTx(
+		ctx, tx, clusterID, kind, resourceID,
+	); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
 UPDATE desired_resources
 SET deletion_timestamp = COALESCE(deletion_timestamp, $4),
     finalizers = CASE
@@ -397,7 +431,7 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	if affected == 0 {
 		return agentstore.ErrDesiredNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *Store) FinalizeDesired(
@@ -458,7 +492,29 @@ func (s *Store) finalizeDesired(
 	}
 	defer tx.Rollback()
 
-	if requireLease {
+	if err := lockDesiredLifecycleTx(
+		ctx, tx, clusterID, kind, resourceID,
+	); err != nil {
+		return err
+	}
+
+	var currentGeneration int64
+	var deletionTimestamp sql.NullTime
+	var finalizers []byte
+	err = tx.QueryRowContext(ctx, `
+SELECT generation, deletion_timestamp, finalizers
+FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
+`, clusterID, kind, resourceID).Scan(
+		&currentGeneration,
+		&deletionTimestamp,
+		&finalizers,
+	)
+	if err == sql.ErrNoRows {
+		if !requireLease {
+			return agentstore.ErrDesiredNotFound
+		}
 		var finalizedGeneration int64
 		finalizedErr := tx.QueryRowContext(ctx, `
 SELECT generation
@@ -466,20 +522,26 @@ FROM deletion_tombstones
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 FOR UPDATE
 `, clusterID, kind, resourceID).Scan(&finalizedGeneration)
-		if finalizedErr != nil && finalizedErr != sql.ErrNoRows {
+		if finalizedErr == sql.ErrNoRows {
+			return agentstore.ErrDesiredNotFound
+		}
+		if finalizedErr != nil {
 			return finalizedErr
 		}
-		if finalizedErr == nil {
-			switch {
-			case generation == finalizedGeneration:
-				return tx.Commit()
-			case generation < finalizedGeneration:
-				return agentstore.ErrStaleGeneration
-			default:
-				return agentstore.ErrDesiredNotFound
-			}
+		switch {
+		case generation == finalizedGeneration:
+			return tx.Commit()
+		case generation < finalizedGeneration:
+			return agentstore.ErrStaleGeneration
+		default:
+			return agentstore.ErrDesiredNotFound
 		}
+	}
+	if err != nil {
+		return err
+	}
 
+	if requireLease {
 		var currentOwner string
 		var leaseValid bool
 		err = tx.QueryRowContext(ctx, `
@@ -499,21 +561,6 @@ FOR UPDATE
 		}
 	}
 
-	var currentGeneration int64
-	var deletionTimestamp sql.NullTime
-	var finalizers []byte
-	err = tx.QueryRowContext(ctx, `
-SELECT generation, deletion_timestamp, finalizers
-FROM desired_resources
-WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
-FOR UPDATE
-`, clusterID, kind, resourceID).Scan(&currentGeneration, &deletionTimestamp, &finalizers)
-	if err == sql.ErrNoRows {
-		return agentstore.ErrDesiredNotFound
-	}
-	if err != nil {
-		return err
-	}
 	if currentGeneration != generation {
 		return agentstore.ErrStaleGeneration
 	}
@@ -592,6 +639,23 @@ func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []
 	defer tx.Rollback()
 
 	for _, item := range observations {
+		var desiredGeneration int64
+		err := tx.QueryRowContext(ctx, `
+SELECT generation
+FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR SHARE
+`, clusterID, item.Kind, item.ID).Scan(&desiredGeneration)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == sql.ErrNoRows {
+			if item.LeaseOwner != "" {
+				return agentstore.ErrLeaseLost
+			}
+			continue
+		}
+
 		if item.LeaseOwner != "" {
 			var currentOwner string
 			var leaseValid bool
@@ -610,23 +674,6 @@ FOR UPDATE
 			if currentOwner != item.LeaseOwner || !leaseValid {
 				return agentstore.ErrLeaseLost
 			}
-		}
-
-		var desiredGeneration int64
-		err := tx.QueryRowContext(ctx, `
-SELECT generation
-FROM desired_resources
-WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
-FOR UPDATE
-`, clusterID, item.Kind, item.ID).Scan(&desiredGeneration)
-		if err != nil && err != sql.ErrNoRows {
-			return err
-		}
-		if err == sql.ErrNoRows {
-			// Observations are subordinate to desired state. Do not persist
-			// a future/stale observation while the canonical resource does
-			// not exist, because a later recreate may use that generation.
-			continue
 		}
 		if item.ObservedGeneration != desiredGeneration {
 			continue

@@ -59,7 +59,8 @@ func (a *ResourceAPI) UpsertComputePool(w http.ResponseWriter, r *http.Request) 
 	if err := a.store.UpsertDesired(r.Context(), poolPlacement.ClusterID, agent.DesiredResource{
 		Kind: "ComputePool", ID: in.Metadata.ID, Generation: in.Metadata.Generation, Spec: spec,
 	}); err != nil {
-		if errors.Is(err, agentstore.ErrStaleGeneration) {
+		if errors.Is(err, agentstore.ErrStaleGeneration) ||
+			errors.Is(err, agentstore.ErrDesiredDeleting) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -124,6 +125,7 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, agentstore.ErrStaleGeneration) ||
 			errors.Is(err, agentstore.ErrIdentityConflict) ||
 			errors.Is(err, agentstore.ErrDesiredNotDeleting) ||
+			errors.Is(err, agentstore.ErrDesiredDeleting) ||
 			errors.Is(err, agentstore.ErrComputePoolNotFound) ||
 			errors.Is(err, agentstore.ErrComputePoolDeleting) ||
 			errors.Is(err, agentstore.ErrAcceleratorBindingNotFound) {

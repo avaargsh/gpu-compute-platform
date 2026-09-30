@@ -33,6 +33,15 @@ func (s *Store) ClaimReconcileLease(
 	}
 	defer tx.Rollback()
 
+	if err := lockDesiredLifecycleTx(
+		ctx, tx, clusterID, kind, resourceID,
+	); err != nil {
+		return false, err
+	}
+
+	// Hold the canonical desired row while claiming its lease. Report and
+	// Finalize use the same desired -> lease lock order, avoiding reverse-order
+	// deadlocks while still fencing concurrent deletion.
 	var exists int
 	err = tx.QueryRowContext(ctx, `
 SELECT 1
