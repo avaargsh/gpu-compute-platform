@@ -396,7 +396,6 @@ func TestPostgresCreateWorkloadDesiredPreservesLostAckReplay(t *testing.T) {
 	}
 }
 
-
 func TestPostgresFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
 	db := openContractDB(t)
 	store := New(db)
