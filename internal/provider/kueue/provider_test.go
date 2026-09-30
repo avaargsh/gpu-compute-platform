@@ -128,3 +128,62 @@ func TestDeletePoolPreservesSharedResourceFlavor(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteDRAWorkloadReleasesClaimAndPreservesAuditEvidence(t *testing.T) {
+	client := &fakeClient{}
+	p := NewProvider(client)
+
+	got, err := p.DeleteWorkload(context.Background(), baseprovider.WorkloadProjection{
+		WorkloadID: "train-1",
+		ProjectID:  "project-1",
+		PoolID:     "pool-1",
+		ClusterID:  "cluster-a",
+		Namespace:  "project-1",
+		Generation: 4,
+		Accelerator: domain.AcceleratorRequest{
+			Class: "a100-mig-1g",
+			Quota: 1,
+		},
+		AcceleratorBinding: domain.AcceleratorBinding{
+			Class:          "a100-mig-1g",
+			AllocationMode: domain.AcceleratorAllocationDRA,
+			ResourceName:   "nvidia.com/gpu",
+			Flavor:         "a100-mig-1g",
+			DRA: &domain.DRAAllocation{
+				DeviceClassName: "gpu.nvidia.com",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Gone {
+		t.Fatalf("DRA workload resources should be gone: %#v", got)
+	}
+
+	wantOrder := []string{
+		"delete-job:project-1/job-train-1",
+		"delete-claim:project-1/accelerator-train-1",
+	}
+	if len(client.order) != len(wantOrder) {
+		t.Fatalf("unexpected DRA release order: %#v", client.order)
+	}
+	for i := range wantOrder {
+		if client.order[i] != wantOrder[i] {
+			t.Fatalf("release[%d]=%q, want %q", i, client.order[i], wantOrder[i])
+		}
+	}
+
+	wantEvidence := []string{
+		"k8s://cluster-a/namespaces/project-1/jobs/job-train-1",
+		"k8s://cluster-a/namespaces/project-1/resourceclaims/accelerator-train-1",
+	}
+	if len(got.EvidenceRefs) != len(wantEvidence) {
+		t.Fatalf("release evidence=%#v, want %#v", got.EvidenceRefs, wantEvidence)
+	}
+	for i := range wantEvidence {
+		if got.EvidenceRefs[i] != wantEvidence[i] {
+			t.Fatalf("evidence[%d]=%q, want %q", i, got.EvidenceRefs[i], wantEvidence[i])
+		}
+	}
+}
