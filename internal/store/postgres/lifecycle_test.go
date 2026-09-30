@@ -101,7 +101,6 @@ func TestPostgresTombstoneFencesOldGenerationAndAllowsNewerRecreate(t *testing.T
 	}
 }
 
-
 func TestPostgresUpsertSameGenerationIsIdempotentButImmutable(t *testing.T) {
 	db := openContractDB(t)
 	store := New(db)
@@ -110,12 +109,12 @@ func TestPostgresUpsertSameGenerationIsIdempotentButImmutable(t *testing.T) {
 	resourceID := domain.ID("pool-generation-fence")
 
 	original := agent.DesiredResource{
-		Kind: "ComputePool",
-		ID: resourceID,
+		Kind:       "ComputePool",
+		ID:         resourceID,
 		Generation: 5,
 		Spec: map[string]any{
 			"namespace": "project-1",
-			"quota": 8,
+			"quota":     8,
 		},
 	}
 	if err := store.UpsertDesired(ctx, clusterID, original); err != nil {
@@ -128,7 +127,7 @@ func TestPostgresUpsertSameGenerationIsIdempotentButImmutable(t *testing.T) {
 	mutated := original
 	mutated.Spec = map[string]any{
 		"namespace": "project-1",
-		"quota": 16,
+		"quota":     16,
 	}
 	if err := store.UpsertDesired(ctx, clusterID, mutated); !errors.Is(err, agentstore.ErrStaleGeneration) {
 		t.Fatalf("same-generation mutation err=%v, want ErrStaleGeneration", err)
