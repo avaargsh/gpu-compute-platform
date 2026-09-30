@@ -12,13 +12,14 @@ type StateAPI struct {
 }
 
 type resourceState struct {
-	Kind               string             `json:"kind"`
-	ID                 domain.ID          `json:"id"`
-	DesiredGeneration  int64              `json:"desiredGeneration"`
-	ObservedGeneration int64              `json:"observedGeneration"`
-	SyncState          string             `json:"syncState"`
-	Conditions         []domain.Condition `json:"conditions,omitempty"`
-	EvidenceRefs       []string           `json:"evidenceRefs,omitempty"`
+	Kind                  string             `json:"kind"`
+	ID                    domain.ID          `json:"id"`
+	DesiredGeneration     int64              `json:"desiredGeneration"`
+	ObservedGeneration    int64              `json:"observedGeneration"`
+	SyncState             string             `json:"syncState"`
+	Conditions            []domain.Condition `json:"conditions,omitempty"`
+	EvidenceRefs          []string           `json:"evidenceRefs,omitempty"`
+	ObservationLeaseOwner string             `json:"observationLeaseOwner,omitempty"`
 }
 
 func NewStateAPI(store agentstore.Store) *StateAPI {
@@ -68,5 +69,6 @@ func (a *StateAPI) Get(w http.ResponseWriter, r *http.Request) {
 	out := projectResourceState(desired.Generation, observed, observation.ObservedGeneration, observation.Conditions, observation.EvidenceRefs)
 	out.Kind = desired.Kind
 	out.ID = desired.ID
+	out.ObservationLeaseOwner = observation.LeaseOwner
 	writeJSON(w, http.StatusOK, out)
 }

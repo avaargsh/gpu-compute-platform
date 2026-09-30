@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS resource_observations (
     kind TEXT NOT NULL,
     resource_id TEXT NOT NULL,
     observed_generation BIGINT NOT NULL,
+    lease_owner TEXT NOT NULL DEFAULT '',
     conditions JSONB NOT NULL DEFAULT '[]'::jsonb,
     evidence_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
     observed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -34,6 +35,9 @@ ALTER TABLE desired_resources
 
 ALTER TABLE desired_resources
     ADD COLUMN IF NOT EXISTS finalizers JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE resource_observations
+    ADD COLUMN IF NOT EXISTS lease_owner TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS desired_resources_cluster_generation_idx
     ON desired_resources (cluster_id, generation);

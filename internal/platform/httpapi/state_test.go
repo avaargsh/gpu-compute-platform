@@ -55,3 +55,46 @@ func TestStateAPIProjectsGenerationDrift(t *testing.T) {
 		t.Fatal("expected stale desired write to fail")
 	}
 }
+
+func TestStateAPIExposesLastObservationLeaseOwner(t *testing.T) {
+	store := agentstore.NewMemory()
+	ctx := context.Background()
+	if err := store.UpsertDesired(ctx, "cluster-a", agent.DesiredResource{
+		Kind: "Workload", ID: "train-owner", Generation: 1,
+		Spec: map[string]any{"image": "v1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimReconcileLease(
+		ctx, "cluster-a", "Workload", "train-owner", "agent-b", 30,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim lease: claimed=%t err=%v", claimed, err)
+	}
+	if err := store.Report(ctx, "cluster-a", []agent.Observation{{
+		Kind:               "Workload",
+		ID:                 "train-owner",
+		ObservedGeneration: 1,
+		LeaseOwner:         "agent-b",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(NewRouterWithAgentStore(store))
+	defer server.Close()
+	resp, err := server.Client().Get(
+		server.URL + "/api/v1/internal/clusters/cluster-a/state/Workload/train-owner",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var got resourceState
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.ObservationLeaseOwner != "agent-b" {
+		t.Fatalf("observation lease owner=%q, want agent-b", got.ObservationLeaseOwner)
+	}
+}

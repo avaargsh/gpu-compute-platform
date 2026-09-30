@@ -83,12 +83,15 @@ The kind acceptance path must prove all of the following against real Kubernetes
 2. Kueue reaches QuotaReserved and Admitted.
 3. the Job carries `ai.compute/generation=1`.
 4. status exposes both Job evidence and Kueue Workload evidence.
-5. restarting the Cluster Agent keeps the same Kubernetes Job UID.
-6. an identical same-generation PUT remains idempotent.
-7. an in-place generation/spec replacement returns HTTP 409.
-8. an invalid accelerator class fails closed without creating a Job.
-9. deletion removes provider-owned Workload resources before finalization.
-10. ComputePool cleanup waits for dependent Workloads and preserves shared ResourceFlavor.
+5. Agent A's observation identifies its explicit reconcile owner.
+6. while A's resource lease is live, concurrent Agent B cannot become the Workload observation writer.
+7. killing Agent A does not implicitly erase the resource lease.
+8. after lease expiry, Agent B takes ownership and the Kubernetes Job UID remains unchanged.
+9. an identical same-generation PUT remains idempotent.
+10. an in-place generation/spec replacement returns HTTP 409.
+11. an invalid accelerator class fails closed without creating a Job.
+12. deletion removes provider-owned Workload resources before finalization.
+13. ComputePool cleanup waits for dependent Workloads and preserves shared ResourceFlavor.
 
 ## Release rule
 
