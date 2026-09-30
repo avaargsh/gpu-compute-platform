@@ -10,10 +10,10 @@ func TestJobObjectCarriesQueueAndGPURequest(t *testing.T) {
 	job, err := jobObject(Job{
 		Generation: 7,
 		Name:       "job-train-1",
-		Namespace: "project-1",
-		Image:     "example/train:latest",
-		Command:   []string{"python", "train.py"},
-		Resources: map[string]int64{"vendor.example/gpu": 2},
+		Namespace:  "project-1",
+		Image:      "example/train:latest",
+		Command:    []string{"python", "train.py"},
+		Resources:  map[string]int64{"vendor.example/gpu": 2},
 		Labels: map[string]string{
 			"kueue.x-k8s.io/queue-name": "lq-pool-h100",
 		},
@@ -72,7 +72,7 @@ func unstructuredNestedSlice(obj map[string]any, fields ...string) ([]any, bool,
 func TestDRAObjectsUseStableResourceAPI(t *testing.T) {
 	in := Job{
 		Generation: 9,
-		Name: "job-train-dra", Namespace: "project-1", Image: "example/train:latest",
+		Name:       "job-train-dra", Namespace: "project-1", Image: "example/train:latest",
 		Labels: map[string]string{"kueue.x-k8s.io/queue-name": "lq-pool-h100"},
 		DRA:    &DRARequest{ClaimName: "accelerator-train-dra", DeviceClassName: "gpu.nvidia.com", Count: 2},
 	}
