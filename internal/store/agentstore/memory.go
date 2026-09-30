@@ -305,14 +305,15 @@ func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Obser
 				break
 			}
 		}
-		if currentGeneration != 0 && out[i].ObservedGeneration != currentGeneration {
+		if currentGeneration == 0 {
+			// Desired state is the management-plane source of truth. Never
+			// persist an observation for an identity/generation that has no
+			// current desired resource; otherwise a future recreate could
+			// inherit an observation that predates its intent.
 			continue
 		}
-		if currentGeneration == 0 {
-			key := string(clusterID) + "/" + out[i].Kind + "/" + string(out[i].ID)
-			if tombstoneGeneration, ok := m.tombstones[key]; ok && out[i].ObservedGeneration <= tombstoneGeneration {
-				continue
-			}
+		if out[i].ObservedGeneration != currentGeneration {
+			continue
 		}
 		if old, ok := previous[out[i].Kind+"/"+string(out[i].ID)]; ok {
 			if out[i].ObservedGeneration < old.ObservedGeneration {
