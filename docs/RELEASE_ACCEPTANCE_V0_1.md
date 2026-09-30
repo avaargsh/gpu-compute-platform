@@ -8,6 +8,7 @@ This document defines the release gate for the v0.1 Go control plane. A change i
 | --- | --- | --- |
 | Desired/observed generation | stale provider state reported as current | stale-generation tests + provider generation annotation |
 | Reconcile lease | concurrent agents issuing duplicate side effects | lease ownership/expiry contract |
+| Lease write fence | old owner reporting/finalizing after takeover | owner-bound observation/finalize tests |
 | Retry/backoff | transient provider outage becoming terminal drift | retry/backoff contract |
 | Agent restart | process restart losing convergence safety | new Runner replay contract + Golden Path restart |
 | Control-plane restart | desired/observation/lease state lost with process memory | PostgreSQL store reconstruction contract |
@@ -38,6 +39,30 @@ CI must pass both before merge.
 ### Cluster Agent restart
 
 The Agent is disposable process state. After restart it pulls the same desired state and safely replays reconciliation. Provider operations therefore must remain idempotent for the same generation. A restarted Agent must not create a second Job or mutate the execution projection.
+
+### Lease takeover and write fencing
+
+The lease protects two separate boundaries:
+
+```text
+claim lease
+   -> provider side effects
+   -> report observation/evidence
+   -> finalize desired state
+   -> release/delete lease
+```
+
+A competing Agent is fenced before provider reconciliation while another
+unexpired owner holds the lease. After expiry, a new Agent may take ownership.
+
+Ownership is also checked again when observations and finalization are committed.
+Those checks happen in the same store transaction as the write. Therefore an
+Agent that started work under an older lease cannot commit same-generation
+evidence or finalize the resource after another Agent has taken ownership.
+
+The HTTP Agent API requires a lease owner on these writes. PostgreSQL is the
+authoritative implementation; the in-memory store mirrors the same contract for
+deterministic tests.
 
 ### Control Plane restart
 
