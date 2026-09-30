@@ -12,14 +12,14 @@ type StateAPI struct {
 }
 
 type resourceState struct {
-	Kind               string             `json:"kind"`
-	ID                 domain.ID          `json:"id"`
-	DesiredGeneration  int64              `json:"desiredGeneration"`
-	ObservedGeneration int64              `json:"observedGeneration"`
-	SyncState          string             `json:"syncState"`
-	Conditions         []domain.Condition `json:"conditions,omitempty"`
-	EvidenceRefs       []string           `json:"evidenceRefs,omitempty"`
-	ObservationLeaseOwner string           `json:"observationLeaseOwner,omitempty"`
+	Kind                  string             `json:"kind"`
+	ID                    domain.ID          `json:"id"`
+	DesiredGeneration     int64              `json:"desiredGeneration"`
+	ObservedGeneration    int64              `json:"observedGeneration"`
+	SyncState             string             `json:"syncState"`
+	Conditions            []domain.Condition `json:"conditions,omitempty"`
+	EvidenceRefs          []string           `json:"evidenceRefs,omitempty"`
+	ObservationLeaseOwner string             `json:"observationLeaseOwner,omitempty"`
 }
 
 func NewStateAPI(store agentstore.Store) *StateAPI {
