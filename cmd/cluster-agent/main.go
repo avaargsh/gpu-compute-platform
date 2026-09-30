@@ -49,8 +49,36 @@ func main() {
 	log.Printf("cluster capabilities: kueue=%t accelerators=%v", capabilities.Kueue, capabilities.Accelerators)
 
 	control := httpclient.New(controlPlaneURL, &http.Client{Timeout: 10 * time.Second})
-	runner := agent.NewRunner(clusterID, control, runtime)
-	lifecycle := agent.NewLifecycle(clusterID, control, runner, agentVersion, serverVersion.GitVersion, 15*time.Second)
+
+	agentInstanceID := os.Getenv("AGENT_INSTANCE_ID")
+	runner := agent.NewRunnerWithLeaseOwner(
+		clusterID,
+		control,
+		runtime,
+		agentInstanceID,
+	)
+
+	syncInterval := 15 * time.Second
+	if raw := os.Getenv("AGENT_SYNC_INTERVAL"); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil || parsed <= 0 {
+			log.Fatalf("invalid AGENT_SYNC_INTERVAL %q", raw)
+		}
+		syncInterval = parsed
+	}
+	log.Printf(
+		"cluster agent process identity=%q syncInterval=%s",
+		agentInstanceID,
+		syncInterval,
+	)
+	lifecycle := agent.NewLifecycle(
+		clusterID,
+		control,
+		runner,
+		agentVersion,
+		serverVersion.GitVersion,
+		syncInterval,
+	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
