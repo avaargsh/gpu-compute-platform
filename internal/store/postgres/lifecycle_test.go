@@ -195,7 +195,6 @@ func TestPostgresFailedRecreateDoesNotConsumeTombstone(t *testing.T) {
 	}
 }
 
-
 func TestPostgresReportCannotPreseedFutureRecreate(t *testing.T) {
 	db := openContractDB(t)
 	store := New(db)
