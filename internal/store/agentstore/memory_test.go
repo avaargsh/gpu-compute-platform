@@ -467,18 +467,17 @@ func TestMemoryLeaseTakeoverFencesStaleWrites(t *testing.T) {
 	}
 }
 
-
 func TestMemoryUpsertSameGenerationIsIdempotentButImmutable(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemory()
 	clusterID := domain.ID("cluster-a")
 	original := agent.DesiredResource{
-		Kind: "ComputePool",
-		ID: "pool-1",
+		Kind:       "ComputePool",
+		ID:         "pool-1",
 		Generation: 7,
 		Spec: map[string]any{
 			"namespace": "project-1",
-			"quota": float64(8),
+			"quota":     float64(8),
 		},
 	}
 	if err := store.UpsertDesired(ctx, clusterID, original); err != nil {
@@ -491,7 +490,7 @@ func TestMemoryUpsertSameGenerationIsIdempotentButImmutable(t *testing.T) {
 	mutated := original
 	mutated.Spec = map[string]any{
 		"namespace": "project-1",
-		"quota": float64(16),
+		"quota":     float64(16),
 	}
 	if err := store.UpsertDesired(ctx, clusterID, mutated); !errors.Is(err, ErrStaleGeneration) {
 		t.Fatalf("same-generation mutation err=%v, want ErrStaleGeneration", err)
