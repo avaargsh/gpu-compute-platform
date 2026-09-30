@@ -21,6 +21,7 @@ var ErrPlacementSourceGenerationMismatch = errors.New("placement migration sourc
 var ErrPlacementTargetGenerationMismatch = errors.New("placement migration target generation changed")
 var ErrDesiredNotFound = errors.New("desired resource not found")
 var ErrDesiredNotDeleting = errors.New("desired resource is not deleting")
+var ErrDesiredDeleting = errors.New("desired resource is deleting")
 var ErrComputePoolNotFound = errors.New("compute pool desired state not found")
 var ErrComputePoolDeleting = errors.New("compute pool is deleting")
 var ErrAcceleratorBindingNotFound = errors.New("accelerator class is not bound by compute pool")
