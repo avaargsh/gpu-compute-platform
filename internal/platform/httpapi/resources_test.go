@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
@@ -16,6 +17,22 @@ func boundRouter(store agentstore.Store, projectCluster, poolCluster domain.ID) 
 	placement := NewMemoryPlacementResolver()
 	placement.BindProject(domain.ProjectBinding{ProjectID: "project-1", ClusterID: projectCluster, Namespace: "project-1"})
 	placement.BindPool(domain.ClusterBinding{PoolID: "pool-h100", ClusterID: poolCluster, Provider: "kueue"})
+	if err := store.UpsertDesired(context.Background(), poolCluster, agent.DesiredResource{
+		Kind: "ComputePool",
+		ID: "pool-h100",
+		Generation: 1,
+		Spec: map[string]any{
+			"projectID": "project-1",
+			"namespace": "project-1",
+			"acceleratorBindings": []domain.AcceleratorBinding{{
+				Class: "h100-80g",
+				ResourceName: "nvidia.com/gpu",
+				Flavor: "h100",
+			}},
+		},
+	}); err != nil {
+		panic(err)
+	}
 	return NewRouterWithDependencies(store, placement)
 }
 
@@ -227,4 +244,73 @@ func TestResourceAPIRequiresDeleteRecreateForWorkloadChanges(t *testing.T) {
 	if !found || desired.Generation != 2 || desired.Spec["image"] != "example/v2" {
 		t.Fatalf("recreated desired state=%#v", desired)
 	}
+}
+
+
+func TestResourceAPIRejectsWorkloadWhenPoolDesiredStateIsMissing(t *testing.T) {
+	store := agentstore.NewMemory()
+	placement := NewMemoryPlacementResolver()
+	placement.BindProject(domain.ProjectBinding{
+		ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "project-1",
+	})
+	placement.BindPool(domain.ClusterBinding{
+		PoolID: "pool-h100", ClusterID: "cluster-a", Provider: "kueue",
+	})
+	server := httptest.NewServer(NewRouterWithDependencies(store, placement))
+	defer server.Close()
+
+	body := []byte(`{
+		"metadata":{"id":"train-1","generation":1},
+		"projectId":"project-1",
+		"poolId":"pool-h100",
+		"spec":{"image":"example/train:latest","accelerator":{"class":"h100-80g","quota":1}}
+	}`)
+	resp, err := server.Client().Do(mustRequest(
+		t,
+		http.MethodPut,
+		server.URL+"/api/v1/workloads/train-1",
+		body,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status=%d, want 409", resp.StatusCode)
+	}
+}
+
+func TestResourceAPIRejectsWorkloadWithUnboundAcceleratorClass(t *testing.T) {
+	store := agentstore.NewMemory()
+	server := httptest.NewServer(boundRouter(store, "cluster-a", "cluster-a"))
+	defer server.Close()
+
+	body := []byte(`{
+		"metadata":{"id":"train-1","generation":1},
+		"projectId":"project-1",
+		"poolId":"pool-h100",
+		"spec":{"image":"example/train:latest","accelerator":{"class":"b200","quota":1}}
+	}`)
+	resp, err := server.Client().Do(mustRequest(
+		t,
+		http.MethodPut,
+		server.URL+"/api/v1/workloads/train-1",
+		body,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status=%d, want 409", resp.StatusCode)
+	}
+}
+
+func mustRequest(t *testing.T, method, url string, body []byte) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(method, url, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
 }
