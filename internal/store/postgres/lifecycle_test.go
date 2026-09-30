@@ -442,12 +442,13 @@ func TestPostgresFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
 	}
 }
 
-func TestPostgresUpsertRejectsHigherGenerationWhileDeleting(t *testing.T) {
+func TestPostgresUpsertCannotCancelDeletionLifecycle(t *testing.T) {
 	db := openContractDB(t)
 	store := New(db)
 	ctx := context.Background()
-	clusterID := domain.ID("cluster-delete-immutable")
-	resourceID := domain.ID("pool-delete-immutable")
+	clusterID := domain.ID("cluster-delete-preserved")
+	resourceID := domain.ID("pool-delete-preserved")
+	at := time.Date(2026, 9, 30, 16, 0, 0, 0, time.UTC)
 
 	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
 		Kind: "ComputePool", ID: resourceID, Generation: 3,
@@ -456,17 +457,15 @@ func TestPostgresUpsertRejectsHigherGenerationWhileDeleting(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.MarkDesiredDeleting(
-		ctx, clusterID, "ComputePool", resourceID, time.Now(),
+		ctx, clusterID, "ComputePool", resourceID, at,
 	); err != nil {
 		t.Fatal(err)
 	}
-
-	err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
 		Kind: "ComputePool", ID: resourceID, Generation: 4,
 		Spec: map[string]any{"quota": 8},
-	})
-	if !errors.Is(err, agentstore.ErrDesiredDeleting) {
-		t.Fatalf("update during deletion err=%v, want ErrDesiredDeleting", err)
+	}); err != nil {
+		t.Fatal(err)
 	}
 
 	got, found, err := store.GetDesired(
@@ -475,8 +474,15 @@ func TestPostgresUpsertRejectsHigherGenerationWhileDeleting(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("desired missing: found=%t err=%v", found, err)
 	}
-	if got.Generation != 3 || got.Spec["quota"] != float64(4) {
-		t.Fatalf("deleting desired state mutated: %#v", got)
+	if got.Generation != 4 || got.Spec["quota"] != float64(8) {
+		t.Fatalf("desired update missing: %#v", got)
+	}
+	if got.DeletionTimestamp == nil || !got.DeletionTimestamp.Equal(at) {
+		t.Fatalf("upsert cancelled deletion timestamp: %#v", got.DeletionTimestamp)
+	}
+	if len(got.Finalizers) != 1 ||
+		got.Finalizers[0] != agentstore.ProviderCleanupFinalizer {
+		t.Fatalf("upsert cancelled cleanup finalizer: %#v", got.Finalizers)
 	}
 }
 
