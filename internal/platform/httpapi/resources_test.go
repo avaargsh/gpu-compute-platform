@@ -61,15 +61,16 @@ func TestResourceAPIProjectsWorkloadDesiredState(t *testing.T) {
 		t.Fatalf("unexpected status: %d", resp.StatusCode)
 	}
 
-	desired, err := store.Desired(context.Background(), "cluster-a")
+	got, found, err := store.GetDesired(
+		context.Background(),
+		"cluster-a",
+		"Workload",
+		"train-1",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(desired) != 1 {
-		t.Fatalf("expected one desired resource: %#v", desired)
-	}
-	got := desired[0]
-	if got.Kind != "Workload" || got.ID != "train-1" || got.Generation != 7 {
+	if !found || got.Generation != 7 {
 		t.Fatalf("unexpected desired identity: %#v", got)
 	}
 	if got.Spec["projectID"] != domain.ID("project-1") || got.Spec["poolID"] != domain.ID("pool-h100") || got.Spec["namespace"] != "project-1" {
@@ -137,11 +138,16 @@ func TestResourceAPIRejectsStaleWorkloadGenerationWithoutRollback(t *testing.T) 
 		t.Fatalf("stale generation status=%d, want 409", got)
 	}
 
-	desired, err := store.Desired(context.Background(), "cluster-a")
+	desired, found, err := store.GetDesired(
+		context.Background(),
+		"cluster-a",
+		"Workload",
+		"train-1",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(desired) != 1 || desired[0].Generation != 8 || desired[0].Spec["image"] != "example/v8" {
+	if !found || desired.Generation != 8 || desired.Spec["image"] != "example/v8" {
 		t.Fatalf("stale write rolled desired state back: %#v", desired)
 	}
 }
