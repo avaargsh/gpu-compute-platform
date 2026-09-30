@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -30,11 +32,24 @@ func TestAgentDesiredAndReportRoundTrip(t *testing.T) {
 	if len(desired) != 1 || desired[0].Generation != 3 {
 		t.Fatalf("unexpected desired: %#v", desired)
 	}
+	lease, err := store.ClaimReconcileLease(context.Background(), "cluster-a", "ComputePool", "pool-1", "agent-test", 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lease.Claimed {
+		t.Fatal("expected reconcile lease to be claimed")
+	}
 
 	payload, _ := json.Marshal(map[string]any{
 		"clusterId": "cluster-a",
 		"observations": []agent.Observation{
-			{Kind: "ComputePool", ID: "pool-1", ObservedGeneration: 3},
+			{
+				Kind:               "ComputePool",
+				ID:                 "pool-1",
+				ObservedGeneration: 3,
+				LeaseOwner:         lease.Owner,
+				LeaseEpoch:         lease.Epoch,
+			},
 		},
 	})
 	reportResp, err := server.Client().Post(
@@ -46,6 +61,9 @@ func TestAgentDesiredAndReportRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	reportResp.Body.Close()
+	if reportResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("unexpected report status: %d", reportResp.StatusCode)
+	}
 
 	observed := store.Observations("cluster-a")
 	if len(observed) != 1 || observed[0].ObservedGeneration != 3 {
