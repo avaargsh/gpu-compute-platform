@@ -552,3 +552,49 @@ func TestMemoryLeaseCannotPreclaimMissingDesiredIdentity(t *testing.T) {
 		t.Fatalf("orphan lease persisted: %#v", store.leases)
 	}
 }
+
+
+func TestMemoryFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	store.SetDesired("cluster-a", []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-finalize-replay", Generation: 4,
+	}})
+	if err := store.MarkDesiredDeleting(
+		ctx, "cluster-a", "Workload", "train-finalize-replay", time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimReconcileLease(
+		ctx,
+		"cluster-a",
+		"Workload",
+		"train-finalize-replay",
+		"agent-a",
+		30,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim: claimed=%t err=%v", claimed, err)
+	}
+
+	if err := store.FinalizeDesiredOwned(
+		ctx, "cluster-a", "Workload", "train-finalize-replay", 4, "agent-a",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FinalizeDesiredOwned(
+		ctx, "cluster-a", "Workload", "train-finalize-replay", 4, "agent-a",
+	); err != nil {
+		t.Fatalf("same-generation finalize replay must succeed: %v", err)
+	}
+	if err := store.FinalizeDesiredOwned(
+		ctx, "cluster-a", "Workload", "train-finalize-replay", 3, "agent-a",
+	); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("older replay err=%v, want ErrStaleGeneration", err)
+	}
+	if err := store.FinalizeDesiredOwned(
+		ctx, "cluster-a", "Workload", "train-finalize-replay", 5, "agent-a",
+	); !errors.Is(err, ErrDesiredNotFound) {
+		t.Fatalf("future replay err=%v, want ErrDesiredNotFound", err)
+	}
+}
