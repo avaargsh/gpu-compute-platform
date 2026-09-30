@@ -386,4 +386,3 @@ func TestRunnerDeletionReplaysAfterFinalizeFailure(t *testing.T) {
 		t.Fatalf("failed finalize must release its lease before replay, releases=%d", control.releaseCalls)
 	}
 }
-
