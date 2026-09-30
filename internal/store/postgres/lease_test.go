@@ -176,6 +176,9 @@ WHERE cluster_id = 'cluster-a'
 	if len(observed.EvidenceRefs) != 1 || observed.EvidenceRefs[0] != "evidence://agent-b" {
 		t.Fatalf("stale writer changed evidence: %#v", observed.EvidenceRefs)
 	}
+	if observed.LeaseOwner != "agent-b" {
+		t.Fatalf("persisted observation owner=%q, want agent-b", observed.LeaseOwner)
+	}
 
 	if err := store.MarkDesiredDeleting(
 		ctx, "cluster-a", "Workload", "train-fenced", time.Now(),
