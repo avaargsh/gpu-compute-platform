@@ -21,6 +21,9 @@ var ErrPlacementSourceGenerationMismatch = errors.New("placement migration sourc
 var ErrPlacementTargetGenerationMismatch = errors.New("placement migration target generation changed")
 var ErrDesiredNotFound = errors.New("desired resource not found")
 var ErrDesiredNotDeleting = errors.New("desired resource is not deleting")
+var ErrComputePoolNotFound = errors.New("compute pool desired state not found")
+var ErrComputePoolDeleting = errors.New("compute pool is deleting")
+var ErrAcceleratorBindingNotFound = errors.New("accelerator class is not bound by compute pool")
 var ErrLeaseLost = errors.New("reconcile lease ownership lost")
 
 const ProviderCleanupFinalizer = "gpu-compute-platform.io/provider-cleanup"
@@ -33,6 +36,7 @@ type Store interface {
 	LocateDesired(context.Context, string, domain.ID) (domain.ID, agent.DesiredResource, bool, error)
 	GetObservation(context.Context, domain.ID, string, domain.ID) (agent.Observation, bool, error)
 	UpsertDesired(context.Context, domain.ID, agent.DesiredResource) error
+	CreateWorkloadDesired(context.Context, domain.ID, domain.ID, string, agent.DesiredResource) error
 	MarkDesiredDeleting(context.Context, domain.ID, string, domain.ID, time.Time) error
 	FinalizeDesired(context.Context, domain.ID, string, domain.ID, int64) error
 	FinalizeDesiredOwned(context.Context, domain.ID, string, domain.ID, int64, string) error
