@@ -140,7 +140,7 @@ after_uid="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.m
 before="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o json)"
 put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"h100-80g\",\"quota\":1}}}"
 sleep 3
-after="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o json)
+after="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o json)"
 BEFORE="$before" AFTER="$after" python - <<'PY'
 import json, os
 before=json.loads(os.environ["BEFORE"])
