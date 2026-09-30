@@ -11,6 +11,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
@@ -237,16 +238,15 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	}
 }
 
-
 func TestPostgresLeaseClaimSerializesWithDesiredDeletion(t *testing.T) {
 	db := openContractDB(t)
 	store := New(db)
 	ctx := context.Background()
-	clusterID := "cluster-a"
-	resourceID := "claim-delete-race"
+	clusterID := domain.ID("cluster-a")
+	resourceID := domain.ID("claim-delete-race")
 
 	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
-		Kind: "Workload", ID: agent.ID(resourceID), Generation: 1, Spec: map[string]any{},
+		Kind: "Workload", ID: resourceID, Generation: 1, Spec: map[string]any{},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ FOR UPDATE
 			context.Background(),
 			"cluster-a",
 			"Workload",
-			agent.ID(resourceID),
+			resourceID,
 			"worker-a",
 			120,
 		)
