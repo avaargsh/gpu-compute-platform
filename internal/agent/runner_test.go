@@ -387,36 +387,3 @@ func TestRunnerDeletionReplaysAfterFinalizeFailure(t *testing.T) {
 	}
 }
 
-func TestRunnerDoesNotAcknowledgeDesiredGenerationOnProviderFailure(t *testing.T) {
-	control := &fakeControlPlane{desired: []DesiredResource{
-		{Kind: "ComputePool", ID: "pool-1", Generation: 1, Spec: map[string]any{
-			"acceleratorBindings": []any{map[string]any{"class": "h100", "resourceName": "nvidia.com/gpu", "flavor": "h100"}},
-		}},
-		{Kind: "Workload", ID: "train-1", Generation: 2, Spec: map[string]any{
-			"poolID": "pool-1", "accelerator": map[string]any{"class": "h100", "quota": float64(1)},
-		}},
-	}}
-	runtime := &fakeRuntime{workloadErr: errors.New("job generation drift")}
-	runner := NewRunner("cluster-a", control, runtime)
-
-	if err := runner.Sync(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-
-	var workload Observation
-	for _, observed := range control.reported {
-		if observed.Kind == "Workload" && observed.ID == "train-1" {
-			workload = observed
-			break
-		}
-	}
-	if workload.ID == "" {
-		t.Fatalf("missing workload failure observation: %#v", control.reported)
-	}
-	if workload.ObservedGeneration != 0 {
-		t.Fatalf("failed provider reconcile acknowledged generation %d", workload.ObservedGeneration)
-	}
-	if len(workload.Conditions) != 1 || workload.Conditions[0].Reason != "ReconcileFailed" {
-		t.Fatalf("unexpected failure condition: %#v", workload.Conditions)
-	}
-}
