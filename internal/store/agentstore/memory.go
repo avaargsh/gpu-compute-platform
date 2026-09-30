@@ -408,7 +408,6 @@ func containsFinalizer(finalizers []string, target string) bool {
 	return false
 }
 
-
 func desiredSpecEqual(left, right map[string]any) (bool, error) {
 	leftJSON, err := json.Marshal(left)
 	if err != nil {
