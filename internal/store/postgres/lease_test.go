@@ -205,7 +205,6 @@ WHERE cluster_id = 'cluster-a'
 	}
 }
 
-
 func TestPostgresLeaseCannotPreclaimMissingDesiredIdentity(t *testing.T) {
 	db := openContractDB(t)
 	store := New(db)
