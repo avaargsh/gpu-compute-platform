@@ -99,6 +99,7 @@ Release evidence is not proof that a resource still exists. It is an audit point
 7. ComputePool cleanup waits until dependent Workloads have finalized.
 8. Shared pool resources such as ResourceFlavor are not deleted by a workload release.
 9. Provider-created Job and ResourceClaim objects carry the desired generation. An existing object from another generation fails closed instead of being reported as converged.
-10. v0.1 does not hot-replace immutable Jobs. A generation-changing workload update requires an explicit release/delete and recreate lifecycle.
+10. `ObservedGeneration` records the desired generation the agent processed, including failed reconciliation; convergence is expressed by conditions. A stale provider object therefore reports `Ready=False / ReconcileFailed` for the current generation rather than success.
+11. v0.1 does not hot-replace immutable Jobs. A generation-changing workload update requires an explicit release/delete and recreate lifecycle.
 
 These invariants define the v0.1 workload lifecycle boundary. Future DRA/HAMi/provider integrations must fit this contract rather than add a parallel lifecycle model.
