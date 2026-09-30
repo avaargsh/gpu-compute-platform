@@ -106,6 +106,42 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		"command":     in.Spec.Command,
 		"accelerator": in.Spec.Accelerator,
 	}
+
+	existingClusterID, existing, found, err := a.store.LocateDesired(r.Context(), "Workload", in.Metadata.ID)
+	if err != nil {
+		if errors.Is(err, agentstore.ErrIdentityConflict) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if found {
+		if existing.DeletionTimestamp != nil {
+			http.Error(w, "workload is deleting; wait for finalization before recreate", http.StatusConflict)
+			return
+		}
+		if in.Metadata.Generation < existing.Generation {
+			http.Error(w, agentstore.ErrStaleGeneration.Error(), http.StatusConflict)
+			return
+		}
+		if existingClusterID != poolPlacement.ClusterID || in.Metadata.Generation != existing.Generation {
+			http.Error(w, "active workload is immutable; delete and recreate with a higher generation", http.StatusConflict)
+			return
+		}
+		equal, err := desiredSpecEqual(existing.Spec, spec)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !equal {
+			http.Error(w, "active workload is immutable; delete and recreate with a higher generation", http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	if err := a.store.UpsertDesired(r.Context(), poolPlacement.ClusterID, agent.DesiredResource{
 		Kind: "Workload", ID: in.Metadata.ID, Generation: in.Metadata.Generation, Spec: spec,
 	}); err != nil {
@@ -117,6 +153,18 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func desiredSpecEqual(a, b map[string]any) (bool, error) {
+	left, err := json.Marshal(a)
+	if err != nil {
+		return false, err
+	}
+	right, err := json.Marshal(b)
+	if err != nil {
+		return false, err
+	}
+	return string(left) == string(right), nil
 }
 
 type workloadView struct {
