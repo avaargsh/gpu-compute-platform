@@ -378,7 +378,6 @@ func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
 	}
 }
 
-
 func TestMemoryLeaseTakeoverFencesStaleWrites(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemory()
