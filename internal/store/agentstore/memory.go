@@ -131,7 +131,7 @@ func (m *Memory) CreateWorkloadDesired(
 				return ErrIdentityConflict
 			}
 			if existing.DeletionTimestamp != nil {
-				return ErrDesiredNotDeleting
+				return ErrDesiredDeleting
 			}
 			if existing.Generation != in.Generation {
 				return ErrStaleGeneration
@@ -189,6 +189,9 @@ func (m *Memory) upsertDesiredLocked(
 	items := m.desired[clusterID]
 	for i := range items {
 		if items[i].Kind == in.Kind && items[i].ID == in.ID {
+			if items[i].DeletionTimestamp != nil {
+				return ErrDesiredDeleting
+			}
 			if in.Generation < items[i].Generation {
 				return ErrStaleGeneration
 			}
@@ -200,10 +203,6 @@ func (m *Memory) upsertDesiredLocked(
 				if !equal {
 					return ErrStaleGeneration
 				}
-			}
-			if items[i].DeletionTimestamp != nil {
-				in.DeletionTimestamp = items[i].DeletionTimestamp
-				in.Finalizers = append([]string(nil), items[i].Finalizers...)
 			}
 			items[i] = in
 			m.desired[clusterID] = items
