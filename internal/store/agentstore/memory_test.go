@@ -682,7 +682,6 @@ func TestMemoryFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
 	}
 }
 
-
 func TestMemoryUpsertRejectsHigherGenerationWhileDeleting(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemory()
