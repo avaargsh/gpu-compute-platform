@@ -286,7 +286,6 @@ func TestPostgresReportCannotPreseedFutureRecreate(t *testing.T) {
 	}
 }
 
-
 func TestPostgresCreateWorkloadDesiredRejectsConcurrentPoolDelete(t *testing.T) {
 	db := openContractDB(t)
 	store := New(db)
@@ -296,8 +295,8 @@ func TestPostgresCreateWorkloadDesiredRejectsConcurrentPoolDelete(t *testing.T) 
 	workloadID := domain.ID("train-parent-race")
 
 	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
-		Kind: "ComputePool",
-		ID:   poolID,
+		Kind:       "ComputePool",
+		ID:         poolID,
 		Generation: 1,
 		Spec: map[string]any{
 			"acceleratorBindings": []domain.AcceleratorBinding{{
@@ -369,8 +368,8 @@ func TestPostgresCreateWorkloadDesiredPreservesLostAckReplay(t *testing.T) {
 	}
 
 	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
-		Kind: "ComputePool",
-		ID:   poolID,
+		Kind:       "ComputePool",
+		ID:         poolID,
 		Generation: 1,
 		Spec: map[string]any{
 			"acceleratorBindings": []domain.AcceleratorBinding{{
