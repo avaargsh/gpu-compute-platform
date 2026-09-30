@@ -377,3 +377,93 @@ func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
 		t.Fatalf("newer generation must be allowed to recreate resource: %v", err)
 	}
 }
+
+
+func TestMemoryLeaseTakeoverFencesStaleWrites(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	store.now = func() time.Time { return now }
+
+	store.SetDesired("cluster-a", []agent.DesiredResource{{
+		Kind:       "Workload",
+		ID:         "train-fenced",
+		Generation: 7,
+		Spec:       map[string]any{"image": "example/train:v7"},
+	}})
+
+	claimed, err := store.ClaimReconcileLease(
+		ctx, "cluster-a", "Workload", "train-fenced", "agent-a", 10,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("agent-a claim: claimed=%t err=%v", claimed, err)
+	}
+
+	if err := store.Report(ctx, "cluster-a", []agent.Observation{{
+		Kind:               "Workload",
+		ID:                 "train-fenced",
+		ObservedGeneration: 7,
+		LeaseOwner:         "agent-a",
+		EvidenceRefs:       []string{"evidence://agent-a"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	now = now.Add(11 * time.Second)
+	claimed, err = store.ClaimReconcileLease(
+		ctx, "cluster-a", "Workload", "train-fenced", "agent-b", 30,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("agent-b takeover: claimed=%t err=%v", claimed, err)
+	}
+
+	err = store.Report(ctx, "cluster-a", []agent.Observation{{
+		Kind:               "Workload",
+		ID:                 "train-fenced",
+		ObservedGeneration: 7,
+		LeaseOwner:         "agent-a",
+		EvidenceRefs:       []string{"evidence://stale-agent-a"},
+	}})
+	if !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("stale report err=%v, want ErrLeaseLost", err)
+	}
+
+	if err := store.Report(ctx, "cluster-a", []agent.Observation{{
+		Kind:               "Workload",
+		ID:                 "train-fenced",
+		ObservedGeneration: 7,
+		LeaseOwner:         "agent-b",
+		EvidenceRefs:       []string{"evidence://agent-b"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	observed, found, err := store.GetObservation(
+		ctx, "cluster-a", "Workload", "train-fenced",
+	)
+	if err != nil || !found {
+		t.Fatalf("get observation: found=%t err=%v", found, err)
+	}
+	if len(observed.EvidenceRefs) != 1 || observed.EvidenceRefs[0] != "evidence://agent-b" {
+		t.Fatalf("stale writer changed evidence: %#v", observed.EvidenceRefs)
+	}
+
+	if err := store.MarkDesiredDeleting(
+		ctx, "cluster-a", "Workload", "train-fenced", now,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	err = store.FinalizeDesiredOwned(
+		ctx, "cluster-a", "Workload", "train-fenced", 7, "agent-a",
+	)
+	if !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("stale finalize err=%v, want ErrLeaseLost", err)
+	}
+
+	if err := store.FinalizeDesiredOwned(
+		ctx, "cluster-a", "Workload", "train-fenced", 7, "agent-b",
+	); err != nil {
+		t.Fatalf("takeover owner finalize: %v", err)
+	}
+}
