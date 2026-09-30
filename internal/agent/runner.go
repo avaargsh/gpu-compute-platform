@@ -35,13 +35,25 @@ type Runner struct {
 }
 
 func NewRunner(clusterID domain.ID, control ControlPlane, runtime Runtime) *Runner {
+	return NewRunnerWithLeaseOwner(clusterID, control, runtime, "")
+}
+
+func NewRunnerWithLeaseOwner(
+	clusterID domain.ID,
+	control ControlPlane,
+	runtime Runtime,
+	leaseOwner string,
+) *Runner {
+	if leaseOwner == "" {
+		leaseOwner = newLeaseOwner()
+	}
 	return &Runner{
 		clusterID:  clusterID,
 		control:    control,
 		runtime:    runtime,
 		now:        time.Now,
 		retries:    make(map[string]retryState),
-		leaseOwner: newLeaseOwner(),
+		leaseOwner: leaseOwner,
 	}
 }
 
