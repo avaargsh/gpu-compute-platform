@@ -54,6 +54,7 @@ The current CPU-only acceptance environment uses Run:ai Fake GPU Operator with a
 - The cluster agent owns provider reconciliation and downstream observation.
 - Desired and observed state are generation-aware.
 - Reconcile side effects require a remote lease.
+- Observation and finalization writes are fenced by the current unexpired reconcile-lease owner; an old Agent cannot commit after ownership moves.
 - Deletion retains Desired state until provider cleanup is observed complete.
 - Finalization writes a generation tombstone and removes observation/lease state atomically in PostgreSQL.
 - Shared cluster-scoped resources such as Kueue ResourceFlavor are not garbage-collected by a single ComputePool without explicit ownership/reference tracking.
