@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
@@ -159,5 +160,72 @@ func TestBindingAPIRejectsStaleGenerationWithoutRollback(t *testing.T) {
 	}
 	if placement.ClusterID != "cluster-a" || placement.Namespace != "project-v8" {
 		t.Fatalf("stale binding rolled placement back: %#v", placement)
+	}
+}
+
+
+func TestResourceAPIRequiresDeleteRecreateForWorkloadChanges(t *testing.T) {
+	store := agentstore.NewMemory()
+	server := httptest.NewServer(boundRouter(store, "cluster-a", "cluster-a"))
+	defer server.Close()
+
+	put := func(body string) int {
+		req, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/workloads/train-1", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	generationOne := `{"metadata":{"id":"train-1","generation":1},"projectId":"project-1","poolId":"pool-h100","spec":{"image":"example/v1","command":["run"],"accelerator":{"class":"h100-80g","quota":1}}}`
+	if got := put(generationOne); got != http.StatusNoContent {
+		t.Fatalf("initial create status=%d", got)
+	}
+	if got := put(generationOne); got != http.StatusNoContent {
+		t.Fatalf("identical replay status=%d, want 204", got)
+	}
+
+	sameGenerationMutation := `{"metadata":{"id":"train-1","generation":1},"projectId":"project-1","poolId":"pool-h100","spec":{"image":"example/v2","command":["run"],"accelerator":{"class":"h100-80g","quota":1}}}`
+	if got := put(sameGenerationMutation); got != http.StatusConflict {
+		t.Fatalf("same-generation mutation status=%d, want 409", got)
+	}
+
+	nextGeneration := `{"metadata":{"id":"train-1","generation":2},"projectId":"project-1","poolId":"pool-h100","spec":{"image":"example/v2","command":["run"],"accelerator":{"class":"h100-80g","quota":1}}}`
+	if got := put(nextGeneration); got != http.StatusConflict {
+		t.Fatalf("active generation replacement status=%d, want 409", got)
+	}
+
+	desired, found, err := store.GetDesired(context.Background(), "cluster-a", "Workload", "train-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || desired.Generation != 1 || desired.Spec["image"] != "example/v1" {
+		t.Fatalf("active desired state drifted: %#v", desired)
+	}
+
+	if err := store.MarkDesiredDeleting(context.Background(), "cluster-a", "Workload", "train-1", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if got := put(nextGeneration); got != http.StatusConflict {
+		t.Fatalf("update during deletion status=%d, want 409", got)
+	}
+	if err := store.FinalizeDesired(context.Background(), "cluster-a", "Workload", "train-1", 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := put(nextGeneration); got != http.StatusNoContent {
+		t.Fatalf("recreate after finalization status=%d, want 204", got)
+	}
+	desired, found, err = store.GetDesired(context.Background(), "cluster-a", "Workload", "train-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || desired.Generation != 2 || desired.Spec["image"] != "example/v2" {
+		t.Fatalf("recreated desired state=%#v", desired)
 	}
 }
