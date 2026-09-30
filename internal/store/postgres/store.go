@@ -187,39 +187,46 @@ func (s *Store) UpsertDesired(ctx context.Context, clusterID domain.ID, in agent
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
 	var tombstoneGeneration int64
-	err := s.db.QueryRowContext(ctx, `
+	tombstoneErr := tx.QueryRowContext(ctx, `
 SELECT generation
 FROM deletion_tombstones
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
 `, clusterID, in.Kind, in.ID).Scan(&tombstoneGeneration)
-	if err != nil && err != sql.ErrNoRows {
-		return err
+	if tombstoneErr != nil && tombstoneErr != sql.ErrNoRows {
+		return tombstoneErr
 	}
-	if err == nil && in.Generation <= tombstoneGeneration {
+	if tombstoneErr == nil && in.Generation <= tombstoneGeneration {
 		return agentstore.ErrStaleGeneration
-	}
-	if err == nil {
-		if _, err := s.db.ExecContext(ctx, `
-DELETE FROM deletion_tombstones
-WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
-`, clusterID, in.Kind, in.ID); err != nil {
-			return err
-		}
 	}
 
 	spec, err := json.Marshal(in.Spec)
 	if err != nil {
 		return fmt.Errorf("marshal desired spec: %w", err)
 	}
-	result, err := s.db.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 INSERT INTO desired_resources (cluster_id, kind, resource_id, generation, spec)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
     generation = EXCLUDED.generation,
     spec = EXCLUDED.spec,
-    updated_at = now()
-WHERE desired_resources.generation <= EXCLUDED.generation
+    updated_at = CASE
+        WHEN desired_resources.generation < EXCLUDED.generation THEN now()
+        ELSE desired_resources.updated_at
+    END
+WHERE desired_resources.generation < EXCLUDED.generation
+   OR (
+       desired_resources.generation = EXCLUDED.generation
+       AND desired_resources.spec = EXCLUDED.spec
+   )
 `, clusterID, in.Kind, in.ID, in.Generation, spec)
 	if err != nil {
 		return err
@@ -231,7 +238,17 @@ WHERE desired_resources.generation <= EXCLUDED.generation
 	if affected == 0 {
 		return agentstore.ErrStaleGeneration
 	}
-	return nil
+
+	if tombstoneErr == nil {
+		if _, err := tx.ExecContext(ctx, `
+DELETE FROM deletion_tombstones
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, in.Kind, in.ID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (s *Store) MarkDesiredDeleting(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, at time.Time) error {
