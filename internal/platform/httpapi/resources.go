@@ -98,6 +98,46 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "project and pool bindings target different clusters", http.StatusConflict)
 		return
 	}
+
+	poolDesired, found, err := a.store.GetDesired(
+		r.Context(),
+		poolPlacement.ClusterID,
+		"ComputePool",
+		in.PoolID,
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "compute pool desired state not found", http.StatusConflict)
+		return
+	}
+	if poolDesired.DeletionTimestamp != nil {
+		http.Error(w, "compute pool is deleting", http.StatusConflict)
+		return
+	}
+	pool, err := projectComputePool(poolDesired)
+	if err != nil {
+		http.Error(w, "invalid compute pool desired state", http.StatusConflict)
+		return
+	}
+	bindingFound := false
+	for _, binding := range pool.Spec.AcceleratorBindings {
+		if binding.Class == in.Spec.Accelerator.Class {
+			bindingFound = true
+			break
+		}
+	}
+	if !bindingFound {
+		http.Error(
+			w,
+			"accelerator class is not bound by compute pool",
+			http.StatusConflict,
+		)
+		return
+	}
+
 	spec := map[string]any{
 		"projectID":   in.ProjectID,
 		"poolID":      in.PoolID,
