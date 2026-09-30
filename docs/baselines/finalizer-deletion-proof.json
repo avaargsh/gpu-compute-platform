@@ -1,0 +1,115 @@
+{
+  "verifiedCommit": "b3d3b0a119bb2c099c3803f0f137a595cda14c01",
+  "event": "push",
+  "workflowUrl": "https://github.com/avaargsh/gpu-compute-platform/actions/runs/36686628367",
+  "conclusion": "success",
+  "finalizedStates": [
+    {
+      "conditions": [
+        {
+          "lastTransitionTime": "2026-09-30T08:00:52.239969085Z",
+          "message": "provider resources are gone",
+          "reason": "Deleted",
+          "status": "False",
+          "type": "Ready"
+        }
+      ],
+      "deletionTombstone": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-09-30T08:00:52.239969085Z",
+            "message": "provider resources are gone",
+            "reason": "Deleted",
+            "status": "False",
+            "type": "Ready"
+          }
+        ],
+        "evidenceRefs": [
+          "k8s://kind-golden/namespaces/golden-go/jobs/job-train-invalid"
+        ],
+        "finalizedAt": "2026-09-30T08:00:52.240343378Z",
+        "generation": 1
+      },
+      "desiredGeneration": 0,
+      "evidenceRefs": [
+        "k8s://kind-golden/namespaces/golden-go/jobs/job-train-invalid"
+      ],
+      "id": "train-invalid",
+      "kind": "Workload",
+      "observedGeneration": 0,
+      "syncState": "Finalized"
+    },
+    {
+      "conditions": [
+        {
+          "lastTransitionTime": "2026-09-30T08:01:22.221240495Z",
+          "message": "provider resources are gone",
+          "reason": "Deleted",
+          "status": "False",
+          "type": "Ready"
+        }
+      ],
+      "deletionTombstone": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-09-30T08:01:22.221240495Z",
+            "message": "provider resources are gone",
+            "reason": "Deleted",
+            "status": "False",
+            "type": "Ready"
+          }
+        ],
+        "evidenceRefs": [
+          "k8s://kind-golden/namespaces/golden-go/jobs/job-train-golden"
+        ],
+        "finalizedAt": "2026-09-30T08:01:22.221604068Z",
+        "generation": 1
+      },
+      "desiredGeneration": 0,
+      "evidenceRefs": [
+        "k8s://kind-golden/namespaces/golden-go/jobs/job-train-golden"
+      ],
+      "id": "train-golden",
+      "kind": "Workload",
+      "observedGeneration": 0,
+      "syncState": "Finalized"
+    },
+    {
+      "conditions": [
+        {
+          "lastTransitionTime": "2026-09-30T08:01:52.193732758Z",
+          "message": "provider resources are gone",
+          "reason": "Deleted",
+          "status": "False",
+          "type": "Ready"
+        }
+      ],
+      "deletionTombstone": {
+        "conditions": [
+          {
+            "lastTransitionTime": "2026-09-30T08:01:52.193732758Z",
+            "message": "provider resources are gone",
+            "reason": "Deleted",
+            "status": "False",
+            "type": "Ready"
+          }
+        ],
+        "evidenceRefs": [
+          "k8s://kind-golden/clusterqueue/cq-pool-h100",
+          "k8s://kind-golden/namespaces/golden-go/localqueue/lq-pool-h100"
+        ],
+        "finalizedAt": "2026-09-30T08:01:52.194120737Z",
+        "generation": 1
+      },
+      "desiredGeneration": 0,
+      "evidenceRefs": [
+        "k8s://kind-golden/clusterqueue/cq-pool-h100",
+        "k8s://kind-golden/namespaces/golden-go/localqueue/lq-pool-h100"
+      ],
+      "id": "pool-h100",
+      "kind": "ComputePool",
+      "observedGeneration": 0,
+      "syncState": "Finalized"
+    }
+  ]
+}

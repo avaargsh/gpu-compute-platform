@@ -55,7 +55,7 @@ The current CPU-only acceptance environment uses Run:ai Fake GPU Operator with a
 - Desired and observed state are generation-aware.
 - Reconcile side effects require a remote lease.
 - Deletion retains Desired state until provider cleanup is observed complete.
-- Finalization writes a generation tombstone and removes observation/lease state atomically in PostgreSQL.
+- Finalization retains final generation, conditions, evidence and time in a tombstone, then removes observation/lease state atomically in PostgreSQL.
 - Shared cluster-scoped resources such as Kueue ResourceFlavor are not garbage-collected by a single ComputePool without explicit ownership/reference tracking.
 - DRA, HAMi, MIG, multi-provider expansion, and advanced placement are intentionally deferred until the current Golden Path is frozen.
 
@@ -78,7 +78,7 @@ make e2e-golden
 
 This creates a kind cluster, installs Kueue and Fake GPU Operator, configures a stable H100 profile, and validates Control Plane -> Agent -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete.
 
-See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract.
+See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract, [Finalizer/Deletion baseline](docs/baselines/finalizer-deletion.md) for exact push CI evidence, and [CONTRIBUTING.md](CONTRIBUTING.md) to contribute.
 
 ## License
 
