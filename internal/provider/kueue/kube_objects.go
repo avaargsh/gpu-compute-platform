@@ -2,6 +2,7 @@ package kueue
 
 import (
 	"fmt"
+	"strconv"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -92,7 +93,9 @@ func jobObject(in Job) (*batchv1.Job, error) {
 		}
 		jobLabels := cloneStringMap(in.Labels)
 		jobLabels["ai.compute/workload"] = in.Name
-		return &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: in.Name, Namespace: in.Namespace, Annotations: cloneStringMap(in.Annotations), Labels: jobLabels}, Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"ai.compute/workload": in.Name}}, Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, ResourceClaims: []corev1.PodResourceClaim{{Name: "accelerator", ResourceClaimName: &in.DRA.ClaimName}}, Containers: []corev1.Container{{Name: "workload", Image: in.Image, Command: append([]string(nil), in.Command...)}}}}}}, nil
+		jobAnnotations := cloneStringMap(in.Annotations)
+		jobAnnotations[generationAnnotation] = strconv.FormatInt(in.Generation, 10)
+		return &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: in.Name, Namespace: in.Namespace, Annotations: jobAnnotations, Labels: jobLabels}, Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"ai.compute/workload": in.Name}}, Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, ResourceClaims: []corev1.PodResourceClaim{{Name: "accelerator", ResourceClaimName: &in.DRA.ClaimName}}, Containers: []corev1.Container{{Name: "workload", Image: in.Image, Command: append([]string(nil), in.Command...)}}}}}}, nil
 	}
 	if len(in.Resources) != 1 {
 		return nil, fmt.Errorf("exactly one positive accelerator resource is required")
@@ -107,6 +110,8 @@ func jobObject(in Job) (*batchv1.Job, error) {
 		return nil, fmt.Errorf("exactly one positive accelerator resource is required")
 	}
 	qty := *resource.NewQuantity(count, resource.DecimalSI)
+	jobAnnotations := cloneStringMap(in.Annotations)
+	jobAnnotations[generationAnnotation] = strconv.FormatInt(in.Generation, 10)
 	jobLabels := cloneStringMap(in.Labels)
 	jobLabels["ai.compute/workload"] = in.Name
 	podLabels := map[string]string{"ai.compute/workload": in.Name}
@@ -115,7 +120,7 @@ func jobObject(in Job) (*batchv1.Job, error) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        in.Name,
 			Namespace:   in.Namespace,
-			Annotations: cloneStringMap(in.Annotations),
+			Annotations: jobAnnotations,
 			Labels:      jobLabels,
 		},
 		Spec: batchv1.JobSpec{
@@ -149,7 +154,28 @@ func resourceClaimObject(in Job) (*resourcev1.ResourceClaim, error) {
 		return nil, fmt.Errorf("valid DRA request is required")
 	}
 	count := in.DRA.Count
-	return &resourcev1.ResourceClaim{TypeMeta: metav1.TypeMeta{APIVersion: "resource.k8s.io/v1", Kind: "ResourceClaim"}, ObjectMeta: metav1.ObjectMeta{Name: in.DRA.ClaimName, Namespace: in.Namespace}, Spec: resourcev1.ResourceClaimSpec{Devices: resourcev1.DeviceClaim{Requests: []resourcev1.DeviceRequest{{Name: "accelerator", Exactly: &resourcev1.ExactDeviceRequest{DeviceClassName: in.DRA.DeviceClassName, AllocationMode: resourcev1.DeviceAllocationModeExactCount, Count: count}}}}}}, nil
+	annotations := cloneStringMap(in.Annotations)
+	annotations[generationAnnotation] = strconv.FormatInt(in.Generation, 10)
+	return &resourcev1.ResourceClaim{
+		TypeMeta: metav1.TypeMeta{APIVersion: "resource.k8s.io/v1", Kind: "ResourceClaim"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        in.DRA.ClaimName,
+			Namespace:   in.Namespace,
+			Annotations: annotations,
+		},
+		Spec: resourcev1.ResourceClaimSpec{
+			Devices: resourcev1.DeviceClaim{
+				Requests: []resourcev1.DeviceRequest{{
+					Name: "accelerator",
+					Exactly: &resourcev1.ExactDeviceRequest{
+						DeviceClassName: in.DRA.DeviceClassName,
+						AllocationMode:  resourcev1.DeviceAllocationModeExactCount,
+						Count:           count,
+					},
+				}},
+			},
+		},
+	}, nil
 }
 
 func stringMapAny(in map[string]string) map[string]any {

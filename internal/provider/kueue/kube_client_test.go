@@ -3,6 +3,7 @@ package kueue
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -349,5 +350,55 @@ func TestApplyExistingJobPreservesControllerStatus(t *testing.T) {
 	}
 	if got.Status.Succeeded != 1 {
 		t.Fatalf("reconcile erased controller-owned job status: %#v", got.Status)
+	}
+}
+
+func TestApplyExistingJobRejectsStaleGeneration(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	client := NewKubeClient(coreClient, nil)
+
+	first := Job{
+		Generation: 1,
+		Name:       "job-generation-fence",
+		Namespace:  "project-1",
+		Image:      "busybox:1.36",
+		Resources:  map[string]int64{"vendor.example/gpu": 1},
+	}
+	if err := client.ApplyJob(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+
+	next := first
+	next.Generation = 2
+	if err := client.ApplyJob(ctx, next); err == nil || !strings.Contains(err.Error(), "generation drift") {
+		t.Fatalf("expected stale job generation to fail closed, got %v", err)
+	}
+}
+
+func TestApplyExistingResourceClaimRejectsStaleGeneration(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	client := NewKubeClient(coreClient, nil)
+
+	first := Job{
+		Generation: 1,
+		Name:       "job-dra-fence",
+		Namespace:  "project-1",
+		Image:      "busybox:1.36",
+		DRA: &DRARequest{
+			ClaimName:       "accelerator-dra-fence",
+			DeviceClassName: "gpu.nvidia.com",
+			Count:           1,
+		},
+	}
+	if err := client.ApplyResourceClaim(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+
+	next := first
+	next.Generation = 2
+	if err := client.ApplyResourceClaim(ctx, next); err == nil || !strings.Contains(err.Error(), "generation drift") {
+		t.Fatalf("expected stale ResourceClaim generation to fail closed, got %v", err)
 	}
 }
