@@ -109,6 +109,75 @@ func (m *Memory) GetObservation(_ context.Context, clusterID domain.ID, kind str
 func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.DesiredResource) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.upsertDesiredLocked(clusterID, in)
+}
+
+func (m *Memory) CreateWorkloadDesired(
+	_ context.Context,
+	clusterID domain.ID,
+	poolID domain.ID,
+	acceleratorClass string,
+	in agent.DesiredResource,
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for candidateClusterID, items := range m.desired {
+		for _, existing := range items {
+			if existing.Kind != "Workload" || existing.ID != in.ID {
+				continue
+			}
+			if candidateClusterID != clusterID {
+				return ErrIdentityConflict
+			}
+			if existing.DeletionTimestamp != nil {
+				return ErrDesiredNotDeleting
+			}
+			if existing.Generation != in.Generation {
+				return ErrStaleGeneration
+			}
+			equal, err := desiredSpecEqual(existing.Spec, in.Spec)
+			if err != nil {
+				return err
+			}
+			if !equal {
+				return ErrStaleGeneration
+			}
+			return nil
+		}
+	}
+
+	var pool *agent.DesiredResource
+	items := m.desired[clusterID]
+	for i := range items {
+		if items[i].Kind == "ComputePool" && items[i].ID == poolID {
+			pool = &items[i]
+			break
+		}
+	}
+	if pool == nil {
+		return ErrComputePoolNotFound
+	}
+	if pool.DeletionTimestamp != nil {
+		return ErrComputePoolDeleting
+	}
+	bound, err := acceleratorBindingExists(
+		pool.Spec,
+		acceleratorClass,
+	)
+	if err != nil {
+		return err
+	}
+	if !bound {
+		return ErrAcceleratorBindingNotFound
+	}
+	return m.upsertDesiredLocked(clusterID, in)
+}
+
+func (m *Memory) upsertDesiredLocked(
+	clusterID domain.ID,
+	in agent.DesiredResource,
+) error {
 	key := string(clusterID) + "/" + in.Kind + "/" + string(in.ID)
 	consumeTombstone := false
 	if tombstoneGeneration, ok := m.tombstones[key]; ok {
@@ -431,4 +500,26 @@ func desiredSpecEqual(left, right map[string]any) (bool, error) {
 		return false, fmt.Errorf("marshal incoming desired spec: %w", err)
 	}
 	return bytes.Equal(leftJSON, rightJSON), nil
+}
+
+func acceleratorBindingExists(
+	spec map[string]any,
+	acceleratorClass string,
+) (bool, error) {
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		return false, fmt.Errorf("marshal compute pool desired spec: %w", err)
+	}
+	var projected struct {
+		AcceleratorBindings []domain.AcceleratorBinding `json:"acceleratorBindings"`
+	}
+	if err := json.Unmarshal(raw, &projected); err != nil {
+		return false, fmt.Errorf("decode compute pool desired spec: %w", err)
+	}
+	for _, binding := range projected.AcceleratorBindings {
+		if binding.Class == acceleratorClass {
+			return true, nil
+		}
+	}
+	return false, nil
 }

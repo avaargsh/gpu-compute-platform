@@ -319,3 +319,56 @@ func mustRequest(t *testing.T, method, url string, body []byte) *http.Request {
 	}
 	return req
 }
+
+func TestResourceAPIPreservesIdenticalReplayAfterPoolDeletionStarts(t *testing.T) {
+	store := agentstore.NewMemory()
+	server := httptest.NewServer(boundRouter(store, "cluster-a", "cluster-a"))
+	defer server.Close()
+
+	body := []byte(`{
+		"metadata":{"id":"train-replay","generation":1},
+		"projectId":"project-1",
+		"poolId":"pool-h100",
+		"spec":{"image":"example/train:v1","accelerator":{"class":"h100-80g","quota":1}}
+	}`)
+	put := func(resourceID string, payload []byte) int {
+		resp, err := server.Client().Do(mustRequest(
+			t,
+			http.MethodPut,
+			server.URL+"/api/v1/workloads/"+resourceID,
+			payload,
+		))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if got := put("train-replay", body); got != http.StatusNoContent {
+		t.Fatalf("initial create status=%d", got)
+	}
+	if err := store.MarkDesiredDeleting(
+		context.Background(),
+		"cluster-a",
+		"ComputePool",
+		"pool-h100",
+		time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := put("train-replay", body); got != http.StatusNoContent {
+		t.Fatalf("lost-ACK replay status=%d, want 204", got)
+	}
+
+	newBody := []byte(`{
+		"metadata":{"id":"train-new","generation":1},
+		"projectId":"project-1",
+		"poolId":"pool-h100",
+		"spec":{"image":"example/train:v1","accelerator":{"class":"h100-80g","quota":1}}
+	}`)
+	if got := put("train-new", newBody); got != http.StatusConflict {
+		t.Fatalf("new workload under deleting pool status=%d, want 409", got)
+	}
+}

@@ -99,45 +99,6 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	poolDesired, found, err := a.store.GetDesired(
-		r.Context(),
-		poolPlacement.ClusterID,
-		"ComputePool",
-		in.PoolID,
-	)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !found {
-		http.Error(w, "compute pool desired state not found", http.StatusConflict)
-		return
-	}
-	if poolDesired.DeletionTimestamp != nil {
-		http.Error(w, "compute pool is deleting", http.StatusConflict)
-		return
-	}
-	pool, err := projectComputePool(poolDesired)
-	if err != nil {
-		http.Error(w, "invalid compute pool desired state", http.StatusConflict)
-		return
-	}
-	bindingFound := false
-	for _, binding := range pool.Spec.AcceleratorBindings {
-		if binding.Class == in.Spec.Accelerator.Class {
-			bindingFound = true
-			break
-		}
-	}
-	if !bindingFound {
-		http.Error(
-			w,
-			"accelerator class is not bound by compute pool",
-			http.StatusConflict,
-		)
-		return
-	}
-
 	spec := map[string]any{
 		"projectID":   in.ProjectID,
 		"poolID":      in.PoolID,
@@ -147,45 +108,25 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		"accelerator": in.Spec.Accelerator,
 	}
 
-	existingClusterID, existing, found, err := a.store.LocateDesired(r.Context(), "Workload", in.Metadata.ID)
+	// The Store owns replay, identity and parent-lifecycle admission as one
+	// atomic operation. Do not preflight here: a lookup followed by a write would
+	// reopen TOCTOU races with concurrent finalization or cross-cluster create.
+	err = a.store.CreateWorkloadDesired(
+		r.Context(),
+		poolPlacement.ClusterID,
+		in.PoolID,
+		in.Spec.Accelerator.Class,
+		agent.DesiredResource{
+			Kind: "Workload", ID: in.Metadata.ID, Generation: in.Metadata.Generation, Spec: spec,
+		},
+	)
 	if err != nil {
-		if errors.Is(err, agentstore.ErrIdentityConflict) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if found {
-		if existing.DeletionTimestamp != nil {
-			http.Error(w, "workload is deleting; wait for finalization before recreate", http.StatusConflict)
-			return
-		}
-		if in.Metadata.Generation < existing.Generation {
-			http.Error(w, agentstore.ErrStaleGeneration.Error(), http.StatusConflict)
-			return
-		}
-		if existingClusterID != poolPlacement.ClusterID || in.Metadata.Generation != existing.Generation {
-			http.Error(w, "active workload is immutable; delete and recreate with a higher generation", http.StatusConflict)
-			return
-		}
-		equal, err := desiredSpecEqual(existing.Spec, spec)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if !equal {
-			http.Error(w, "active workload is immutable; delete and recreate with a higher generation", http.StatusConflict)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	if err := a.store.UpsertDesired(r.Context(), poolPlacement.ClusterID, agent.DesiredResource{
-		Kind: "Workload", ID: in.Metadata.ID, Generation: in.Metadata.Generation, Spec: spec,
-	}); err != nil {
-		if errors.Is(err, agentstore.ErrStaleGeneration) {
+		if errors.Is(err, agentstore.ErrStaleGeneration) ||
+			errors.Is(err, agentstore.ErrIdentityConflict) ||
+			errors.Is(err, agentstore.ErrDesiredNotDeleting) ||
+			errors.Is(err, agentstore.ErrComputePoolNotFound) ||
+			errors.Is(err, agentstore.ErrComputePoolDeleting) ||
+			errors.Is(err, agentstore.ErrAcceleratorBindingNotFound) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}

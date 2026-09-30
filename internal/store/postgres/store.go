@@ -183,7 +183,11 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	return item, true, nil
 }
 
-func (s *Store) UpsertDesired(ctx context.Context, clusterID domain.ID, in agent.DesiredResource) error {
+func (s *Store) UpsertDesired(
+	ctx context.Context,
+	clusterID domain.ID,
+	in agent.DesiredResource,
+) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
@@ -194,6 +198,125 @@ func (s *Store) UpsertDesired(ctx context.Context, clusterID domain.ID, in agent
 	}
 	defer tx.Rollback()
 
+	if err := s.upsertDesiredTx(ctx, tx, clusterID, in); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateWorkloadDesired(
+	ctx context.Context,
+	clusterID domain.ID,
+	poolID domain.ID,
+	acceleratorClass string,
+	in agent.DesiredResource,
+) error {
+	if s.db == nil {
+		return fmt.Errorf("postgres database is required")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Workload identity is globally canonical. Serialize competing creates even
+	// before a row exists so two clusters cannot race through LocateDesired.
+	if _, err := tx.ExecContext(
+		ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"Workload/"+string(in.ID),
+	); err != nil {
+		return err
+	}
+
+	incomingSpec, err := json.Marshal(in.Spec)
+	if err != nil {
+		return fmt.Errorf("marshal desired spec: %w", err)
+	}
+	var existingClusterID domain.ID
+	var existingGeneration int64
+	var existingSpecMatches bool
+	var existingDeletion sql.NullTime
+	existingErr := tx.QueryRowContext(ctx, `
+SELECT cluster_id, generation, spec = $2::jsonb, deletion_timestamp
+FROM desired_resources
+WHERE kind = 'Workload' AND resource_id = $1
+ORDER BY cluster_id
+LIMIT 1
+FOR UPDATE
+`, in.ID, incomingSpec).Scan(
+		&existingClusterID,
+		&existingGeneration,
+		&existingSpecMatches,
+		&existingDeletion,
+	)
+	if existingErr != nil && existingErr != sql.ErrNoRows {
+		return existingErr
+	}
+	if existingErr == nil {
+		if existingClusterID != clusterID {
+			return agentstore.ErrIdentityConflict
+		}
+		if existingDeletion.Valid {
+			return agentstore.ErrDesiredNotDeleting
+		}
+		if existingGeneration != in.Generation || !existingSpecMatches {
+			return agentstore.ErrStaleGeneration
+		}
+		// Lost-ACK/idempotent replay: do not re-check parent lifecycle. The
+		// original workload is already canonical and may be blocking pool delete.
+		return tx.Commit()
+	}
+
+	var poolSpec []byte
+	var deletionTimestamp sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+SELECT spec, deletion_timestamp
+FROM desired_resources
+WHERE cluster_id = $1 AND kind = 'ComputePool' AND resource_id = $2
+FOR UPDATE
+`, clusterID, poolID).Scan(&poolSpec, &deletionTimestamp)
+	if err == sql.ErrNoRows {
+		return agentstore.ErrComputePoolNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if deletionTimestamp.Valid {
+		return agentstore.ErrComputePoolDeleting
+	}
+
+	var projected struct {
+		AcceleratorBindings []domain.AcceleratorBinding `json:"acceleratorBindings"`
+	}
+	if err := json.Unmarshal(poolSpec, &projected); err != nil {
+		return fmt.Errorf("decode compute pool desired spec: %w", err)
+	}
+	bindingFound := false
+	for _, binding := range projected.AcceleratorBindings {
+		if binding.Class == acceleratorClass {
+			bindingFound = true
+			break
+		}
+	}
+	if !bindingFound {
+		return agentstore.ErrAcceleratorBindingNotFound
+	}
+
+	if err := s.upsertDesiredTx(ctx, tx, clusterID, in); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) upsertDesiredTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	clusterID domain.ID,
+	in agent.DesiredResource,
+) error {
 	var tombstoneGeneration int64
 	tombstoneErr := tx.QueryRowContext(ctx, `
 SELECT generation
@@ -247,8 +370,7 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 			return err
 		}
 	}
-
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) MarkDesiredDeleting(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, at time.Time) error {
