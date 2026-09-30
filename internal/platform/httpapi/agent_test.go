@@ -105,7 +105,6 @@ func TestAgentReportRejectsStaleLeaseOwner(t *testing.T) {
 	}
 }
 
-
 func TestAgentFinalizeDesiredTreatsCommittedReplayAsSuccess(t *testing.T) {
 	store := agentstore.NewMemory()
 	ctx := context.Background()
