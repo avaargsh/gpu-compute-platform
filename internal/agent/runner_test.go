@@ -74,6 +74,7 @@ type fakeRuntime struct {
 	workloadErr         error
 	workloadCalls       int
 	workloadDeleteCalls int
+	deletionPending     bool
 }
 
 func (f *fakeRuntime) ReconcilePool(_ context.Context, p provider.PoolProjection) (provider.PoolObservation, error) {
@@ -88,7 +89,7 @@ func (f *fakeRuntime) DeletePool(_ context.Context, _ provider.PoolProjection) (
 
 func (f *fakeRuntime) DeleteWorkload(_ context.Context, _ provider.WorkloadProjection) (provider.DeletionObservation, error) {
 	f.workloadDeleteCalls++
-	return provider.DeletionObservation{Gone: true, EvidenceRefs: []string{"job-delete-evidence"}}, nil
+	return provider.DeletionObservation{Gone: !f.deletionPending, EvidenceRefs: []string{"job-delete-evidence"}}, nil
 }
 
 func (f *fakeRuntime) ReconcileWorkload(_ context.Context, p provider.WorkloadProjection) (provider.WorkloadObservation, error) {

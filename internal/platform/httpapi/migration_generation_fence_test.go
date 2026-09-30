@@ -68,6 +68,7 @@ func TestRetireSourceRejectsWrongGenerationTombstone(t *testing.T) {
 	if err := resources.MarkDesiredDeleting(ctx, "cluster-a", "ComputePool", "pool-1", time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
+	recordGoneForTest(t, resources, "cluster-a", "ComputePool", "pool-1", 8)
 	if err := resources.FinalizeDesired(ctx, "cluster-a", "ComputePool", "pool-1", 8); err != nil {
 		t.Fatal(err)
 	}

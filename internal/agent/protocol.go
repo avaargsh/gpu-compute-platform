@@ -62,6 +62,13 @@ type Observation struct {
 	LeaseEpoch         int64              `json:"leaseEpoch,omitempty"`
 }
 
+type DeletionTombstone struct {
+	Generation   int64              `json:"generation"`
+	Conditions   []domain.Condition `json:"conditions"`
+	EvidenceRefs []string           `json:"evidenceRefs"`
+	FinalizedAt  time.Time          `json:"finalizedAt"`
+}
+
 type ControlPlane interface {
 	Register(context.Context, Registration) error
 	Heartbeat(context.Context, Heartbeat) error

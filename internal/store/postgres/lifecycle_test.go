@@ -26,7 +26,8 @@ func TestPostgresFinalizeDesiredAtomicallyCleansRuntimeState(t *testing.T) {
 	}
 	if err := store.Report(ctx, clusterID, []agent.Observation{{
 		Kind: "Workload", ID: resourceID, ObservedGeneration: generation,
-		Conditions: []domain.Condition{{Type: "Ready", Status: "False", Reason: "Deleting"}},
+		Conditions:   []domain.Condition{{Type: "Ready", Status: "False", Reason: "Deleted"}},
+		EvidenceRefs: []string{"provider://gone/train-finalize"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +63,10 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	if err != nil || !ok || finalizedGeneration != generation {
 		t.Fatalf("unexpected tombstone: generation=%d ok=%t err=%v", finalizedGeneration, ok, err)
 	}
+	tombstone, ok, err := store.GetDeletionTombstone(ctx, clusterID, "Workload", resourceID)
+	if err != nil || !ok || tombstone.Generation != generation || tombstone.FinalizedAt.IsZero() || len(tombstone.EvidenceRefs) != 1 || tombstone.EvidenceRefs[0] != "provider://gone/train-finalize" {
+		t.Fatalf("unexpected final evidence: %#v ok=%t err=%v", tombstone, ok, err)
+	}
 }
 
 func TestPostgresTombstoneFencesOldGenerationAndAllowsNewerRecreate(t *testing.T) {
@@ -80,6 +85,13 @@ func TestPostgresTombstoneFencesOldGenerationAndAllowsNewerRecreate(t *testing.T
 	if err := store.MarkDesiredDeleting(ctx, clusterID, "Workload", resourceID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.Report(ctx, clusterID, []agent.Observation{{
+		Kind: "Workload", ID: resourceID, ObservedGeneration: generation,
+		Conditions:   []domain.Condition{{Type: "Ready", Status: "False", Reason: "Deleted"}},
+		EvidenceRefs: []string{"provider://gone/train-recreate"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.FinalizeDesired(ctx, clusterID, "Workload", resourceID, generation); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +108,7 @@ func TestPostgresTombstoneFencesOldGenerationAndAllowsNewerRecreate(t *testing.T
 	}
 	if _, ok, err := store.FinalizedGeneration(ctx, clusterID, "Workload", resourceID); err != nil {
 		t.Fatal(err)
-	} else if ok {
-		t.Fatal("newer generation recreate must consume the old tombstone")
+	} else if !ok {
+		t.Fatal("newer generation recreate must retain the final evidence tombstone")
 	}
 }

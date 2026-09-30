@@ -54,6 +54,15 @@ func (r *Runner) Sync(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("pull desired resources: %w", err)
 	}
+	current := make(map[string]bool, len(desired))
+	for _, item := range desired {
+		current[item.Kind+"/"+string(item.ID)] = true
+	}
+	for key := range r.retries {
+		if !current[key] {
+			delete(r.retries, key)
+		}
+	}
 
 	bindings, err := indexAcceleratorBindings(desired)
 	if err != nil {
@@ -113,7 +122,6 @@ func (r *Runner) Sync(ctx context.Context) error {
 				continue
 			}
 
-			delete(r.retries, key)
 			finalObservation := Observation{
 				LeaseOwner: grant.Owner, LeaseEpoch: grant.Epoch,
 				Kind:               item.Kind,
@@ -136,6 +144,7 @@ func (r *Runner) Sync(ctx context.Context) error {
 				_ = r.control.ReleaseReconcileLease(ctx, lease)
 				return fmt.Errorf("finalize desired resource %s: %w", key, err)
 			}
+			delete(r.retries, key)
 			continue
 		}
 

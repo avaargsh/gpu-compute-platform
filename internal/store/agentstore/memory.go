@@ -23,7 +23,7 @@ type Memory struct {
 	desired       map[domain.ID][]agent.DesiredResource
 	observations  map[domain.ID][]agent.Observation
 	leases        map[string]memoryLease
-	tombstones    map[string]int64
+	tombstones    map[string]agent.DeletionTombstone
 	now           func() time.Time
 }
 
@@ -34,7 +34,7 @@ func NewMemory() *Memory {
 		desired:       make(map[domain.ID][]agent.DesiredResource),
 		observations:  make(map[domain.ID][]agent.Observation),
 		leases:        make(map[string]memoryLease),
-		tombstones:    make(map[string]int64),
+		tombstones:    make(map[string]agent.DeletionTombstone),
 		now:           time.Now,
 	}
 }
@@ -109,11 +109,10 @@ func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := string(clusterID) + "/" + in.Kind + "/" + string(in.ID)
-	if tombstoneGeneration, ok := m.tombstones[key]; ok {
-		if in.Generation <= tombstoneGeneration {
+	if tombstone, ok := m.tombstones[key]; ok {
+		if in.Generation <= tombstone.Generation {
 			return ErrStaleGeneration
 		}
-		delete(m.tombstones, key)
 	}
 	items := m.desired[clusterID]
 	for i := range items {
@@ -131,7 +130,22 @@ func (m *Memory) UpsertDesired(_ context.Context, clusterID domain.ID, in agent.
 		}
 	}
 	m.desired[clusterID] = append(items, in)
+	m.pruneObservation(clusterID, in)
 	return nil
+}
+
+// Report may arrive before desired state; publication must reconcile that case.
+// The caller holds mu, so creating desired and pruning stale evidence are atomic.
+func (m *Memory) pruneObservation(clusterID domain.ID, desired agent.DesiredResource) {
+	items := m.observations[clusterID]
+	out := items[:0]
+	for _, item := range items {
+		if item.Kind == desired.Kind && item.ID == desired.ID && item.ObservedGeneration != desired.Generation {
+			continue
+		}
+		out = append(out, item)
+	}
+	m.observations[clusterID] = out
 }
 
 func (m *Memory) MarkDesiredDeleting(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID, at time.Time) error {
@@ -174,8 +188,9 @@ func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind st
 		}
 	}
 	items := m.desired[clusterID]
-	out := items[:0]
+	out := make([]agent.DesiredResource, 0, len(items))
 	found := false
+	var finalObservation agent.Observation
 	for _, item := range items {
 		if item.Kind == kind && item.ID == resourceID {
 			if item.Generation != generation {
@@ -184,6 +199,22 @@ func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind st
 			if item.DeletionTimestamp == nil || !containsFinalizer(item.Finalizers, ProviderCleanupFinalizer) {
 				return ErrDesiredNotDeleting
 			}
+			for _, finalizer := range item.Finalizers {
+				if finalizer != ProviderCleanupFinalizer {
+					return ErrFinalizersRemaining
+				}
+			}
+			for _, observation := range m.observations[clusterID] {
+				if observation.Kind == kind && observation.ID == resourceID {
+					finalObservation = observation
+					break
+				}
+			}
+			if !HasDeletionEvidence(finalObservation, generation) {
+				return ErrDeletionEvidenceRequired
+			}
+			// Only our cleanup finalizer is consumed by this operation.
+			item.Finalizers = nil
 			found = true
 			continue
 		}
@@ -194,7 +225,10 @@ func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind st
 	}
 	m.desired[clusterID] = append([]agent.DesiredResource(nil), out...)
 
-	m.tombstones[key] = generation
+	m.tombstones[key] = agent.DeletionTombstone{
+		Generation: generation, Conditions: append([]domain.Condition(nil), finalObservation.Conditions...),
+		EvidenceRefs: append([]string(nil), finalObservation.EvidenceRefs...), FinalizedAt: m.now().UTC(),
+	}
 	delete(m.leases, key)
 
 	observations := m.observations[clusterID]
@@ -212,8 +246,17 @@ func (m *Memory) FinalizeDesired(_ context.Context, clusterID domain.ID, kind st
 func (m *Memory) FinalizedGeneration(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (int64, bool, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	generation, ok := m.tombstones[string(clusterID)+"/"+kind+"/"+string(resourceID)]
-	return generation, ok, nil
+	tombstone, ok := m.tombstones[string(clusterID)+"/"+kind+"/"+string(resourceID)]
+	return tombstone.Generation, ok, nil
+}
+
+func (m *Memory) GetDeletionTombstone(_ context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (agent.DeletionTombstone, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	tombstone, ok := m.tombstones[string(clusterID)+"/"+kind+"/"+string(resourceID)]
+	tombstone.Conditions = append([]domain.Condition(nil), tombstone.Conditions...)
+	tombstone.EvidenceRefs = append([]string(nil), tombstone.EvidenceRefs...)
+	return tombstone, ok, nil
 }
 
 func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Observation) error {
@@ -238,18 +281,20 @@ func (m *Memory) Report(_ context.Context, clusterID domain.ID, in []agent.Obser
 	filtered := out[:0]
 	for i := range out {
 		currentGeneration := int64(0)
+		hasDesired := false
 		for _, desired := range m.desired[clusterID] {
 			if desired.Kind == out[i].Kind && desired.ID == out[i].ID {
 				currentGeneration = desired.Generation
+				hasDesired = true
 				break
 			}
 		}
-		if currentGeneration != 0 && out[i].ObservedGeneration != currentGeneration {
+		if hasDesired && out[i].ObservedGeneration != currentGeneration {
 			continue
 		}
-		if currentGeneration == 0 {
+		if !hasDesired {
 			key := string(clusterID) + "/" + out[i].Kind + "/" + string(out[i].ID)
-			if tombstoneGeneration, ok := m.tombstones[key]; ok && out[i].ObservedGeneration <= tombstoneGeneration {
+			if tombstone, ok := m.tombstones[key]; ok && out[i].ObservedGeneration <= tombstone.Generation {
 				continue
 			}
 		}

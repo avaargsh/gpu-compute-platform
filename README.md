@@ -79,3 +79,7 @@ make e2e-golden
 This creates a kind cluster, installs Kueue and Fake GPU Operator, configures a stable H100 profile, and validates Control Plane -> Agent -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete.
 
 See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract.
+
+## License
+
+Licensed under [Apache License 2.0](LICENSE).

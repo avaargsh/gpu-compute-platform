@@ -187,8 +187,16 @@ func (s *Store) UpsertDesired(ctx context.Context, clusterID domain.ID, in agent
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockResourceTx(ctx, tx, clusterID, in.Kind, in.ID); err != nil {
+		return err
+	}
 	var tombstoneGeneration int64
-	err := s.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 SELECT generation
 FROM deletion_tombstones
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
@@ -199,20 +207,21 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	if err == nil && in.Generation <= tombstoneGeneration {
 		return agentstore.ErrStaleGeneration
 	}
-	if err == nil {
-		if _, err := s.db.ExecContext(ctx, `
-DELETE FROM deletion_tombstones
+	var previousGeneration int64
+	err = tx.QueryRowContext(ctx, `
+SELECT generation FROM desired_resources
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
-`, clusterID, in.Kind, in.ID); err != nil {
-			return err
-		}
+`, clusterID, in.Kind, in.ID).Scan(&previousGeneration)
+	if err != nil && err != sql.ErrNoRows {
+		return err
 	}
+	creating := err == sql.ErrNoRows
 
 	spec, err := json.Marshal(in.Spec)
 	if err != nil {
 		return fmt.Errorf("marshal desired spec: %w", err)
 	}
-	result, err := s.db.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 INSERT INTO desired_resources (cluster_id, kind, resource_id, generation, spec)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
@@ -231,14 +240,32 @@ WHERE desired_resources.generation <= EXCLUDED.generation
 	if affected == 0 {
 		return agentstore.ErrStaleGeneration
 	}
-	return nil
+	// A report is permitted before desired exists. Publishing a different
+	// generation must atomically discard that provisional observation.
+	if creating {
+		if _, err := tx.ExecContext(ctx, `
+DELETE FROM resource_observations
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3 AND observed_generation <> $4
+`, clusterID, in.Kind, in.ID, in.Generation); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) MarkDesiredDeleting(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, at time.Time) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	result, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockResourceTx(ctx, tx, clusterID, kind, resourceID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
 UPDATE desired_resources
 SET deletion_timestamp = COALESCE(deletion_timestamp, $4),
     finalizers = CASE
@@ -258,18 +285,21 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	if affected == 0 {
 		return agentstore.ErrDesiredNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *Store) FinalizeDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID, generation int64, leaseToken ...any) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := lockResourceTx(ctx, tx, clusterID, kind, resourceID); err != nil {
+		return err
+	}
 
 	if len(leaseToken) == 2 {
 		leaseOwner, _ := leaseToken[0].(string)
@@ -311,13 +341,49 @@ FOR UPDATE
 	if !deletionTimestamp.Valid || !hasCleanupFinalizer {
 		return agentstore.ErrDesiredNotDeleting
 	}
+	for _, finalizer := range currentFinalizers {
+		if finalizer != agentstore.ProviderCleanupFinalizer {
+			return agentstore.ErrFinalizersRemaining
+		}
+	}
+	var finalObservation agent.Observation
+	var conditions, evidence []byte
+	err = tx.QueryRowContext(ctx, `
+SELECT observed_generation, conditions, evidence_refs
+FROM resource_observations
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
+`, clusterID, kind, resourceID).Scan(&finalObservation.ObservedGeneration, &conditions, &evidence)
+	if err == sql.ErrNoRows {
+		return agentstore.ErrDeletionEvidenceRequired
+	}
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(conditions, &finalObservation.Conditions); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(evidence, &finalObservation.EvidenceRefs); err != nil {
+		return err
+	}
+	if !agentstore.HasDeletionEvidence(finalObservation, generation) {
+		return agentstore.ErrDeletionEvidenceRequired
+	}
 
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO deletion_tombstones (cluster_id, kind, resource_id, generation)
-VALUES ($1, $2, $3, $4)
+INSERT INTO deletion_tombstones (cluster_id, kind, resource_id, generation, conditions, evidence_refs)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
     generation = GREATEST(deletion_tombstones.generation, EXCLUDED.generation),
-    finalized_at = now()
+    conditions = EXCLUDED.conditions,
+    evidence_refs = EXCLUDED.evidence_refs,
+    finalized_at = clock_timestamp()
+`, clusterID, kind, resourceID, generation, conditions, evidence); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+UPDATE desired_resources SET finalizers = '[]'::jsonb
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3 AND generation = $4
 `, clusterID, kind, resourceID, generation); err != nil {
 		return err
 	}
@@ -361,15 +427,44 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	return generation, true, nil
 }
 
+func (s *Store) GetDeletionTombstone(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (agent.DeletionTombstone, bool, error) {
+	if s.db == nil {
+		return agent.DeletionTombstone{}, false, fmt.Errorf("postgres database is required")
+	}
+	var tombstone agent.DeletionTombstone
+	var conditions, evidence []byte
+	err := s.db.QueryRowContext(ctx, `
+SELECT generation, conditions, evidence_refs, finalized_at
+FROM deletion_tombstones
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, kind, resourceID).Scan(&tombstone.Generation, &conditions, &evidence, &tombstone.FinalizedAt)
+	if err == sql.ErrNoRows {
+		return agent.DeletionTombstone{}, false, nil
+	}
+	if err != nil {
+		return agent.DeletionTombstone{}, false, err
+	}
+	if err := json.Unmarshal(conditions, &tombstone.Conditions); err != nil {
+		return agent.DeletionTombstone{}, false, err
+	}
+	if err := json.Unmarshal(evidence, &tombstone.EvidenceRefs); err != nil {
+		return agent.DeletionTombstone{}, false, err
+	}
+	return tombstone, true, nil
+}
+
 func (s *Store) Report(ctx context.Context, clusterID domain.ID, observations []agent.Observation) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := lockObservationBatchTx(ctx, tx, clusterID, observations); err != nil {
+		return err
+	}
 
 	for _, item := range observations {
 		if item.LeaseOwner != "" || item.LeaseEpoch != 0 {
@@ -471,7 +566,7 @@ FOR UPDATE
 		return err
 	}
 	var valid bool
-	if err := tx.QueryRowContext(ctx, `SELECT $1 > now()`, leaseUntil).Scan(&valid); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT $1 > clock_timestamp()`, leaseUntil).Scan(&valid); err != nil {
 		return err
 	}
 	if currentOwner != owner || currentEpoch != epoch || !valid {

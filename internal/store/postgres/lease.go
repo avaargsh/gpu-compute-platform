@@ -27,22 +27,30 @@ func (s *Store) ClaimReconcileLease(
 	if ttlSeconds <= 0 {
 		return agent.ReconcileLeaseGrant{}, fmt.Errorf("reconcile lease ttl must be positive")
 	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return agent.ReconcileLeaseGrant{}, err
+	}
+	defer tx.Rollback()
+	if err := lockResourceTx(ctx, tx, clusterID, kind, resourceID); err != nil {
+		return agent.ReconcileLeaseGrant{}, err
+	}
 
 	var grant agent.ReconcileLeaseGrant
 	grant.Claimed = true
-	err := s.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 INSERT INTO reconcile_leases
     (cluster_id, kind, resource_id, owner, lease_until, epoch)
-VALUES ($1, $2, $3, $4, now() + ($5 * interval '1 second'), 1)
+VALUES ($1, $2, $3, $4, clock_timestamp() + ($5 * interval '1 second'), 1)
 ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET
     owner = EXCLUDED.owner,
-    lease_until = now() + ($5 * interval '1 second'),
+    lease_until = clock_timestamp() + ($5 * interval '1 second'),
     epoch = CASE
         WHEN reconcile_leases.owner = EXCLUDED.owner THEN reconcile_leases.epoch
         ELSE reconcile_leases.epoch + 1
     END,
     updated_at = now()
-WHERE reconcile_leases.lease_until <= now()
+WHERE reconcile_leases.lease_until <= clock_timestamp()
    OR reconcile_leases.owner = EXCLUDED.owner
 RETURNING owner, epoch, lease_until
 `, clusterID, kind, resourceID, owner, ttlSeconds).Scan(&grant.Owner, &grant.Epoch, &grant.ExpiresAt)
@@ -50,6 +58,9 @@ RETURNING owner, epoch, lease_until
 		return agent.ReconcileLeaseGrant{}, nil
 	}
 	if err != nil {
+		return agent.ReconcileLeaseGrant{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return agent.ReconcileLeaseGrant{}, err
 	}
 	return grant, nil
@@ -69,7 +80,15 @@ func (s *Store) ReleaseReconcileLease(
 	if owner == "" {
 		return fmt.Errorf("reconcile lease owner is required")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockResourceTx(ctx, tx, clusterID, kind, resourceID); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `
 DELETE FROM reconcile_leases
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3 AND owner = $4 AND ($5 = 0 OR epoch = $5)
 `, clusterID, kind, resourceID, owner, func() int64 {
@@ -78,5 +97,8 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3 AND owner = $4 AND ($5 
 		}
 		return 0
 	}())
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }

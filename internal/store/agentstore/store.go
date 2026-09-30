@@ -21,6 +21,8 @@ var ErrPlacementSourceGenerationMismatch = errors.New("placement migration sourc
 var ErrPlacementTargetGenerationMismatch = errors.New("placement migration target generation changed")
 var ErrDesiredNotFound = errors.New("desired resource not found")
 var ErrDesiredNotDeleting = errors.New("desired resource is not deleting")
+var ErrDeletionEvidenceRequired = errors.New("current generation deletion evidence is required")
+var ErrFinalizersRemaining = errors.New("unowned finalizers remain")
 var ErrStaleReconcileLease = errors.New("stale reconcile lease")
 
 const ProviderCleanupFinalizer = "gpu-compute-platform.io/provider-cleanup"
@@ -36,6 +38,7 @@ type Store interface {
 	MarkDesiredDeleting(context.Context, domain.ID, string, domain.ID, time.Time) error
 	FinalizeDesired(context.Context, domain.ID, string, domain.ID, int64, ...any) error
 	FinalizedGeneration(context.Context, domain.ID, string, domain.ID) (int64, bool, error)
+	GetDeletionTombstone(context.Context, domain.ID, string, domain.ID) (agent.DeletionTombstone, bool, error)
 	Report(context.Context, domain.ID, []agent.Observation) error
 	ClaimReconcileLease(context.Context, domain.ID, string, domain.ID, string, int64) (agent.ReconcileLeaseGrant, error)
 	ReleaseReconcileLease(context.Context, domain.ID, string, domain.ID, string, ...int64) error

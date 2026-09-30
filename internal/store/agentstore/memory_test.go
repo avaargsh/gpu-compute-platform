@@ -257,6 +257,13 @@ func TestMemoryDesiredDeletionLifecycle(t *testing.T) {
 	if got.DeletionTimestamp == nil || !got.DeletionTimestamp.Equal(at) || len(got.Finalizers) != 1 {
 		t.Fatalf("mark-delete must be idempotent: %#v", got)
 	}
+	if err := store.Report(ctx, clusterID, []agent.Observation{{
+		Kind: "Workload", ID: "train-1", ObservedGeneration: 4,
+		Conditions:   []domain.Condition{{Type: "Ready", Status: "False", Reason: "Deleted"}},
+		EvidenceRefs: []string{"provider://gone/train-1"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := store.FinalizeDesired(ctx, clusterID, "Workload", "train-1", 4); err != nil {
 		t.Fatal(err)
@@ -323,7 +330,8 @@ func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
 	}})
 	if err := store.Report(ctx, clusterID, []agent.Observation{{
 		Kind: "Workload", ID: "train-1", ObservedGeneration: 4,
-		Conditions: []domain.Condition{{Type: "Ready", Status: "False", Reason: "Deleted"}},
+		Conditions:   []domain.Condition{{Type: "Ready", Status: "False", Reason: "Deleted"}},
+		EvidenceRefs: []string{"provider://gone/train-1"},
 	}}); err != nil {
 		t.Fatal(err)
 	}

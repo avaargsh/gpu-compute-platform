@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
@@ -12,13 +13,14 @@ type StateAPI struct {
 }
 
 type resourceState struct {
-	Kind               string             `json:"kind"`
-	ID                 domain.ID          `json:"id"`
-	DesiredGeneration  int64              `json:"desiredGeneration"`
-	ObservedGeneration int64              `json:"observedGeneration"`
-	SyncState          string             `json:"syncState"`
-	Conditions         []domain.Condition `json:"conditions,omitempty"`
-	EvidenceRefs       []string           `json:"evidenceRefs,omitempty"`
+	Kind               string                   `json:"kind"`
+	ID                 domain.ID                `json:"id"`
+	DesiredGeneration  int64                    `json:"desiredGeneration"`
+	ObservedGeneration int64                    `json:"observedGeneration"`
+	SyncState          string                   `json:"syncState"`
+	Conditions         []domain.Condition       `json:"conditions,omitempty"`
+	EvidenceRefs       []string                 `json:"evidenceRefs,omitempty"`
+	DeletionTombstone  *agent.DeletionTombstone `json:"deletionTombstone,omitempty"`
 }
 
 func NewStateAPI(store agentstore.Store) *StateAPI {
@@ -56,7 +58,19 @@ func (a *StateAPI) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !found {
-		http.NotFound(w, r)
+		tombstone, finalized, err := a.store.GetDeletionTombstone(r.Context(), clusterID, kind, resourceID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !finalized {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, resourceState{
+			Kind: kind, ID: resourceID, SyncState: "Finalized", DeletionTombstone: &tombstone,
+			Conditions: tombstone.Conditions, EvidenceRefs: tombstone.EvidenceRefs,
+		})
 		return
 	}
 	observation, observed, err := a.store.GetObservation(r.Context(), clusterID, kind, resourceID)

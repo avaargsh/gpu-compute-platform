@@ -116,3 +116,9 @@ CREATE TABLE IF NOT EXISTS deletion_tombstones (
 
 CREATE INDEX IF NOT EXISTS deletion_tombstones_finalized_idx
     ON deletion_tombstones (finalized_at);
+
+ALTER TABLE deletion_tombstones
+    ADD COLUMN IF NOT EXISTS conditions JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+ALTER TABLE deletion_tombstones
+    ADD COLUMN IF NOT EXISTS evidence_refs JSONB NOT NULL DEFAULT '[]'::jsonb;

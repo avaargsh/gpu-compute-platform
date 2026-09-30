@@ -166,15 +166,34 @@ wait_api_gone() {
   return 1
 }
 
+assert_final_evidence() {
+  local kind="$1" id="$2" payload
+  payload="$(curl -fsS "$BASE_URL/api/v1/internal/clusters/$CLUSTER_ID/state/$kind/$id")"
+  PAYLOAD="$payload" python - <<'PY'
+import json, os
+data = json.loads(os.environ["PAYLOAD"])
+assert data["syncState"] == "Finalized", data
+assert data["desiredGeneration"] == 0 and data["observedGeneration"] == 0, data
+tombstone = data["deletionTombstone"]
+assert tombstone["generation"] == 1 and tombstone["finalizedAt"], tombstone
+assert tombstone["evidenceRefs"] and all(tombstone["evidenceRefs"]), tombstone
+assert any(c["type"] == "Ready" and c["status"] == "False" and c["reason"] == "Deleted"
+           for c in tombstone["conditions"]), tombstone
+print(json.dumps(data, sort_keys=True))
+PY
+}
+
 # Deletion lifecycle: failed projections must still be deletable because cleanup
 # identity is independent of accelerator resolution.
 delete_desired "Workload" "$INVALID_WORKLOAD_ID"
 wait_api_gone "/api/v1/workloads/$INVALID_WORKLOAD_ID"
+assert_final_evidence "Workload" "$INVALID_WORKLOAD_ID"
 
 # A realized workload must be cleaned at the provider before desired state is
 # finalized. The finalization transaction also removes observation and lease.
 delete_desired "Workload" "$WORKLOAD_ID"
 wait_api_gone "/api/v1/workloads/$WORKLOAD_ID"
+assert_final_evidence "Workload" "$WORKLOAD_ID"
 if kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" >/dev/null 2>&1; then
   echo "workload desired state finalized before provider Job was gone" >&2
   exit 1
@@ -186,6 +205,7 @@ fi
 # explicit control-plane ownership/reference tracking.
 delete_desired "ComputePool" "$POOL_ID"
 wait_api_gone "/api/v1/compute-pools/$POOL_ID"
+assert_final_evidence "ComputePool" "$POOL_ID"
 if kubectl get localqueue "lq-$POOL_ID" -n "$NAMESPACE" >/dev/null 2>&1; then
   echo "LocalQueue survived pool finalization" >&2
   exit 1

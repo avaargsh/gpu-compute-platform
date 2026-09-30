@@ -82,6 +82,7 @@ func TestPlacementMigrationCrashReplayGoldenPath(t *testing.T) {
 	if err != nil || !found || source.DeletionTimestamp == nil {
 		t.Fatalf("source deletion not durable: found=%v desired=%#v err=%v", found, source, err)
 	}
+	recordGoneForTest(t, resources, "cluster-a", "ComputePool", "pool-1", 7)
 	if err := resources.FinalizeDesired(ctx, "cluster-a", "ComputePool", "pool-1", 7); err != nil {
 		t.Fatal(err)
 	}

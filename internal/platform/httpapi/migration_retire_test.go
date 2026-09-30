@@ -55,6 +55,7 @@ func TestRetireSourceUsesDeletionLifecycleBeforeSuccess(t *testing.T) {
 		t.Fatalf("phase=%s, want Retiring until provider cleanup finalizes", migration.Phase)
 	}
 
+	recordGoneForTest(t, resources, "cluster-a", "ComputePool", "pool-1", 7)
 	if err := resources.FinalizeDesired(ctx, "cluster-a", "ComputePool", "pool-1", 7); err != nil {
 		t.Fatal(err)
 	}

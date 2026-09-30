@@ -55,6 +55,11 @@ WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
 	if err := store.MarkDesiredDeleting(ctx, clusterID, "Workload", resourceID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	current.Conditions = []domain.Condition{{Type: "Ready", Status: "False", Reason: "Deleted"}}
+	current.EvidenceRefs = []string{"provider://gone/train-fenced"}
+	if err := store.Report(ctx, clusterID, []agent.Observation{current}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.FinalizeDesired(ctx, clusterID, "Workload", resourceID, generation, a.Owner, a.Epoch); !errors.Is(err, agentstore.ErrStaleReconcileLease) {
 		t.Fatalf("stale finalize err=%v, want ErrStaleReconcileLease", err)
 	}
