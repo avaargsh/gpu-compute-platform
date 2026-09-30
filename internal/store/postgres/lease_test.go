@@ -98,7 +98,6 @@ func TestPostgresLeaseInputValidation(t *testing.T) {
 	}
 }
 
-
 func TestPostgresLeaseTakeoverFencesStaleReportAndFinalize(t *testing.T) {
 	db := openContractDB(t)
 	store := New(db)
