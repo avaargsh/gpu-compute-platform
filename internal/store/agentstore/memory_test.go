@@ -552,3 +552,93 @@ func TestMemoryLeaseCannotPreclaimMissingDesiredIdentity(t *testing.T) {
 		t.Fatalf("orphan lease persisted: %#v", store.leases)
 	}
 }
+
+
+func TestMemoryCreateWorkloadDesiredPreservesReplayAfterPoolDeleting(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	pool := agent.DesiredResource{
+		Kind: "ComputePool",
+		ID:   "pool-1",
+		Generation: 1,
+		Spec: map[string]any{
+			"acceleratorBindings": []domain.AcceleratorBinding{{
+				Class:        "h100",
+				ResourceName: "nvidia.com/gpu",
+				Flavor:       "h100",
+			}},
+		},
+	}
+	if err := store.UpsertDesired(ctx, "cluster-a", pool); err != nil {
+		t.Fatal(err)
+	}
+	workload := agent.DesiredResource{
+		Kind: "Workload",
+		ID:   "train-1",
+		Generation: 1,
+		Spec: map[string]any{
+			"poolID": "pool-1",
+			"accelerator": domain.AcceleratorRequest{
+				Class: "h100",
+				Quota: 1,
+			},
+		},
+	}
+	if err := store.CreateWorkloadDesired(
+		ctx, "cluster-a", "pool-1", "h100", workload,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkDesiredDeleting(
+		ctx, "cluster-a", "ComputePool", "pool-1", time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.CreateWorkloadDesired(
+		ctx, "cluster-a", "pool-1", "h100", workload,
+	); err != nil {
+		t.Fatalf("identical replay after pool deletion started must succeed: %v", err)
+	}
+
+	other := workload
+	other.ID = "train-2"
+	if err := store.CreateWorkloadDesired(
+		ctx, "cluster-a", "pool-1", "h100", other,
+	); !errors.Is(err, ErrComputePoolDeleting) {
+		t.Fatalf("new workload under deleting pool err=%v, want ErrComputePoolDeleting", err)
+	}
+}
+
+func TestMemoryCreateWorkloadDesiredRejectsCrossClusterIdentityRace(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemory()
+	for _, clusterID := range []domain.ID{"cluster-a", "cluster-b"} {
+		if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+			Kind: "ComputePool",
+			ID:   "pool-1",
+			Generation: 1,
+			Spec: map[string]any{
+				"acceleratorBindings": []domain.AcceleratorBinding{{
+					Class: "h100", ResourceName: "nvidia.com/gpu", Flavor: "h100",
+				}},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workload := agent.DesiredResource{
+		Kind: "Workload", ID: "global-train", Generation: 1,
+		Spec: map[string]any{"poolID": "pool-1"},
+	}
+	if err := store.CreateWorkloadDesired(
+		ctx, "cluster-a", "pool-1", "h100", workload,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateWorkloadDesired(
+		ctx, "cluster-b", "pool-1", "h100", workload,
+	); !errors.Is(err, ErrIdentityConflict) {
+		t.Fatalf("cross-cluster duplicate err=%v, want ErrIdentityConflict", err)
+	}
+}
