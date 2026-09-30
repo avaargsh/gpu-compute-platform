@@ -553,7 +553,6 @@ func TestMemoryLeaseCannotPreclaimMissingDesiredIdentity(t *testing.T) {
 	}
 }
 
-
 func TestMemoryFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemory()
