@@ -11,6 +11,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
@@ -49,6 +50,11 @@ func TestPostgresReconcileLeaseOwnershipAndExpiry(t *testing.T) {
 	db := openContractDB(t)
 	store := New(db)
 	ctx := context.Background()
+	if err := store.UpsertDesired(ctx, "cluster-a", agent.DesiredResource{
+		Kind: "Workload", ID: "train-1", Generation: 1, Spec: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	claimed, err := store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 1)
 	if err != nil || !claimed {
@@ -197,5 +203,123 @@ WHERE cluster_id = 'cluster-a'
 		ctx, "cluster-a", "Workload", "train-fenced", 7, "agent-b",
 	); err != nil {
 		t.Fatalf("takeover owner finalize: %v", err)
+	}
+}
+
+func TestPostgresLeaseCannotPreclaimMissingDesiredIdentity(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+
+	claimed, err := store.ClaimReconcileLease(
+		ctx,
+		"cluster-a",
+		"Workload",
+		"future-workload",
+		"worker-a",
+		120,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed {
+		t.Fatal("lease must not be created before desired state exists")
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `
+SELECT count(*) FROM reconcile_leases
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, "cluster-a", "Workload", "future-workload").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("orphan reconcile lease persisted: count=%d", count)
+	}
+}
+
+func TestPostgresLeaseClaimSerializesWithDesiredDeletion(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-a")
+	resourceID := domain.ID("claim-delete-race")
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "Workload", ID: resourceID, Generation: 1, Spec: map[string]any{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	blocker, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback()
+
+	var locked int
+	if err := blocker.QueryRowContext(ctx, `
+SELECT 1
+FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR UPDATE
+`, clusterID, "Workload", resourceID).Scan(&locked); err != nil {
+		t.Fatal(err)
+	}
+
+	type claimResult struct {
+		claimed bool
+		err     error
+	}
+	resultCh := make(chan claimResult, 1)
+	go func() {
+		claimed, claimErr := store.ClaimReconcileLease(
+			context.Background(),
+			"cluster-a",
+			"Workload",
+			resourceID,
+			"worker-a",
+			120,
+		)
+		resultCh <- claimResult{claimed: claimed, err: claimErr}
+	}()
+
+	select {
+	case result := <-resultCh:
+		t.Fatalf("lease claim escaped desired row lock: %#v", result)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if _, err := blocker.ExecContext(ctx, `
+DELETE FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, "Workload", resourceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := blocker.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.claimed {
+			t.Fatal("claim must fail when desired is deleted before lock acquisition")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("lease claim did not resume after desired deletion committed")
+	}
+
+	var count int
+	if err := db.QueryRowContext(ctx, `
+SELECT count(*) FROM reconcile_leases
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+`, clusterID, "Workload", resourceID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("desired deletion race left orphan lease: count=%d", count)
 	}
 }

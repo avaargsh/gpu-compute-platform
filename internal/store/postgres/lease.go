@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -26,9 +27,29 @@ func (s *Store) ClaimReconcileLease(
 		return false, fmt.Errorf("reconcile lease ttl must be positive")
 	}
 
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	var exists int
+	err = tx.QueryRowContext(ctx, `
+SELECT 1
+FROM desired_resources
+WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
+FOR SHARE
+`, clusterID, kind, resourceID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
 	now := time.Now().UTC()
 	until := now.Add(time.Duration(ttlSeconds) * time.Second)
-	result, err := s.db.ExecContext(ctx, `
+	result, err := tx.ExecContext(ctx, `
 INSERT INTO reconcile_leases
     (cluster_id, kind, resource_id, owner, lease_until)
 VALUES ($1, $2, $3, $4, $5)
@@ -44,6 +65,9 @@ WHERE reconcile_leases.lease_until <= $6
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
 		return false, err
 	}
 	return affected == 1, nil

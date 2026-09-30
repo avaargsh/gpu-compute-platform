@@ -479,22 +479,14 @@ FOR UPDATE
 		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
-		if err == nil && item.ObservedGeneration != desiredGeneration {
+		if err == sql.ErrNoRows {
+			// Observations are subordinate to desired state. Do not persist
+			// a future/stale observation while the canonical resource does
+			// not exist, because a later recreate may use that generation.
 			continue
 		}
-		if err == sql.ErrNoRows {
-			var tombstoneGeneration int64
-			tombstoneErr := tx.QueryRowContext(ctx, `
-SELECT generation
-FROM deletion_tombstones
-WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
-`, clusterID, item.Kind, item.ID).Scan(&tombstoneGeneration)
-			if tombstoneErr != nil && tombstoneErr != sql.ErrNoRows {
-				return tombstoneErr
-			}
-			if tombstoneErr == nil && item.ObservedGeneration <= tombstoneGeneration {
-				continue
-			}
+		if item.ObservedGeneration != desiredGeneration {
+			continue
 		}
 
 		var previousJSON []byte

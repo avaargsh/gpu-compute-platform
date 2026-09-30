@@ -16,6 +16,11 @@ func TestMemoryReportStateMachine(t *testing.T) {
 	t0 := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(time.Minute)
 	t2 := t1.Add(time.Minute)
+	store.SetDesired("cluster-a", []agent.DesiredResource{
+		{Kind: "Workload", ID: "train-1", Generation: 8},
+		{Kind: "ComputePool", ID: "pool-h100", Generation: 3},
+		{Kind: "Workload", ID: "train-2", Generation: 1},
+	})
 
 	if err := store.Report(ctx, "cluster-a", []agent.Observation{
 		{
@@ -81,6 +86,9 @@ func TestMemoryReportUsesNewTransitionTimeWhenStatusChanges(t *testing.T) {
 	store := NewMemory()
 	t0 := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 	t1 := t0.Add(time.Minute)
+	store.SetDesired("cluster-a", []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-1", Generation: 8,
+	}})
 
 	_ = store.Report(ctx, "cluster-a", []agent.Observation{{
 		Kind: "Workload", ID: "train-1", ObservedGeneration: 8,
@@ -173,6 +181,9 @@ func TestMemoryReconcileLeaseLifecycle(t *testing.T) {
 	store := NewMemory()
 	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
 	store.now = func() time.Time { return now }
+	store.SetDesired("cluster-a", []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-1", Generation: 1,
+	}})
 
 	claimed, err := store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
 	if err != nil || !claimed {
@@ -341,9 +352,13 @@ func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
 	if _, ok, err := store.GetObservation(ctx, clusterID, "Workload", "train-1"); err != nil || ok {
 		t.Fatalf("finalize must clean observation: ok=%t err=%v", ok, err)
 	}
+	key := string(clusterID) + "/Workload/train-1"
+	if _, ok := store.leases[key]; ok {
+		t.Fatal("finalize must clean reconcile lease")
+	}
 	claimed, err = store.ClaimReconcileLease(ctx, clusterID, "Workload", "train-1", "worker-b", 120)
-	if err != nil || !claimed {
-		t.Fatalf("finalize must clean lease: claimed=%t err=%v", claimed, err)
+	if err != nil || claimed {
+		t.Fatalf("missing desired state must not allow a new lease: claimed=%t err=%v", claimed, err)
 	}
 
 	if err := store.Report(ctx, clusterID, []agent.Observation{{
@@ -362,8 +377,8 @@ func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok, _ := store.GetObservation(ctx, clusterID, "Workload", "train-1"); !ok || got.ObservedGeneration != 5 {
-		t.Fatalf("missing desired must not categorically forbid newer reports: %#v", got)
+	if _, ok, _ := store.GetObservation(ctx, clusterID, "Workload", "train-1"); ok {
+		t.Fatal("observation without current desired state must be ignored")
 	}
 
 	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
@@ -375,6 +390,18 @@ func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
 		Kind: "Workload", ID: "train-1", Generation: 5, Spec: map[string]any{},
 	}); err != nil {
 		t.Fatalf("newer generation must be allowed to recreate resource: %v", err)
+	}
+	if _, ok, _ := store.GetObservation(ctx, clusterID, "Workload", "train-1"); ok {
+		t.Fatal("recreated desired state must not inherit a pre-intent observation")
+	}
+	if err := store.Report(ctx, clusterID, []agent.Observation{{
+		Kind: "Workload", ID: "train-1", ObservedGeneration: 5,
+		Conditions: []domain.Condition{{Type: "Ready", Status: "True", Reason: "CurrentReport"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, _ := store.GetObservation(ctx, clusterID, "Workload", "train-1"); !ok || got.ObservedGeneration != 5 {
+		t.Fatalf("current observation after recreate must persist: %#v", got)
 	}
 }
 
@@ -502,5 +529,26 @@ func TestMemoryUpsertSameGenerationIsIdempotentButImmutable(t *testing.T) {
 	}
 	if got.Spec["quota"] != float64(8) {
 		t.Fatalf("same-generation mutation changed desired spec: %#v", got.Spec)
+	}
+}
+
+func TestMemoryLeaseCannotPreclaimMissingDesiredIdentity(t *testing.T) {
+	store := NewMemory()
+	claimed, err := store.ClaimReconcileLease(
+		context.Background(),
+		"cluster-a",
+		"Workload",
+		"future-workload",
+		"worker-a",
+		120,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed {
+		t.Fatal("lease must not be created before desired state exists")
+	}
+	if len(store.leases) != 0 {
+		t.Fatalf("orphan lease persisted: %#v", store.leases)
 	}
 }
