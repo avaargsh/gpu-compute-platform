@@ -62,6 +62,8 @@ jobs:
         run: go vet ./...
       - name: Test
         run: go test ./...
+      - name: Release acceptance contracts
+        run: make acceptance-contract
       - name: Build binaries
         run: |
           go build ./cmd/control-plane
