@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
@@ -15,6 +16,12 @@ func TestAgentDesiredAndReportRoundTrip(t *testing.T) {
 	store.SetDesired("cluster-a", []agent.DesiredResource{
 		{Kind: "ComputePool", ID: "pool-1", Generation: 3},
 	})
+	claimed, err := store.ClaimReconcileLease(
+		context.Background(), "cluster-a", "ComputePool", "pool-1", "agent-a", 30,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim lease: claimed=%t err=%v", claimed, err)
+	}
 	server := httptest.NewServer(NewRouterWithAgentStore(store))
 	defer server.Close()
 
@@ -34,7 +41,7 @@ func TestAgentDesiredAndReportRoundTrip(t *testing.T) {
 	payload, _ := json.Marshal(map[string]any{
 		"clusterId": "cluster-a",
 		"observations": []agent.Observation{
-			{Kind: "ComputePool", ID: "pool-1", ObservedGeneration: 3},
+			{Kind: "ComputePool", ID: "pool-1", ObservedGeneration: 3, LeaseOwner: "agent-a"},
 		},
 	})
 	reportResp, err := server.Client().Post(
@@ -52,4 +59,47 @@ func TestAgentDesiredAndReportRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected observations: %#v", observed)
 	}
 
+}
+
+
+func TestAgentReportRejectsStaleLeaseOwner(t *testing.T) {
+	store := agentstore.NewMemory()
+	store.SetDesired("cluster-a", []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-1", Generation: 1,
+	}})
+	claimed, err := store.ClaimReconcileLease(
+		context.Background(), "cluster-a", "Workload", "train-1", "agent-b", 30,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim lease: claimed=%t err=%v", claimed, err)
+	}
+
+	server := httptest.NewServer(NewRouterWithAgentStore(store))
+	defer server.Close()
+
+	payload, _ := json.Marshal(map[string]any{
+		"clusterId": "cluster-a",
+		"observations": []agent.Observation{{
+			Kind:               "Workload",
+			ID:                 "train-1",
+			ObservedGeneration: 1,
+			LeaseOwner:         "agent-a",
+		}},
+	})
+	resp, err := server.Client().Post(
+		server.URL+"/api/v1/agent/report",
+		"application/json",
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 409 {
+		t.Fatalf("status=%d, want 409", resp.StatusCode)
+	}
+	if got := store.Observations("cluster-a"); len(got) != 0 {
+		t.Fatalf("stale observation must not persist: %#v", got)
+	}
 }
