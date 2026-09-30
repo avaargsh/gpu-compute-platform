@@ -181,6 +181,9 @@ func TestMemoryReconcileLeaseLifecycle(t *testing.T) {
 	store := NewMemory()
 	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
 	store.now = func() time.Time { return now }
+	store.SetDesired("cluster-a", []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-1", Generation: 1,
+	}})
 
 	claimed, err := store.ClaimReconcileLease(ctx, "cluster-a", "Workload", "train-1", "worker-a", 30)
 	if err != nil || !claimed {
@@ -349,9 +352,13 @@ func TestFinalizeCreatesGenerationTombstoneAndCleansRuntimeState(t *testing.T) {
 	if _, ok, err := store.GetObservation(ctx, clusterID, "Workload", "train-1"); err != nil || ok {
 		t.Fatalf("finalize must clean observation: ok=%t err=%v", ok, err)
 	}
+	key := string(clusterID) + "/Workload/train-1"
+	if _, ok := store.leases[key]; ok {
+		t.Fatal("finalize must clean reconcile lease")
+	}
 	claimed, err = store.ClaimReconcileLease(ctx, clusterID, "Workload", "train-1", "worker-b", 120)
-	if err != nil || !claimed {
-		t.Fatalf("finalize must clean lease: claimed=%t err=%v", claimed, err)
+	if err != nil || claimed {
+		t.Fatalf("missing desired state must not allow a new lease: claimed=%t err=%v", claimed, err)
 	}
 
 	if err := store.Report(ctx, clusterID, []agent.Observation{{
@@ -522,5 +529,27 @@ func TestMemoryUpsertSameGenerationIsIdempotentButImmutable(t *testing.T) {
 	}
 	if got.Spec["quota"] != float64(8) {
 		t.Fatalf("same-generation mutation changed desired spec: %#v", got.Spec)
+	}
+}
+
+
+func TestMemoryLeaseCannotPreclaimMissingDesiredIdentity(t *testing.T) {
+	store := NewMemory()
+	claimed, err := store.ClaimReconcileLease(
+		context.Background(),
+		"cluster-a",
+		"Workload",
+		"future-workload",
+		"worker-a",
+		120,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed {
+		t.Fatal("lease must not be created before desired state exists")
+	}
+	if len(store.leases) != 0 {
+		t.Fatalf("orphan lease persisted: %#v", store.leases)
 	}
 }
