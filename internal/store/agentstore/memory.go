@@ -368,6 +368,18 @@ func (m *Memory) ClaimReconcileLease(
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	foundDesired := false
+	for _, item := range m.desired[clusterID] {
+		if item.Kind == kind && item.ID == resourceID {
+			foundDesired = true
+			break
+		}
+	}
+	if !foundDesired {
+		return false, nil
+	}
+
 	key := string(clusterID) + "/" + kind + "/" + string(resourceID)
 	now := m.now().UTC()
 	current, ok := m.leases[key]
