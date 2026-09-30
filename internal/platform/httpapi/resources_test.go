@@ -163,7 +163,6 @@ func TestBindingAPIRejectsStaleGenerationWithoutRollback(t *testing.T) {
 	}
 }
 
-
 func TestResourceAPIRequiresDeleteRecreateForWorkloadChanges(t *testing.T) {
 	store := agentstore.NewMemory()
 	server := httptest.NewServer(boundRouter(store, "cluster-a", "cluster-a"))
