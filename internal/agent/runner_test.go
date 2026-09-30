@@ -146,7 +146,12 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 	}
 
 	runtime := &fakeRuntime{}
-	runner := NewRunner("cluster-a", control, runtime)
+	runner := NewRunnerWithLeaseOwner(
+		"cluster-a",
+		control,
+		runtime,
+		"agent-test",
+	)
 	if err := runner.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +169,9 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 	}
 	if control.reported[0].LeaseOwner != control.reported[1].LeaseOwner {
 		t.Fatalf("one runner must use one lease owner: %#v", control.reported)
+	}
+	if control.reported[0].LeaseOwner != "agent-test" {
+		t.Fatalf("explicit lease owner not propagated: %#v", control.reported)
 	}
 	if runtime.workload.AcceleratorBinding.ResourceName != "vendor.example/gpu" {
 		t.Fatalf("workload binding was not resolved: %#v", runtime.workload.AcceleratorBinding)
