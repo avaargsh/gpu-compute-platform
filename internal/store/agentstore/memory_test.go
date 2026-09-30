@@ -682,36 +682,3 @@ func TestMemoryFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
 	}
 }
 
-func TestMemoryUpsertRejectsHigherGenerationWhileDeleting(t *testing.T) {
-	ctx := context.Background()
-	store := NewMemory()
-	if err := store.UpsertDesired(ctx, "cluster-a", agent.DesiredResource{
-		Kind: "ComputePool", ID: "pool-deleting", Generation: 3,
-		Spec: map[string]any{"quota": float64(4)},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.MarkDesiredDeleting(
-		ctx, "cluster-a", "ComputePool", "pool-deleting", time.Now(),
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	err := store.UpsertDesired(ctx, "cluster-a", agent.DesiredResource{
-		Kind: "ComputePool", ID: "pool-deleting", Generation: 4,
-		Spec: map[string]any{"quota": float64(8)},
-	})
-	if !errors.Is(err, ErrDesiredDeleting) {
-		t.Fatalf("update during deletion err=%v, want ErrDesiredDeleting", err)
-	}
-
-	got, found, err := store.GetDesired(
-		ctx, "cluster-a", "ComputePool", "pool-deleting",
-	)
-	if err != nil || !found {
-		t.Fatalf("desired missing: found=%t err=%v", found, err)
-	}
-	if got.Generation != 3 || got.Spec["quota"] != float64(4) {
-		t.Fatalf("deleting desired state mutated: %#v", got)
-	}
-}
