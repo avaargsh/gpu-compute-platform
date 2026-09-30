@@ -68,6 +68,25 @@ func TestDesiredAPIWritesAgentPullState(t *testing.T) {
 		t.Fatalf("repeated delete must be idempotent: %#v", items)
 	}
 
+	updateWhileDeleting := `{"generation":8,"spec":{"projectID":"project-1","poolID":"pool-1","namespace":"project-1","image":"example/train:v8"}}`
+	req = httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/internal/clusters/cluster-a/desired/Workload/train-1",
+		strings.NewReader(updateWhileDeleting),
+	)
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("update while deleting status=%d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	items, err = store.Desired(context.Background(), "cluster-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Generation != 7 {
+		t.Fatalf("deleting desired generation drifted: %#v", items)
+	}
+
 	if err := store.FinalizeDesired(context.Background(), "cluster-a", "Workload", "train-1", 7); err != nil {
 		t.Fatal(err)
 	}
