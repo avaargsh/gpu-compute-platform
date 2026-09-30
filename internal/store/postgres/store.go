@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -238,19 +237,19 @@ func (s *Store) CreateWorkloadDesired(
 	}
 	var existingClusterID domain.ID
 	var existingGeneration int64
-	var existingSpec []byte
+	var existingSpecMatches bool
 	var existingDeletion sql.NullTime
 	existingErr := tx.QueryRowContext(ctx, `
-SELECT cluster_id, generation, spec, deletion_timestamp
+SELECT cluster_id, generation, spec = $2::jsonb, deletion_timestamp
 FROM desired_resources
 WHERE kind = 'Workload' AND resource_id = $1
 ORDER BY cluster_id
 LIMIT 1
 FOR UPDATE
-`, in.ID).Scan(
+`, in.ID, incomingSpec).Scan(
 		&existingClusterID,
 		&existingGeneration,
-		&existingSpec,
+		&existingSpecMatches,
 		&existingDeletion,
 	)
 	if existingErr != nil && existingErr != sql.ErrNoRows {
@@ -263,7 +262,7 @@ FOR UPDATE
 		if existingDeletion.Valid {
 			return agentstore.ErrDesiredNotDeleting
 		}
-		if existingGeneration != in.Generation || !bytes.Equal(existingSpec, incomingSpec) {
+		if existingGeneration != in.Generation || !existingSpecMatches {
 			return agentstore.ErrStaleGeneration
 		}
 		// Lost-ACK/idempotent replay: do not re-check parent lifecycle. The
