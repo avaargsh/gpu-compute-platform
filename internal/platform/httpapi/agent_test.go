@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
@@ -100,5 +102,50 @@ func TestAgentReportRejectsStaleLeaseOwner(t *testing.T) {
 	}
 	if got := store.Observations("cluster-a"); len(got) != 0 {
 		t.Fatalf("stale observation must not persist: %#v", got)
+	}
+}
+
+
+func TestAgentFinalizeDesiredTreatsCommittedReplayAsSuccess(t *testing.T) {
+	store := agentstore.NewMemory()
+	ctx := context.Background()
+	store.SetDesired("cluster-a", []agent.DesiredResource{{
+		Kind: "Workload", ID: "train-finalize-replay", Generation: 4,
+	}})
+	if err := store.MarkDesiredDeleting(
+		ctx, "cluster-a", "Workload", "train-finalize-replay", time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimReconcileLease(
+		ctx, "cluster-a", "Workload", "train-finalize-replay", "agent-a", 30,
+	)
+	if err != nil || !claimed {
+		t.Fatalf("claim: claimed=%t err=%v", claimed, err)
+	}
+
+	server := httptest.NewServer(NewRouterWithAgentStore(store))
+	defer server.Close()
+	payload, _ := json.Marshal(agent.FinalizeDesiredRequest{
+		ClusterID:  "cluster-a",
+		Kind:       "Workload",
+		ResourceID: "train-finalize-replay",
+		Generation: 4,
+		Owner:      "agent-a",
+	})
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		resp, err := server.Client().Post(
+			server.URL+"/api/v1/agent/finalize-desired",
+			"application/json",
+			bytes.NewReader(payload),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("attempt %d status=%d, want 204", attempt, resp.StatusCode)
+		}
 	}
 }
