@@ -56,7 +56,6 @@ func TestStateAPIProjectsGenerationDrift(t *testing.T) {
 	}
 }
 
-
 func TestStateAPIExposesLastObservationLeaseOwner(t *testing.T) {
 	store := agentstore.NewMemory()
 	ctx := context.Background()
