@@ -70,12 +70,18 @@ make test
 make build
 ```
 
+Run the deterministic release contracts:
+
+```bash
+make acceptance-contract
+```
+
 Run the real acceptance path:
 
 ```bash
 make e2e-golden
 ```
 
-This creates a kind cluster, installs Kueue and Fake GPU Operator, configures a stable H100 profile, and validates Control Plane -> Agent -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete.
+The Golden Path creates a kind cluster, installs Kueue and Fake GPU Operator, configures a stable H100 profile, and validates Control Plane -> Agent -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete, including agent restart replay, generation fencing, evidence completeness, and immutable workload replacement.
 
-See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract and [docs/WORKLOAD_LIFECYCLE.md](docs/WORKLOAD_LIFECYCLE.md) for the Reserve → Allocate → Bind → Release → Audit workload lifecycle.
+See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract, [docs/WORKLOAD_LIFECYCLE.md](docs/WORKLOAD_LIFECYCLE.md) for the Reserve → Allocate → Bind → Release → Audit workload lifecycle, and [docs/RELEASE_ACCEPTANCE_V0_1.md](docs/RELEASE_ACCEPTANCE_V0_1.md) for the v0.1 release gate.

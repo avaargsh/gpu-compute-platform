@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: fmt fmt-check test vet build kind-up install-kueue install-fake-gpu e2e-golden
+.PHONY: fmt fmt-check test vet build acceptance-contract kind-up install-kueue install-fake-gpu e2e-golden
 
 fmt:
 	bash scripts/go-format.sh
@@ -17,6 +17,11 @@ vet:
 build:
 	go build ./cmd/control-plane
 	go build ./cmd/cluster-agent
+
+acceptance-contract:
+	go test ./internal/agent -run 'TestRunner(RestartReplaysDesiredSafely|BacksOffRetryableFailureAndResetsOnNewGeneration|SkipsProviderWhenLeaseIsContended|DeletionReplaysAfterFinalObservationFailure|DeletionReplaysAfterFinalizeFailure)$$'
+	go test ./internal/store/postgres -run 'TestPostgres(ReconcileLeaseOwnershipAndExpiry|FinalizeDesiredAtomicallyCleansRuntimeState|TombstoneFencesOldGenerationAndAllowsNewerRecreate|StateSurvivesStoreReconstruction)$$'
+	go test ./internal/platform/httpapi -run 'TestResourceAPI(RequiresDeleteRecreateForWorkloadChanges|RejectsStaleWorkloadGenerationWithoutRollback)$$'
 
 kind-up:
 	kind get clusters | grep -qx kind-golden || kind create cluster --name kind-golden --wait 120s

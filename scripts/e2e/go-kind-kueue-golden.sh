@@ -101,8 +101,20 @@ put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"g
 
 result="$(wait_workload)"
 condition_true "$result" "Admitted"
+
+RESULT="$result" CLUSTER_ID="$CLUSTER_ID" NAMESPACE="$NAMESPACE" WORKLOAD_ID="$WORKLOAD_ID" python - <<'PY'
+import json, os
+data=json.loads(os.environ["RESULT"])
+evidence=((data.get("status") or {}).get("evidenceRefs") or [])
+job=f'k8s://{os.environ["CLUSTER_ID"]}/namespaces/{os.environ["NAMESPACE"]}/jobs/job-{os.environ["WORKLOAD_ID"]}'
+assert job in evidence, evidence
+assert any(ref.startswith(f'kueue://{os.environ["CLUSTER_ID"]}/namespaces/{os.environ["NAMESPACE"]}/workloads/') for ref in evidence), evidence
+PY
+
 requested="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.spec.template.spec.containers[0].resources.requests.nvidia\.com/gpu}')"
 [[ "$requested" == "1" ]] || { echo "expected $ACCELERATOR_RESOURCE request=1, got $requested" >&2; exit 1; }
+generation="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.ai\.compute/generation}')"
+[[ "$generation" == "1" ]] || { echo "expected workload generation annotation=1, got $generation" >&2; exit 1; }
 flavor_label="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o jsonpath='{.spec.nodeLabels.nvidia\.com/gpu\.product}')"
 [[ "$flavor_label" == "NVIDIA-H100-80GB-HBM3" ]] || { echo "unexpected H100 flavor node label: $flavor_label" >&2; exit 1; }
 flavor_zone="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o json | python -c 'import json,sys; print(json.load(sys.stdin)["spec"]["nodeLabels"].get("topology.kubernetes.io/zone", ""))')"
@@ -111,6 +123,18 @@ flavor_rack="$(kubectl get resourceflavor "$ACCELERATOR_FLAVOR" -o json | python
 [[ "$flavor_rack" == "rack-a01" ]] || { echo "unexpected H100 flavor rack: $flavor_rack" >&2; exit 1; }
 scheduled_node="$(kubectl get pod -n "$NAMESPACE" -l "ai.compute/workload=job-$WORKLOAD_ID" -o jsonpath='{.items[0].spec.nodeName}')"
 [[ "$scheduled_node" == "$node" ]] || { echo "workload escaped topology-aware H100 flavor: $scheduled_node" >&2; exit 1; }
+
+# Restarting the cluster agent must safely replay the same desired state without
+# replacing the immutable execution object.
+before_uid="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.metadata.uid}')"
+kill "$AGENT_PID"
+wait "$AGENT_PID" 2>/dev/null || true
+AGENT_PID=""
+CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" go run ./cmd/cluster-agent >/tmp/go-cluster-agent.log 2>&1 &
+AGENT_PID=$!
+replayed="$(wait_workload)"
+after_uid="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.metadata.uid}')"
+[[ "$before_uid" == "$after_uid" ]] || { echo "agent restart replaced workload Job: before=$before_uid after=$after_uid" >&2; exit 1; }
 
 # Replaying desired state must not drift the resolved Kubernetes projection.
 before="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o json)"
@@ -131,6 +155,13 @@ def projection(obj):
     }
 assert projection(before) == projection(after), (projection(before), projection(after))
 PY
+
+# Active workload execution intent is immutable. A changed generation/spec must
+# use Delete -> provider cleanup -> Finalize -> Recreate rather than hot replacement.
+replacement_code="$(curl -sS -o /tmp/workload-replacement.out -w '%{http_code}' -X PUT   "$BASE_URL/api/v1/workloads/$WORKLOAD_ID"   -H 'Content-Type: application/json'   -d "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":2},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.37\",\"command\":[\"sh\",\"-c\",\"echo replacement\"],\"accelerator\":{\"class\":\"h100-80g\",\"quota\":1}}}")"
+[[ "$replacement_code" == "409" ]] || { echo "active workload replacement returned HTTP $replacement_code" >&2; cat /tmp/workload-replacement.out >&2; exit 1; }
+generation="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.ai\.compute/generation}')"
+[[ "$generation" == "1" ]] || { echo "rejected replacement changed provider generation to $generation" >&2; exit 1; }
 
 # An unbound portable class must fail closed before any Kubernetes Job is created.
 put "/api/v1/workloads/$INVALID_WORKLOAD_ID" "{\"metadata\":{\"id\":\"$INVALID_WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"exit 0\"],\"accelerator\":{\"class\":\"a100-invalid\",\"quota\":1}}}"
