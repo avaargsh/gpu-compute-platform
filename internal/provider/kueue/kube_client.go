@@ -3,6 +3,7 @@ package kueue
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -54,8 +55,12 @@ func (c *KubeClient) ApplyResourceClaim(ctx context.Context, in Job) error {
 		return err
 	}
 	claims := c.core.ResourceV1().ResourceClaims(in.Namespace)
-	_, err = claims.Get(ctx, claim.Name, metav1.GetOptions{})
+	current, err := claims.Get(ctx, claim.Name, metav1.GetOptions{})
 	if err == nil {
+		wantGeneration := strconv.FormatInt(in.Generation, 10)
+		if current.Annotations[generationAnnotation] != wantGeneration {
+			return fmt.Errorf("resource claim %s generation drift: have %q want %q", claim.Name, current.Annotations[generationAnnotation], wantGeneration)
+		}
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
@@ -75,11 +80,14 @@ func (c *KubeClient) ApplyJob(ctx context.Context, in Job) error {
 	}
 
 	jobs := c.core.BatchV1().Jobs(in.Namespace)
-	_, err = jobs.Get(ctx, in.Name, metav1.GetOptions{})
+	current, err := jobs.Get(ctx, in.Name, metav1.GetOptions{})
 	if err == nil {
-		// Jobs are immutable execution objects. Re-applying an existing Job with
-		// Update would also overwrite controller-owned status on every agent tick.
-		// Desired generation changes must use an explicit replacement strategy.
+		// Jobs are immutable execution objects. A different desired generation
+		// must never be accepted as converged by the old provider object.
+		wantGeneration := strconv.FormatInt(in.Generation, 10)
+		if current.Annotations[generationAnnotation] != wantGeneration {
+			return fmt.Errorf("job %s generation drift: have %q want %q", in.Name, current.Annotations[generationAnnotation], wantGeneration)
+		}
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
