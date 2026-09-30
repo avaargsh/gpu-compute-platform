@@ -108,44 +108,9 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		"accelerator": in.Spec.Accelerator,
 	}
 
-	// Fast-path an already committed workload before checking the current pool
-	// lifecycle. This preserves identical PUT replay after a lost ACK even if the
-	// parent pool has since entered deletion.
-	existingClusterID, existing, found, err := a.store.LocateDesired(r.Context(), "Workload", in.Metadata.ID)
-	if err != nil {
-		if errors.Is(err, agentstore.ErrIdentityConflict) {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if found {
-		if existing.DeletionTimestamp != nil {
-			http.Error(w, "workload is deleting; wait for finalization before recreate", http.StatusConflict)
-			return
-		}
-		if in.Metadata.Generation < existing.Generation {
-			http.Error(w, agentstore.ErrStaleGeneration.Error(), http.StatusConflict)
-			return
-		}
-		if existingClusterID != poolPlacement.ClusterID || in.Metadata.Generation != existing.Generation {
-			http.Error(w, "active workload is immutable; delete and recreate with a higher generation", http.StatusConflict)
-			return
-		}
-		equal, err := desiredSpecEqual(existing.Spec, spec)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if !equal {
-			http.Error(w, "active workload is immutable; delete and recreate with a higher generation", http.StatusConflict)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
+	// The Store owns replay, identity and parent-lifecycle admission as one
+	// atomic operation. Do not preflight here: a lookup followed by a write would
+	// reopen TOCTOU races with concurrent finalization or cross-cluster create.
 	err = a.store.CreateWorkloadDesired(
 		r.Context(),
 		poolPlacement.ClusterID,
