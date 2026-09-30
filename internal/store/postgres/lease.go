@@ -33,12 +33,20 @@ func (s *Store) ClaimReconcileLease(
 	}
 	defer tx.Rollback()
 
+	if err := lockDesiredLifecycleTx(
+		ctx, tx, clusterID, kind, resourceID,
+	); err != nil {
+		return false, err
+	}
+
+	// Lifecycle mutations are serialized by the advisory lock, so a plain
+	// existence read is enough here. Avoid holding a desired-row SHARE lock
+	// while acquiring the lease row; Report/Finalize lock lease -> desired.
 	var exists int
 	err = tx.QueryRowContext(ctx, `
 SELECT 1
 FROM desired_resources
 WHERE cluster_id = $1 AND kind = $2 AND resource_id = $3
-FOR SHARE
 `, clusterID, kind, resourceID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
