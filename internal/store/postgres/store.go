@@ -260,7 +260,7 @@ FOR UPDATE
 			return agentstore.ErrIdentityConflict
 		}
 		if existingDeletion.Valid {
-			return agentstore.ErrDesiredNotDeleting
+			return agentstore.ErrDesiredDeleting
 		}
 		if existingGeneration != in.Generation || !existingSpecMatches {
 			return agentstore.ErrStaleGeneration
