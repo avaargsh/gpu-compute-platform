@@ -681,4 +681,3 @@ func TestMemoryFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
 		t.Fatalf("future replay err=%v, want ErrDesiredNotFound", err)
 	}
 }
-
