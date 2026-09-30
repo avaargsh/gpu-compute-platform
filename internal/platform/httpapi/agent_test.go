@@ -105,7 +105,6 @@ func TestAgentReportRejectsStaleLeaseOwner(t *testing.T) {
 	}
 }
 
-
 func TestAgentFinalizeDesiredTreatsCommittedReplayAsSuccess(t *testing.T) {
 	store := agentstore.NewMemory()
 	ctx := context.Background()
@@ -132,11 +131,11 @@ func TestAgentFinalizeDesiredTreatsCommittedReplayAsSuccess(t *testing.T) {
 	server := httptest.NewServer(NewRouterWithAgentStore(store))
 	defer server.Close()
 	payload, _ := json.Marshal(agent.FinalizeDesiredRequest{
-		ClusterID: "cluster-a",
-		Kind: "Workload",
+		ClusterID:  "cluster-a",
+		Kind:       "Workload",
 		ResourceID: "train-finalize-replay",
 		Generation: 4,
-		Owner: "agent-a",
+		Owner:      "agent-a",
 	})
 
 	for attempt := 1; attempt <= 2; attempt++ {
