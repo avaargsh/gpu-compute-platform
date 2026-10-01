@@ -46,6 +46,7 @@ release claim auditable when unrelated tests are added or removed.
 | Lease contention prevents duplicate provider writers | `TestRunnerSkipsProviderWhenLeaseIsContended` |
 | Final observation/finalize failures are replay-safe | `TestRunnerDeletionReplaysAfterFinalObservationFailure`, `TestRunnerDeletionReplaysAfterFinalizeFailure` |
 | Lease takeover fences stale writers | `TestPostgresLeaseTakeoverFencesStaleReportAndFinalize` |
+| Repeated concurrent lease claims admit exactly one live owner | `TestPostgresLeaseClaimStressHasSingleLiveOwner` |
 | Finalize atomically clears runtime state and writes tombstone | `TestPostgresFinalizeDesiredAtomicallyCleansRuntimeState` |
 | Old generation cannot cross a tombstone; newer recreate can | `TestPostgresTombstoneFencesOldGenerationAndAllowsNewerRecreate` |
 | PostgreSQL reconstruction preserves desired/observed/lease state | `TestPostgresStateSurvivesStoreReconstruction` |
@@ -54,6 +55,7 @@ release claim auditable when unrelated tests are added or removed.
 | Lost-ACK workload admission replay remains idempotent | `TestPostgresCreateWorkloadDesiredPreservesLostAckReplay` |
 | Owned finalize replay is idempotent after a lost ACK | `TestPostgresFinalizeDesiredOwnedIsIdempotentAfterLostAck` |
 | Generic desired upsert cannot cancel active deletion | `TestPostgresUpsertCannotCancelDeletionLifecycle` |
+| Repeated delete/upsert races preserve deletion timestamp and cleanup finalizer | `TestPostgresLifecycleRaceStressPreservesDeletionFence` |
 | Recreate waits for committed finalization and consumes tombstone | `TestPostgresRecreateWaitsForFinalizationReceiptAndConsumesTombstone` |
 | Legacy/current tombstone coexistence cannot shadow current desired identity | `TestPostgresOwnedFinalizePrefersCurrentDesiredOverOlderTombstone` |
 | Public API requires delete/finalize/recreate for immutable workload changes | `TestResourceAPIRequiresDeleteRecreateForWorkloadChanges` |
@@ -62,6 +64,8 @@ release claim auditable when unrelated tests are added or removed.
 If an invariant is renamed or replaced, the release gate and this table must move
 in the same change. A green generic `go test ./...` run is not a substitute for
 this named lifecycle proof.
+
+The two stress contracts repeat their critical PostgreSQL races 20 times per test run. They use synchronized goroutine starts rather than random sleeps, so CI repeatedly exercises lock/serialization semantics without turning the release gate into a probabilistic soak test.
 
 ## v0.1 restart contract
 
