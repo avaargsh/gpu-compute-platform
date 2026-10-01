@@ -34,6 +34,35 @@ make e2e-golden
 
 CI must pass both before merge.
 
+## Machine-bound lifecycle matrix
+
+`make acceptance-contract` is intentionally pinned to named invariants rather
+than being only an alias for the whole unit-test tree. This makes the v0.1
+release claim auditable when unrelated tests are added or removed.
+
+| Invariant | Contract proof |
+| --- | --- |
+| Agent restart replays the same desired identity | `TestRunnerRestartReplaysDesiredSafely` |
+| Lease contention prevents duplicate provider writers | `TestRunnerSkipsProviderWhenLeaseIsContended` |
+| Final observation/finalize failures are replay-safe | `TestRunnerDeletionReplaysAfterFinalObservationFailure`, `TestRunnerDeletionReplaysAfterFinalizeFailure` |
+| Lease takeover fences stale writers | `TestPostgresLeaseTakeoverFencesStaleReportAndFinalize` |
+| Finalize atomically clears runtime state and writes tombstone | `TestPostgresFinalizeDesiredAtomicallyCleansRuntimeState` |
+| Old generation cannot cross a tombstone; newer recreate can | `TestPostgresTombstoneFencesOldGenerationAndAllowsNewerRecreate` |
+| PostgreSQL reconstruction preserves desired/observed/lease state | `TestPostgresStateSurvivesStoreReconstruction` |
+| Restart preserves deletion intent and tombstone fence | `TestPostgresRestartPreservesDeletionIntentAndTombstoneFence` |
+| Workload admission cannot cross a concurrent parent-pool delete | `TestPostgresCreateWorkloadDesiredRejectsConcurrentPoolDelete` |
+| Lost-ACK workload admission replay remains idempotent | `TestPostgresCreateWorkloadDesiredPreservesLostAckReplay` |
+| Owned finalize replay is idempotent after a lost ACK | `TestPostgresFinalizeDesiredOwnedIsIdempotentAfterLostAck` |
+| Generic desired upsert cannot cancel active deletion | `TestPostgresUpsertCannotCancelDeletionLifecycle` |
+| Recreate waits for committed finalization and consumes tombstone | `TestPostgresRecreateWaitsForFinalizationReceiptAndConsumesTombstone` |
+| Legacy/current tombstone coexistence cannot shadow current desired identity | `TestPostgresOwnedFinalizePrefersCurrentDesiredOverOlderTombstone` |
+| Public API requires delete/finalize/recreate for immutable workload changes | `TestResourceAPIRequiresDeleteRecreateForWorkloadChanges` |
+| Public API rejects stale workload generation rollback | `TestResourceAPIRejectsStaleWorkloadGenerationWithoutRollback` |
+
+If an invariant is renamed or replaced, the release gate and this table must move
+in the same change. A green generic `go test ./...` run is not a substitute for
+this named lifecycle proof.
+
 ## v0.1 restart contract
 
 ### Cluster Agent restart
