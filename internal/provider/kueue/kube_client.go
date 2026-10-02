@@ -52,17 +52,14 @@ func (c *KubeClient) ApplyJob(ctx context.Context, in Job) error {
 	}
 
 	jobs := c.core.BatchV1().Jobs(in.Namespace)
-	_, err = jobs.Get(ctx, in.Name, metav1.GetOptions{})
+	current, err := jobs.Get(ctx, in.Name, metav1.GetOptions{})
 	if err == nil {
 		// A replay of the same desired generation is safe: the execution object
 		// already exists under its deterministic identity, so no second Job is
 		// created. A newer desired generation is not silently acknowledged,
 		// because Jobs are immutable and require an explicit replacement policy.
 		wantGeneration := job.Annotations["ai.compute/generation"]
-		gotGeneration := ""
-		if current, getErr := jobs.Get(ctx, in.Name, metav1.GetOptions{}); getErr == nil {
-			gotGeneration = current.Annotations["ai.compute/generation"]
-		}
+		gotGeneration := current.Annotations["ai.compute/generation"]
 		if gotGeneration != wantGeneration {
 			return fmt.Errorf("existing job generation %q does not match desired generation %q", gotGeneration, wantGeneration)
 		}
