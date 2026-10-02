@@ -50,7 +50,7 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 		Annotations: map[string]string{
 			"ai.compute/accelerator-class":  in.Accelerator.Class,
 			"ai.compute/accelerator-flavor": binding.Flavor,
-			"ai.compute/generation":          fmt.Sprintf("%d", in.Generation),
+			"ai.compute/generation":         fmt.Sprintf("%d", in.Generation),
 		},
 	}, nil
 }
