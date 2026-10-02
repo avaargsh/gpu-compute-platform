@@ -14,6 +14,7 @@ type Lifecycle struct {
 	runner            *Runner
 	agentVersion      string
 	kubernetesVersion string
+	capabilities      domain.ClusterCapabilities
 	interval          time.Duration
 	now               func() time.Time
 }
@@ -24,6 +25,7 @@ func NewLifecycle(
 	runner *Runner,
 	agentVersion string,
 	kubernetesVersion string,
+	capabilities domain.ClusterCapabilities,
 	interval time.Duration,
 ) *Lifecycle {
 	if interval <= 0 {
@@ -35,6 +37,7 @@ func NewLifecycle(
 		runner:            runner,
 		agentVersion:      agentVersion,
 		kubernetesVersion: kubernetesVersion,
+		capabilities:      capabilities,
 		interval:          interval,
 		now:               time.Now,
 	}
@@ -48,6 +51,7 @@ func (l *Lifecycle) Run(ctx context.Context) error {
 		ClusterID:         l.clusterID,
 		AgentVersion:      l.agentVersion,
 		KubernetesVersion: l.kubernetesVersion,
+		Capabilities:      l.capabilities,
 	}); err != nil {
 		return fmt.Errorf("register agent: %w", err)
 	}
