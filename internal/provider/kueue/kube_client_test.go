@@ -402,3 +402,52 @@ func TestApplyJobFailsClosedOnGenerationMismatch(t *testing.T) {
 		t.Fatalf("generation mismatch mutated existing execution object: %#v", got.Annotations)
 	}
 }
+
+
+func TestProviderRecoversAfterApplyWithoutObservationByReplayingSameJob(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{workloadGVR: "WorkloadList"},
+	)
+	provider := NewProvider(NewKubeClient(coreClient, dynamicClient))
+	projection := baseprovider.WorkloadProjection{
+		WorkloadID: "train-crash", PoolID: "pool-1", ClusterID: "cluster-a",
+		Namespace: "project-1", Generation: 11, Image: "busybox:1.36",
+		Accelerator: domain.AcceleratorRequest{Class: "h100", Quota: 1},
+		AcceleratorBinding: domain.AcceleratorBinding{
+			Class: "h100", ResourceName: "vendor.example/gpu", Flavor: "h100",
+		},
+	}
+
+	// Simulate worker A reaching the provider side effect and then dying before
+	// it can publish the observation to the control plane.
+	job, err := ProjectWorkload(projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.client.ApplyJob(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+
+	// Worker B replays the full provider reconcile. It must reuse the same Job,
+	// independently observe it, and return the desired generation.
+	got, err := provider.ReconcileWorkload(ctx, projection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := coreClient.BatchV1().Jobs("project-1").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.Items) != 1 {
+		t.Fatalf("crash recovery duplicated provider side effects: jobs=%d", len(jobs.Items))
+	}
+	if got.ObservedGeneration != 11 {
+		t.Fatalf("recovered generation=%d, want 11", got.ObservedGeneration)
+	}
+	if jobs.Items[0].Annotations["ai.compute/generation"] != "11" {
+		t.Fatalf("provider identity lost generation fence: %#v", jobs.Items[0].Annotations)
+	}
+}
