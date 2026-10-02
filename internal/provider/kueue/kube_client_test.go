@@ -351,3 +351,54 @@ func TestApplyExistingJobPreservesControllerStatus(t *testing.T) {
 		t.Fatalf("reconcile erased controller-owned job status: %#v", got.Status)
 	}
 }
+
+
+func TestApplyJobReplayIsIdempotentForSameGeneration(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	client := NewKubeClient(coreClient, nil)
+	in := Job{
+		Name: "job-replay", Namespace: "project-1", Image: "busybox:1.36",
+		Resources: map[string]int64{"vendor.example/gpu": 1},
+		Annotations: map[string]string{"ai.compute/generation": "7"},
+	}
+	if err := client.ApplyJob(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ApplyJob(ctx, in); err != nil {
+		t.Fatalf("same-generation replay must be a no-op: %v", err)
+	}
+	jobs, err := coreClient.BatchV1().Jobs("project-1").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.Items) != 1 {
+		t.Fatalf("replay created duplicate execution objects: %d", len(jobs.Items))
+	}
+}
+
+func TestApplyJobFailsClosedOnGenerationMismatch(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	client := NewKubeClient(coreClient, nil)
+	base := Job{
+		Name: "job-generation", Namespace: "project-1", Image: "busybox:1.36",
+		Resources: map[string]int64{"vendor.example/gpu": 1},
+		Annotations: map[string]string{"ai.compute/generation": "7"},
+	}
+	if err := client.ApplyJob(ctx, base); err != nil {
+		t.Fatal(err)
+	}
+	next := base
+	next.Annotations = map[string]string{"ai.compute/generation": "8"}
+	if err := client.ApplyJob(ctx, next); err == nil {
+		t.Fatal("new desired generation must not silently reuse an immutable older Job")
+	}
+	got, err := coreClient.BatchV1().Jobs("project-1").Get(ctx, base.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Annotations["ai.compute/generation"] != "7" {
+		t.Fatalf("generation mismatch mutated existing execution object: %#v", got.Annotations)
+	}
+}
