@@ -21,22 +21,16 @@ Vue Console
     | REST /api/v1
     v
 Go Control Plane
-    ^
-    | registration / heartbeat / capabilities
-    |
+    ^          |
+    |          | pull desired state
+    | register |
+    | heartbeat|
+    | report   v
 Cluster Agent
     |
-    | pull desired state / report observation
+    | provider reconciliation / observation
     v
 Kubernetes + Kueue + accelerator stack
-    |
-    | provider reconciliation
-    v
-Kubernetes + Kueue + accelerator stack
-    |
-    | observed state / evidence
-    v
-Go Control Plane
 ```
 
 ## Source of truth
