@@ -403,7 +403,6 @@ func TestApplyExistingResourceClaimRejectsStaleGeneration(t *testing.T) {
 	}
 }
 
-
 func TestApplyJobReplaysAfterLostCreateAckWithoutDuplicate(t *testing.T) {
 	ctx := context.Background()
 	coreClient := kubefake.NewSimpleClientset()
@@ -553,7 +552,6 @@ func TestApplyJobCreateRaceRejectsDifferentGeneration(t *testing.T) {
 		t.Fatalf("different-generation create race must fail closed, got %v", err)
 	}
 }
-
 
 func TestApplyResourceClaimAdoptsSameGenerationAfterCreateRace(t *testing.T) {
 	ctx := context.Background()
