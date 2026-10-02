@@ -271,7 +271,7 @@ func (c *KubeClient) deleteDynamic(ctx context.Context, gvr schema.GroupVersionR
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
-	_, err = resource.Get(ctx, obj.GetName(), metav1.GetOptions{})
+	_, err = resource.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return true, nil
 	}
