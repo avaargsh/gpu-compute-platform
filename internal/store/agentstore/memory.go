@@ -20,6 +20,7 @@ type memoryLease struct {
 type Memory struct {
 	mu            sync.RWMutex
 	registrations map[domain.ID]agent.Registration
+	registeredAt  map[domain.ID]time.Time
 	heartbeats    map[domain.ID]agent.Heartbeat
 	desired       map[domain.ID][]agent.DesiredResource
 	observations  map[domain.ID][]agent.Observation
@@ -31,6 +32,7 @@ type Memory struct {
 func NewMemory() *Memory {
 	return &Memory{
 		registrations: make(map[domain.ID]agent.Registration),
+		registeredAt:  make(map[domain.ID]time.Time),
 		heartbeats:    make(map[domain.ID]agent.Heartbeat),
 		desired:       make(map[domain.ID][]agent.DesiredResource),
 		observations:  make(map[domain.ID][]agent.Observation),
@@ -44,7 +46,27 @@ func (m *Memory) Register(_ context.Context, in agent.Registration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.registrations[in.ClusterID] = in
+	m.registeredAt[in.ClusterID] = m.now().UTC()
 	return nil
+}
+
+func (m *Memory) GetAgentStatus(_ context.Context, clusterID domain.ID) (agent.AgentStatus, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	registration, ok := m.registrations[clusterID]
+	if !ok {
+		return agent.AgentStatus{}, false, nil
+	}
+	out := agent.AgentStatus{
+		Registration: registration,
+		RegisteredAt: m.registeredAt[clusterID],
+	}
+	if heartbeat, found := m.heartbeats[clusterID]; found {
+		at := heartbeat.At.UTC()
+		out.LastHeartbeatAt = &at
+	}
+	return out, true, nil
 }
 
 func (m *Memory) Heartbeat(_ context.Context, in agent.Heartbeat) error {

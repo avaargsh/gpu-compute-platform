@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
@@ -146,5 +147,92 @@ func TestAgentFinalizeDesiredTreatsCommittedReplayAsSuccess(t *testing.T) {
 		if resp.StatusCode != http.StatusNoContent {
 			t.Fatalf("attempt %d status=%d, want 204", attempt, resp.StatusCode)
 		}
+	}
+}
+
+func TestClusterStatusReturnsRegisteredCapabilities(t *testing.T) {
+	store := agentstore.NewMemory()
+	server := httptest.NewServer(NewRouterWithAgentStore(store))
+	defer server.Close()
+
+	registration := agent.Registration{
+		ClusterID:         "cluster-capable",
+		AgentVersion:      "v0.2.0",
+		KubernetesVersion: "v1.34.1",
+		Capabilities: domain.ClusterCapabilities{
+			Kueue:        true,
+			Accelerators: []string{"h100-80g", "metax-c500"},
+		},
+	}
+	body, err := json.Marshal(registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := server.Client().Post(
+		server.URL+"/api/v1/agent/register",
+		"application/json",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("register status=%d, want 204", resp.StatusCode)
+	}
+
+	heartbeatAt := time.Date(2026, 10, 2, 6, 0, 0, 0, time.UTC)
+	heartbeatBody, _ := json.Marshal(agent.Heartbeat{
+		ClusterID: registration.ClusterID,
+		At:        heartbeatAt,
+	})
+	heartbeatResp, err := server.Client().Post(
+		server.URL+"/api/v1/agent/heartbeat",
+		"application/json",
+		bytes.NewReader(heartbeatBody),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	heartbeatResp.Body.Close()
+	if heartbeatResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("heartbeat status=%d, want 204", heartbeatResp.StatusCode)
+	}
+
+	statusResp, err := server.Client().Get(
+		server.URL + "/api/v1/clusters/cluster-capable/status",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer statusResp.Body.Close()
+	if statusResp.StatusCode != http.StatusOK {
+		t.Fatalf("status endpoint=%d, want 200", statusResp.StatusCode)
+	}
+	var status agent.AgentStatus
+	if err := json.NewDecoder(statusResp.Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	if !status.Capabilities.Kueue ||
+		len(status.Capabilities.Accelerators) != 2 ||
+		status.Capabilities.Accelerators[1] != "metax-c500" {
+		t.Fatalf("unexpected capabilities: %#v", status.Capabilities)
+	}
+	if status.LastHeartbeatAt == nil || !status.LastHeartbeatAt.Equal(heartbeatAt) {
+		t.Fatalf("heartbeat=%v, want %v", status.LastHeartbeatAt, heartbeatAt)
+	}
+}
+
+func TestClusterStatusReturnsNotFoundBeforeRegistration(t *testing.T) {
+	server := httptest.NewServer(NewRouterWithAgentStore(agentstore.NewMemory()))
+	defer server.Close()
+
+	resp, err := server.Client().Get(server.URL + "/api/v1/clusters/unknown/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status=%d, want 404", resp.StatusCode)
 	}
 }

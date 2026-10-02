@@ -2,9 +2,13 @@ CREATE TABLE IF NOT EXISTS cluster_agents (
     cluster_id TEXT PRIMARY KEY,
     agent_version TEXT NOT NULL,
     kubernetes_version TEXT NOT NULL DEFAULT '',
+    capabilities JSONB NOT NULL DEFAULT '{}'::jsonb,
     registered_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_heartbeat_at TIMESTAMPTZ
 );
+
+ALTER TABLE cluster_agents
+    ADD COLUMN IF NOT EXISTS capabilities JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS desired_resources (
     cluster_id TEXT NOT NULL,

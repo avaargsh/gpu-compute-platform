@@ -49,6 +49,24 @@ func (a *AgentAPI) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *AgentAPI) Status(w http.ResponseWriter, r *http.Request) {
+	clusterID := domain.ID(r.PathValue("clusterID"))
+	if clusterID == "" {
+		http.Error(w, "clusterId is required", http.StatusBadRequest)
+		return
+	}
+	status, found, err := a.store.GetAgentStatus(r.Context(), clusterID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
 func (a *AgentAPI) Desired(w http.ResponseWriter, r *http.Request) {
 	clusterID := domain.ID(r.URL.Query().Get("clusterId"))
 	if clusterID == "" {

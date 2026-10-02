@@ -77,6 +77,7 @@ func main() {
 		runner,
 		agentVersion,
 		serverVersion.GitVersion,
+		capabilities,
 		syncInterval,
 	)
 

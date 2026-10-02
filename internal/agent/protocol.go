@@ -8,9 +8,16 @@ import (
 )
 
 type Registration struct {
-	ClusterID         domain.ID `json:"clusterId"`
-	AgentVersion      string    `json:"agentVersion"`
-	KubernetesVersion string    `json:"kubernetesVersion"`
+	ClusterID         domain.ID                  `json:"clusterId"`
+	AgentVersion      string                     `json:"agentVersion"`
+	KubernetesVersion string                     `json:"kubernetesVersion"`
+	Capabilities      domain.ClusterCapabilities `json:"capabilities"`
+}
+
+type AgentStatus struct {
+	Registration
+	RegisteredAt    time.Time  `json:"registeredAt"`
+	LastHeartbeatAt *time.Time `json:"lastHeartbeatAt,omitempty"`
 }
 
 type Heartbeat struct {

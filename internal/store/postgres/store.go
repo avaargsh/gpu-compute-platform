@@ -24,14 +24,19 @@ func (s *Store) Register(ctx context.Context, in agent.Registration) error {
 	if s.db == nil {
 		return fmt.Errorf("postgres database is required")
 	}
-	_, err := s.db.ExecContext(ctx, `
-INSERT INTO cluster_agents (cluster_id, agent_version, kubernetes_version)
-VALUES ($1, $2, $3)
+	capabilities, err := json.Marshal(in.Capabilities)
+	if err != nil {
+		return fmt.Errorf("marshal cluster capabilities: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO cluster_agents (cluster_id, agent_version, kubernetes_version, capabilities)
+VALUES ($1, $2, $3, $4)
 ON CONFLICT (cluster_id) DO UPDATE SET
     agent_version = EXCLUDED.agent_version,
     kubernetes_version = EXCLUDED.kubernetes_version,
+    capabilities = EXCLUDED.capabilities,
     registered_at = now()
-`, in.ClusterID, in.AgentVersion, in.KubernetesVersion)
+`, in.ClusterID, in.AgentVersion, in.KubernetesVersion, capabilities)
 	return err
 }
 
@@ -43,6 +48,41 @@ func (s *Store) Heartbeat(ctx context.Context, in agent.Heartbeat) error {
 UPDATE cluster_agents SET last_heartbeat_at = $2 WHERE cluster_id = $1
 `, in.ClusterID, in.At)
 	return err
+}
+
+func (s *Store) GetAgentStatus(ctx context.Context, clusterID domain.ID) (agent.AgentStatus, bool, error) {
+	if s.db == nil {
+		return agent.AgentStatus{}, false, fmt.Errorf("postgres database is required")
+	}
+	var out agent.AgentStatus
+	var capabilities []byte
+	var lastHeartbeat sql.NullTime
+	err := s.db.QueryRowContext(ctx, `
+SELECT cluster_id, agent_version, kubernetes_version, capabilities, registered_at, last_heartbeat_at
+FROM cluster_agents
+WHERE cluster_id = $1
+`, clusterID).Scan(
+		&out.ClusterID,
+		&out.AgentVersion,
+		&out.KubernetesVersion,
+		&capabilities,
+		&out.RegisteredAt,
+		&lastHeartbeat,
+	)
+	if err == sql.ErrNoRows {
+		return agent.AgentStatus{}, false, nil
+	}
+	if err != nil {
+		return agent.AgentStatus{}, false, err
+	}
+	if err := json.Unmarshal(capabilities, &out.Capabilities); err != nil {
+		return agent.AgentStatus{}, false, fmt.Errorf("decode cluster capabilities: %w", err)
+	}
+	if lastHeartbeat.Valid {
+		at := lastHeartbeat.Time.UTC()
+		out.LastHeartbeatAt = &at
+	}
+	return out, true, nil
 }
 
 func (s *Store) Desired(ctx context.Context, clusterID domain.ID) ([]agent.DesiredResource, error) {

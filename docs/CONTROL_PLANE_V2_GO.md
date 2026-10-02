@@ -21,18 +21,16 @@ Vue Console
     | REST /api/v1
     v
 Go Control Plane
-    |
-    | desired state
-    v
+    ^          |
+    |          | pull desired state
+    | register |
+    | heartbeat|
+    | report   v
 Cluster Agent
     |
-    | provider reconciliation
+    | provider reconciliation / observation
     v
 Kubernetes + Kueue + accelerator stack
-    |
-    | observed state / evidence
-    v
-Go Control Plane
 ```
 
 ## Source of truth
@@ -52,7 +50,9 @@ Kubernetes is an execution provider. Kubernetes resources are projections of pla
 7. Every reconciled resource carries desired generation and observed generation.
 8. Conditions and evidence are first-class status.
 9. The cluster agent owns downstream observation and provider reconciliation.
-10. The public API does not expose arbitrary Kubernetes CRUD as the product model.
+10. Cluster execution capabilities are discovered in the compute plane and persisted as control-plane facts at registration time.
+11. Capability status records factual versions, capabilities and heartbeat timestamps; availability policy is evaluated separately rather than encoded into discovery.
+12. The public API does not expose arbitrary Kubernetes CRUD as the product model.
 
 ## Initial Golden Path
 
@@ -91,3 +91,37 @@ internal/
 ```
 
 The first implementation remains a modular monolith. Service decomposition is intentionally deferred.
+
+
+## Cluster capability registration
+
+The Cluster Agent discovers execution facts from its local Kubernetes cluster and
+publishes them during registration:
+
+```text
+Kubernetes discovery
+      |
+      v
+ClusterCapabilities
+  - Kueue
+  - Serving
+  - accelerator classes
+      |
+      v
+Agent Registration
+      |
+      v
+PostgreSQL cluster_agents.capabilities
+      |
+      v
+GET /api/v1/clusters/{clusterID}/status
+```
+
+This is deliberately an inventory of observed execution capabilities, not a
+scheduler and not a second desired-state model. Future placement preflight may
+consume these facts, but registration itself does not make placement decisions.
+
+The control plane stores `lastHeartbeatAt` instead of materializing a permanent
+`connected` boolean. Liveness thresholds depend on deployment policy and Agent
+sync cadence and should be evaluated from the timestamp rather than hidden in
+capability discovery.

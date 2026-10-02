@@ -32,6 +32,7 @@ const ProviderCleanupFinalizer = "gpu-compute-platform.io/provider-cleanup"
 type Store interface {
 	Register(context.Context, agent.Registration) error
 	Heartbeat(context.Context, agent.Heartbeat) error
+	GetAgentStatus(context.Context, domain.ID) (agent.AgentStatus, bool, error)
 	Desired(context.Context, domain.ID) ([]agent.DesiredResource, error)
 	GetDesired(context.Context, domain.ID, string, domain.ID) (agent.DesiredResource, bool, error)
 	LocateDesired(context.Context, string, domain.ID) (domain.ID, agent.DesiredResource, bool, error)
