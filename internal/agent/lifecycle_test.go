@@ -5,17 +5,21 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 )
 
 type lifecycleControl struct {
 	fakeControlPlane
-	registered   int
-	heartbeats   int
-	heartbeatErr error
+	registered       int
+	lastRegistration Registration
+	heartbeats       int
+	heartbeatErr     error
 }
 
-func (f *lifecycleControl) Register(context.Context, Registration) error {
+func (f *lifecycleControl) Register(_ context.Context, in Registration) error {
 	f.registered++
+	f.lastRegistration = in
 	return nil
 }
 
@@ -29,7 +33,7 @@ func (f *lifecycleControl) Heartbeat(context.Context, Heartbeat) error {
 func TestLifecycleRegistersAndTicksImmediately(t *testing.T) {
 	control := &lifecycleControl{}
 	runner := NewRunner("cluster-a", control, &fakeRuntime{})
-	lifecycle := NewLifecycle("cluster-a", control, runner, "dev", "v1.34.0", time.Hour)
+	lifecycle := NewLifecycle("cluster-a", control, runner, "dev", "v1.34.0", domain.ClusterCapabilities{}, time.Hour)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -48,7 +52,7 @@ func TestLifecycleRegistersAndTicksImmediately(t *testing.T) {
 func TestLifecycleSurvivesTransientTickFailure(t *testing.T) {
 	control := &lifecycleControl{heartbeatErr: errors.New("temporary control-plane outage")}
 	runner := NewRunner("cluster-a", control, &fakeRuntime{})
-	lifecycle := NewLifecycle("cluster-a", control, runner, "dev", "v1.34.0", time.Millisecond)
+	lifecycle := NewLifecycle("cluster-a", control, runner, "dev", "v1.34.0", domain.ClusterCapabilities{}, time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -68,5 +72,35 @@ func TestLifecycleSurvivesTransientTickFailure(t *testing.T) {
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("run err=%v, want context canceled", err)
+	}
+}
+
+
+func TestLifecycleRegistersDiscoveredCapabilities(t *testing.T) {
+	control := &lifecycleControl{}
+	runner := NewRunner("cluster-a", control, &fakeRuntime{})
+	capabilities := domain.ClusterCapabilities{
+		Kueue:        true,
+		Accelerators: []string{"h100-80g", "metax-c500"},
+	}
+	lifecycle := NewLifecycle(
+		"cluster-a",
+		control,
+		runner,
+		"dev",
+		"v1.34.0",
+		capabilities,
+		time.Hour,
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = lifecycle.Run(ctx)
+
+	got := control.lastRegistration.Capabilities
+	if !got.Kueue || len(got.Accelerators) != 2 ||
+		got.Accelerators[0] != "h100-80g" ||
+		got.Accelerators[1] != "metax-c500" {
+		t.Fatalf("registered capabilities=%#v", got)
 	}
 }
