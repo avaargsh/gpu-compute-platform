@@ -18,6 +18,10 @@ on:
       - "scripts/go-format.sh"
       - "scripts/e2e/go-kind-kueue-golden.sh"
       - "scripts/e2e/install-fake-gpu.sh"
+      - "scripts/verify-production-images.sh"
+      - "deploy/production/**"
+      - "manifests/production/**"
+      - "config/production/**"
       - "internal/**/*.sql"
       - ".github/workflows/go-control-plane.yml"
 
@@ -64,6 +68,8 @@ jobs:
         run: go test ./...
       - name: Release acceptance contracts
         run: make acceptance-contract
+      - name: Production supply-chain policy
+        run: make supply-chain-check
       - name: Build binaries
         run: |
           go build ./cmd/control-plane
