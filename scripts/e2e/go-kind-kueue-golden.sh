@@ -32,6 +32,38 @@ wait_http() {
   done
 }
 
+wait_cluster_capabilities() {
+  local deadline=$((SECONDS + TIMEOUT_SECONDS)) payload
+  while (( SECONDS < deadline )); do
+    payload="$(curl -fsS "$BASE_URL/api/v1/clusters/$CLUSTER_ID/status" 2>/dev/null || true)"
+    if PAYLOAD="$payload" ACCELERATOR_FLAVOR="$ACCELERATOR_FLAVOR" python - <<'PY'
+import json, os
+try:
+    data=json.loads(os.environ["PAYLOAD"])
+except Exception:
+    raise SystemExit(1)
+caps=data.get("capabilities") or {}
+accelerators=caps.get("accelerators") or []
+ok=(
+    data.get("clusterId") is not None
+    and caps.get("kueue") is True
+    and os.environ["ACCELERATOR_FLAVOR"] in accelerators
+    and bool(data.get("kubernetesVersion"))
+    and bool(data.get("lastHeartbeatAt"))
+)
+raise SystemExit(0 if ok else 1)
+PY
+    then
+      printf '%s\n' "$payload"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "timeout waiting for registered Kueue/accelerator capabilities" >&2
+  curl -sS "$BASE_URL/api/v1/clusters/$CLUSTER_ID/status" >&2 || true
+  return 1
+}
+
 put() {
   curl -fsS -X PUT "$BASE_URL$1" -H 'Content-Type: application/json' -d "$2" >/dev/null
 }
@@ -143,7 +175,7 @@ kubectl apply --server-side -f "https://github.com/kubernetes-sigs/kueue/release
 kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout="${TIMEOUT_SECONDS}s"
 
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
-kubectl label node "$node" topology.kubernetes.io/zone=gpu-zone-a ai.compute/rack=rack-a01 --overwrite
+kubectl label node "$node" topology.kubernetes.io/zone=gpu-zone-a ai.compute/rack=rack-a01 "ai.compute/accelerator-class=$ACCELERATOR_FLAVOR" --overwrite
 bash scripts/e2e/install-fake-gpu.sh
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
@@ -162,6 +194,15 @@ AGENT_INSTANCE_ID=agent-a AGENT_SYNC_INTERVAL=60s \
   CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" \
   /tmp/gpu-cluster-agent >/tmp/go-cluster-agent-a.log 2>&1 &
 AGENT_A_PID=$!
+
+capability_status="$(wait_cluster_capabilities)"
+CAPABILITY_STATUS="$capability_status" ACCELERATOR_FLAVOR="$ACCELERATOR_FLAVOR" python - <<'PY'
+import json, os
+data=json.loads(os.environ["CAPABILITY_STATUS"])
+caps=data["capabilities"]
+assert caps["kueue"] is True, caps
+assert os.environ["ACCELERATOR_FLAVOR"] in caps.get("accelerators", []), caps
+PY
 
 result="$(wait_workload)"
 condition_true "$result" "Admitted"
@@ -337,4 +378,4 @@ if ! kubectl get resourceflavor "$ACCELERATOR_FLAVOR" >/dev/null 2>&1; then
 fi
 
 echo "$result"
-echo "GO GOLDEN PASS: Control Plane -> Agent A/B lease fence -> kind -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete"
+echo "GO GOLDEN PASS: Control Plane -> Capability Registration -> Agent A/B lease fence -> kind -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete"
