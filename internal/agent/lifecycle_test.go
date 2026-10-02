@@ -75,7 +75,6 @@ func TestLifecycleSurvivesTransientTickFailure(t *testing.T) {
 	}
 }
 
-
 func TestLifecycleRegistersDiscoveredCapabilities(t *testing.T) {
 	control := &lifecycleControl{}
 	runner := NewRunner("cluster-a", control, &fakeRuntime{})
