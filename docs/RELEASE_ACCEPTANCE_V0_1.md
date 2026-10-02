@@ -14,6 +14,7 @@ This document defines the release gate for the v0.1 Go control plane. A change i
 | Agent restart | process restart losing convergence safety | new Runner replay contract + Golden Path restart |
 | Control-plane restart | desired/observation/lease state lost with process memory | PostgreSQL store reconstruction contract |
 | Evidence | successful state without provider proof | Job + Kueue evidence refs in Golden Path |
+| Capability registration | control plane assumes scheduler/accelerator support that the real cluster did not report | real Agent discovery -> registration -> PostgreSQL/API status in Golden Path |
 | Deletion replay | crash between provider cleanup, evidence report and finalize | final-observation/finalize replay contracts |
 | Tombstone | deleted generation resurrected by stale write | tombstone fence/recreate contract |
 | Workload replacement | immutable Job serving changed desired intent | public delete/finalize/recreate contract |
@@ -148,19 +149,20 @@ The v0.1 acceptance suite proves this at the store boundary. A future deployment
 
 The kind acceptance path must prove all of the following against real Kubernetes/Kueue objects:
 
-1. H100 portable intent resolves to the configured provider resource and flavor.
-2. Kueue reaches QuotaReserved and Admitted.
-3. the Job carries `ai.compute/generation=1`.
-4. status exposes both Job evidence and Kueue Workload evidence.
-5. Agent A's observation identifies its explicit reconcile owner.
-6. while A's resource lease is live, concurrent Agent B cannot become the Workload observation writer.
-7. killing Agent A does not implicitly erase the resource lease.
-8. after lease expiry, Agent B takes ownership and the Kubernetes Job UID remains unchanged.
-9. an identical same-generation PUT remains idempotent.
-10. an in-place generation/spec replacement returns HTTP 409.
-11. an invalid accelerator class fails closed without creating a Job.
-12. deletion removes provider-owned Workload resources before finalization.
-13. ComputePool cleanup waits for dependent Workloads and preserves shared ResourceFlavor.
+1. the real Cluster Agent registers Kueue support, Kubernetes version, heartbeat, and the H100 portable accelerator class through the existing capability-registration path.
+2. H100 portable intent resolves to the configured provider resource and flavor.
+3. Kueue reaches QuotaReserved and Admitted.
+4. the Job carries `ai.compute/generation=1`.
+5. status exposes both Job evidence and Kueue Workload evidence.
+6. Agent A's observation identifies its explicit reconcile owner.
+7. while A's resource lease is live, concurrent Agent B cannot become the Workload observation writer.
+8. killing Agent A does not implicitly erase the resource lease.
+9. after lease expiry, Agent B takes ownership and the Kubernetes Job UID remains unchanged.
+10. an identical same-generation PUT remains idempotent.
+11. an in-place generation/spec replacement returns HTTP 409.
+12. an invalid accelerator class fails closed without creating a Job.
+13. deletion removes provider-owned Workload resources before finalization.
+14. ComputePool cleanup waits for dependent Workloads and preserves shared ResourceFlavor.
 
 ## Release rule
 
@@ -175,4 +177,4 @@ kind/Kueue Golden Path
         = PASS
 ```
 
-DRA, HAMi, multi-provider and advanced placement work must not weaken these gates. New providers fit the lifecycle contract; they do not create a parallel release model.
+The v0.1 gate is frozen around Kueue + Fake GPU. DRA, HAMi, KAI/Volcano execution, serving providers, multi-provider routing, and advanced placement remain deferred until this gate is green and stable. Future providers must fit the same lifecycle/recovery contract; they do not create a parallel release model.

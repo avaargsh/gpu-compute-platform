@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: fmt fmt-check test vet build acceptance-contract kind-up install-kueue install-fake-gpu e2e-golden
+.PHONY: fmt fmt-check test vet build supply-chain-check acceptance-contract kind-up install-kueue install-fake-gpu e2e-golden
 
 fmt:
 	bash scripts/go-format.sh
@@ -17,6 +17,9 @@ vet:
 build:
 	go build ./cmd/control-plane
 	go build ./cmd/cluster-agent
+
+supply-chain-check:
+	bash scripts/verify-production-images.sh
 
 acceptance-contract:
 	go test ./internal/agent -run 'Test(LifecycleRegistersDiscoveredCapabilities|Runner(RestartReplaysDesiredSafely|BacksOffRetryableFailureAndResetsOnNewGeneration|SkipsProviderWhenLeaseIsContended|DeletionReplaysAfterFinalObservationFailure|DeletionReplaysAfterFinalizeFailure))$$'
