@@ -150,7 +150,6 @@ func TestAgentFinalizeDesiredTreatsCommittedReplayAsSuccess(t *testing.T) {
 	}
 }
 
-
 func TestClusterStatusReturnsRegisteredCapabilities(t *testing.T) {
 	store := agentstore.NewMemory()
 	server := httptest.NewServer(NewRouterWithAgentStore(store))
