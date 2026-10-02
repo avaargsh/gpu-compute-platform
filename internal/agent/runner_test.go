@@ -20,6 +20,7 @@ type fakeControlPlane struct {
 	reportBeforeRelease bool
 	reportErr           error
 	finalizeErr         error
+	claimEpoch          int64
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }
@@ -44,7 +45,11 @@ func (f *fakeControlPlane) ClaimReconcileLease(_ context.Context, in ReconcileLe
 	if f.denyLease {
 		return ReconcileLeaseGrant{}, nil
 	}
-	return ReconcileLeaseGrant{Claimed: true, Owner: in.Owner, Epoch: 1, ExpiresAt: time.Now().Add(2 * time.Minute)}, nil
+	epoch := f.claimEpoch
+	if epoch == 0 {
+		epoch = 1
+	}
+	return ReconcileLeaseGrant{Claimed: true, Owner: in.Owner, Epoch: epoch, ExpiresAt: time.Now().Add(2 * time.Minute)}, nil
 }
 func (f *fakeControlPlane) ReleaseReconcileLease(_ context.Context, _ ReconcileLeaseRequest) error {
 	f.releaseCalls++
@@ -388,5 +393,46 @@ func TestRunnerDeletionReplaysAfterFinalizeFailure(t *testing.T) {
 	}
 	if control.releaseCalls != 1 {
 		t.Fatalf("failed finalize must release its lease before replay, releases=%d", control.releaseCalls)
+	}
+}
+
+
+func TestRunnerReplaysProviderAfterCrashBeforeReport(t *testing.T) {
+	control := &fakeControlPlane{
+		reportErr: errors.New("simulated crash after provider apply"),
+		desired: []DesiredResource{{
+			Kind: "ComputePool", ID: "pool-replay", Generation: 7,
+			Spec: map[string]any{"acceleratorBindings": []any{}},
+		}},
+	}
+	runtime := &fakeRuntime{}
+	first := NewRunner("cluster-a", control, runtime)
+	first.leaseOwner = "worker-a"
+	control.claimEpoch = 41
+
+	if err := first.Sync(context.Background()); err == nil {
+		t.Fatal("expected report failure after provider side effect")
+	}
+	if runtime.poolCalls != 1 || len(control.reported) != 0 {
+		t.Fatalf("provider side effect/report boundary not exercised: calls=%d reported=%#v", runtime.poolCalls, control.reported)
+	}
+
+	// Simulate lease expiry and takeover by a fresh agent process. The provider
+	// operation is replayed at least once; the provider contract must make the
+	// deterministic same-generation replay safe.
+	second := NewRunner("cluster-a", control, runtime)
+	second.leaseOwner = "worker-b"
+	control.claimEpoch = 42
+	if err := second.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.poolCalls != 2 {
+		t.Fatalf("takeover must replay provider reconcile, calls=%d", runtime.poolCalls)
+	}
+	if len(control.reported) != 1 || control.reported[0].LeaseOwner != "worker-b" || control.reported[0].LeaseEpoch != 42 {
+		t.Fatalf("only takeover owner may publish recovered observation: %#v", control.reported)
+	}
+	if control.reported[0].ObservedGeneration != 7 {
+		t.Fatalf("recovered observation generation=%d", control.reported[0].ObservedGeneration)
 	}
 }
