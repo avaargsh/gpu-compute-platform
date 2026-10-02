@@ -402,3 +402,200 @@ func TestApplyExistingResourceClaimRejectsStaleGeneration(t *testing.T) {
 		t.Fatalf("expected stale ResourceClaim generation to fail closed, got %v", err)
 	}
 }
+
+func TestApplyJobReplaysAfterLostCreateAckWithoutDuplicate(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	createCalls := 0
+
+	coreClient.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		createCalls++
+		createAction, ok := action.(ktesting.CreateAction)
+		if !ok {
+			t.Fatalf("unexpected create action: %T", action)
+		}
+		job, ok := createAction.GetObject().(*batchv1.Job)
+		if !ok {
+			t.Fatalf("unexpected create object: %T", createAction.GetObject())
+		}
+		if err := coreClient.Tracker().Create(
+			batchv1.SchemeGroupVersion.WithResource("jobs"),
+			job.DeepCopy(),
+			createAction.GetNamespace(),
+		); err != nil {
+			t.Fatalf("persist provider side effect: %v", err)
+		}
+		return true, nil, apierrors.NewTimeoutError("lost create acknowledgement", 1)
+	})
+
+	client := NewKubeClient(coreClient, nil)
+	in := Job{
+		Generation: 7,
+		Name:       "job-lost-ack",
+		Namespace:  "project-1",
+		Image:      "busybox:1.36",
+		Resources:  map[string]int64{"vendor.example/gpu": 1},
+	}
+
+	if err := client.ApplyJob(ctx, in); err == nil || !apierrors.IsTimeout(err) {
+		t.Fatalf("first create must surface the lost acknowledgement as retryable provider error, got %v", err)
+	}
+	if err := client.ApplyJob(ctx, in); err != nil {
+		t.Fatalf("replay must adopt the persisted same-generation Job: %v", err)
+	}
+	if createCalls != 1 {
+		t.Fatalf("replay issued a duplicate CREATE: calls=%d", createCalls)
+	}
+	jobs, err := coreClient.BatchV1().Jobs("project-1").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.Items) != 1 {
+		t.Fatalf("expected one logical provider Job after replay, got %d", len(jobs.Items))
+	}
+}
+
+func TestApplyJobAdoptsSameGenerationAfterCreateRace(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	firstGet := true
+
+	coreClient.PrependReactor("get", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if !firstGet {
+			return false, nil, nil
+		}
+		firstGet = false
+		getAction, ok := action.(ktesting.GetAction)
+		if !ok {
+			t.Fatalf("unexpected get action: %T", action)
+		}
+		return true, nil, apierrors.NewNotFound(batchv1.Resource("jobs"), getAction.GetName())
+	})
+	coreClient.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		createAction, ok := action.(ktesting.CreateAction)
+		if !ok {
+			t.Fatalf("unexpected create action: %T", action)
+		}
+		job, ok := createAction.GetObject().(*batchv1.Job)
+		if !ok {
+			t.Fatalf("unexpected create object: %T", createAction.GetObject())
+		}
+		if err := coreClient.Tracker().Create(
+			batchv1.SchemeGroupVersion.WithResource("jobs"),
+			job.DeepCopy(),
+			createAction.GetNamespace(),
+		); err != nil {
+			t.Fatalf("persist racing provider Job: %v", err)
+		}
+		return true, nil, apierrors.NewAlreadyExists(batchv1.Resource("jobs"), job.Name)
+	})
+
+	client := NewKubeClient(coreClient, nil)
+	err := client.ApplyJob(ctx, Job{
+		Generation: 11,
+		Name:       "job-takeover-race",
+		Namespace:  "project-1",
+		Image:      "busybox:1.36",
+		Resources:  map[string]int64{"vendor.example/gpu": 1},
+	})
+	if err != nil {
+		t.Fatalf("same-generation create race must converge by adoption: %v", err)
+	}
+}
+
+func TestApplyJobCreateRaceRejectsDifferentGeneration(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	firstGet := true
+
+	coreClient.PrependReactor("get", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if !firstGet {
+			return false, nil, nil
+		}
+		firstGet = false
+		getAction, ok := action.(ktesting.GetAction)
+		if !ok {
+			t.Fatalf("unexpected get action: %T", action)
+		}
+		return true, nil, apierrors.NewNotFound(batchv1.Resource("jobs"), getAction.GetName())
+	})
+	coreClient.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		createAction, ok := action.(ktesting.CreateAction)
+		if !ok {
+			t.Fatalf("unexpected create action: %T", action)
+		}
+		job, ok := createAction.GetObject().(*batchv1.Job)
+		if !ok {
+			t.Fatalf("unexpected create object: %T", createAction.GetObject())
+		}
+		stale := job.DeepCopy()
+		stale.Annotations[generationAnnotation] = "10"
+		if err := coreClient.Tracker().Create(
+			batchv1.SchemeGroupVersion.WithResource("jobs"),
+			stale,
+			createAction.GetNamespace(),
+		); err != nil {
+			t.Fatalf("persist stale racing provider Job: %v", err)
+		}
+		return true, nil, apierrors.NewAlreadyExists(batchv1.Resource("jobs"), job.Name)
+	})
+
+	client := NewKubeClient(coreClient, nil)
+	err := client.ApplyJob(ctx, Job{
+		Generation: 11,
+		Name:       "job-generation-race",
+		Namespace:  "project-1",
+		Image:      "busybox:1.36",
+		Resources:  map[string]int64{"vendor.example/gpu": 1},
+	})
+	if err == nil || !strings.Contains(err.Error(), "generation drift") {
+		t.Fatalf("different-generation create race must fail closed, got %v", err)
+	}
+}
+
+func TestApplyResourceClaimAdoptsSameGenerationAfterCreateRace(t *testing.T) {
+	ctx := context.Background()
+	coreClient := kubefake.NewSimpleClientset()
+	firstGet := true
+	resource := schema.GroupResource{Group: "resource.k8s.io", Resource: "resourceclaims"}
+	gvr := schema.GroupVersionResource{Group: "resource.k8s.io", Version: "v1", Resource: "resourceclaims"}
+
+	coreClient.PrependReactor("get", "resourceclaims", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if !firstGet {
+			return false, nil, nil
+		}
+		firstGet = false
+		getAction, ok := action.(ktesting.GetAction)
+		if !ok {
+			t.Fatalf("unexpected get action: %T", action)
+		}
+		return true, nil, apierrors.NewNotFound(resource, getAction.GetName())
+	})
+	coreClient.PrependReactor("create", "resourceclaims", func(action ktesting.Action) (bool, runtime.Object, error) {
+		createAction, ok := action.(ktesting.CreateAction)
+		if !ok {
+			t.Fatalf("unexpected create action: %T", action)
+		}
+		obj := createAction.GetObject().DeepCopyObject()
+		if err := coreClient.Tracker().Create(gvr, obj, createAction.GetNamespace()); err != nil {
+			t.Fatalf("persist racing ResourceClaim: %v", err)
+		}
+		return true, nil, apierrors.NewAlreadyExists(resource, "accelerator-claim-race")
+	})
+
+	client := NewKubeClient(coreClient, nil)
+	err := client.ApplyResourceClaim(ctx, Job{
+		Generation: 5,
+		Name:       "job-claim-race",
+		Namespace:  "project-1",
+		Image:      "busybox:1.36",
+		DRA: &DRARequest{
+			ClaimName:       "accelerator-claim-race",
+			DeviceClassName: "gpu.nvidia.com",
+			Count:           1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("same-generation ResourceClaim create race must converge by adoption: %v", err)
+	}
+}

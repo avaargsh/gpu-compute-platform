@@ -8,6 +8,7 @@ This document defines the release gate for the v0.1 Go control plane. A change i
 | --- | --- | --- |
 | Desired/observed generation | stale provider state reported as current | stale-generation tests + provider generation annotation |
 | Reconcile lease | concurrent agents issuing duplicate side effects | lease ownership/expiry contract |
+| Provider create replay | lost create ACK or GET→CREATE takeover race creating a second logical object | deterministic identity + create-or-adopt tests |
 | Lease write fence | old owner reporting/finalizing after takeover | owner-bound observation/finalize tests |
 | Retry/backoff | transient provider outage becoming terminal drift | retry/backoff contract |
 | Agent restart | process restart losing convergence safety | new Runner replay contract + Golden Path restart |
@@ -43,6 +44,8 @@ release claim auditable when unrelated tests are added or removed.
 | Invariant | Contract proof |
 | --- | --- |
 | Agent restart replays the same desired identity | `TestRunnerRestartReplaysDesiredSafely` |
+| Lost provider create ACK replays without a duplicate logical Job | `TestApplyJobReplaysAfterLostCreateAckWithoutDuplicate` |
+| GET→CREATE takeover race adopts only the same generation | `TestApplyJobAdoptsSameGenerationAfterCreateRace`, `TestApplyJobCreateRaceRejectsDifferentGeneration` |
 | Lease contention prevents duplicate provider writers | `TestRunnerSkipsProviderWhenLeaseIsContended` |
 | Final observation/finalize failures are replay-safe | `TestRunnerDeletionReplaysAfterFinalObservationFailure`, `TestRunnerDeletionReplaysAfterFinalizeFailure` |
 | Lease takeover fences stale writers | `TestPostgresLeaseTakeoverFencesStaleReportAndFinalize` |
@@ -72,6 +75,39 @@ The two stress contracts repeat their critical PostgreSQL races 20 times per tes
 ### Cluster Agent restart
 
 The Agent is disposable process state. After restart it pulls the same desired state and safely replays reconciliation. Provider operations therefore must remain idempotent for the same generation. A restarted Agent must not create a second Job or mutate the execution projection.
+
+### Provider side-effect recovery
+
+The provider boundary is explicitly at-least-once. A reconcile lease limits who
+may begin work, but a remote Kubernetes request can complete after the caller
+loses its response or after lease ownership moves.
+
+Provider correctness therefore depends on deterministic object identity and
+generation-aware adoption:
+
+```text
+GET stable provider identity
+   -> missing
+CREATE
+   -> success                  -> continue
+   -> response lost            -> retry later and observe existing object
+   -> AlreadyExists race       -> re-GET
+                                  -> same generation: adopt
+                                  -> different generation: fail closed
+```
+
+The Kueue/Kubernetes provider binds workload identity to stable Job and
+ResourceClaim names and annotates them with `ai.compute/generation`. It does not
+create attempt-specific execution identities. This prevents lease takeover from
+turning one logical workload into duplicate provider resources.
+
+This does not make provider execution exactly-once. An old owner may still
+finish an in-flight remote call; the control plane prevents that owner from
+committing observation/evidence/finalization after takeover, and the next owner
+converges by observing the deterministic provider identity.
+
+See [PROVIDER_RECOVERY_CONTRACT.md](PROVIDER_RECOVERY_CONTRACT.md) for the full
+provider contract.
 
 ### Lease takeover and write fencing
 

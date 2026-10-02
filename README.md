@@ -53,7 +53,8 @@ The current CPU-only acceptance environment uses Run:ai Fake GPU Operator with a
 - ComputePool accelerator classes are portable intent; provider bindings map them to resource names, flavors, and node labels.
 - The cluster agent owns provider reconciliation and downstream observation.
 - Desired and observed state are generation-aware.
-- Reconcile side effects require a remote lease.
+- Reconciliation is at-least-once: provider side effects use deterministic identity and same-generation adoption rather than claiming exactly-once remote execution.
+- Reconcile side effects require a remote lease; the lease limits concurrent reconcilers but does not make an in-flight provider call atomic with lease expiry.
 - Observation and finalization writes are fenced by the current unexpired reconcile-lease owner; an old Agent cannot commit after ownership moves.
 - Deletion retains Desired state until provider cleanup is observed complete.
 - Finalization writes a generation tombstone and removes observation/lease state atomically in PostgreSQL.
@@ -98,4 +99,4 @@ remain resource-scoped.
 
 The Golden Path creates a kind cluster, installs Kueue and Fake GPU Operator, configures a stable H100 profile, and validates Control Plane -> Agent -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete. It also runs two real cluster-agent processes to prove lease fencing before expiry, takeover after process death/expiry, stable Job UID across takeover, generation fencing, evidence completeness, and immutable workload replacement.
 
-See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract, [docs/WORKLOAD_LIFECYCLE.md](docs/WORKLOAD_LIFECYCLE.md) for the Reserve → Allocate → Bind → Release → Audit workload lifecycle, and [docs/RELEASE_ACCEPTANCE_V0_1.md](docs/RELEASE_ACCEPTANCE_V0_1.md) for the v0.1 release gate.
+See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract, [docs/WORKLOAD_LIFECYCLE.md](docs/WORKLOAD_LIFECYCLE.md) for the Reserve → Allocate → Bind → Release → Audit workload lifecycle, [docs/PROVIDER_RECOVERY_CONTRACT.md](docs/PROVIDER_RECOVERY_CONTRACT.md) for the at-least-once provider recovery model, and [docs/RELEASE_ACCEPTANCE_V0_1.md](docs/RELEASE_ACCEPTANCE_V0_1.md) for the v0.1 release gate.
