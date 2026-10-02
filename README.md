@@ -78,6 +78,12 @@ Run the deterministic release contracts:
 make acceptance-contract
 ```
 
+Check the production image policy (digest pinning + cosign once production manifests exist):
+
+```bash
+make supply-chain-check
+```
+
 Run the real acceptance path:
 
 ```bash
@@ -99,4 +105,4 @@ remain resource-scoped.
 
 The Golden Path creates a kind cluster, installs Kueue and Fake GPU Operator, configures a stable H100 profile, and validates Control Plane -> Agent -> Kueue -> Job/Pod -> Observation -> Finalizer/Delete. It also runs two real cluster-agent processes to prove lease fencing before expiry, takeover after process death/expiry, stable Job UID across takeover, generation fencing, evidence completeness, and immutable workload replacement.
 
-See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract, [docs/WORKLOAD_LIFECYCLE.md](docs/WORKLOAD_LIFECYCLE.md) for the Reserve → Allocate → Bind → Release → Audit workload lifecycle, [docs/PROVIDER_RECOVERY_CONTRACT.md](docs/PROVIDER_RECOVERY_CONTRACT.md) for the at-least-once provider recovery model, and [docs/RELEASE_ACCEPTANCE_V0_1.md](docs/RELEASE_ACCEPTANCE_V0_1.md) for the v0.1 release gate.
+See [docs/CONTROL_PLANE_V2_GO.md](docs/CONTROL_PLANE_V2_GO.md) for the architecture contract, [docs/WORKLOAD_LIFECYCLE.md](docs/WORKLOAD_LIFECYCLE.md) for the Reserve → Allocate → Bind → Release → Audit workload lifecycle, [docs/PROVIDER_RECOVERY_CONTRACT.md](docs/PROVIDER_RECOVERY_CONTRACT.md) for the at-least-once provider recovery model, [docs/RELEASE_ACCEPTANCE_V0_1.md](docs/RELEASE_ACCEPTANCE_V0_1.md) for the v0.1 release gate, and [docs/CAPABILITY_RELEASE_MATRIX.md](docs/CAPABILITY_RELEASE_MATRIX.md) for the supported/deferred capability matrix and promotion rules.
