@@ -57,17 +57,29 @@ func (c *KubeClient) ApplyResourceClaim(ctx context.Context, in Job) error {
 	claims := c.core.ResourceV1().ResourceClaims(in.Namespace)
 	current, err := claims.Get(ctx, claim.Name, metav1.GetOptions{})
 	if err == nil {
-		wantGeneration := strconv.FormatInt(in.Generation, 10)
-		if current.Annotations[generationAnnotation] != wantGeneration {
-			return fmt.Errorf("resource claim %s generation drift: have %q want %q", claim.Name, current.Annotations[generationAnnotation], wantGeneration)
-		}
-		return nil
+		return validateProviderGeneration("resource claim", claim.Name, current.Annotations, in.Generation)
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
+
 	_, err = claims.Create(ctx, claim, metav1.CreateOptions{})
-	return err
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+
+	// The lease only fences who may start reconciliation; it cannot make an
+	// external Kubernetes CREATE exactly-once. If another owner completed the
+	// same deterministic side effect after our GET but before our CREATE, adopt
+	// the object only when its desired generation matches.
+	current, err = claims.Get(ctx, claim.Name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("adopt resource claim %s after create race: %w", claim.Name, err)
+	}
+	return validateProviderGeneration("resource claim", claim.Name, current.Annotations, in.Generation)
 }
 
 func (c *KubeClient) ApplyJob(ctx context.Context, in Job) error {
@@ -84,17 +96,41 @@ func (c *KubeClient) ApplyJob(ctx context.Context, in Job) error {
 	if err == nil {
 		// Jobs are immutable execution objects. A different desired generation
 		// must never be accepted as converged by the old provider object.
-		wantGeneration := strconv.FormatInt(in.Generation, 10)
-		if current.Annotations[generationAnnotation] != wantGeneration {
-			return fmt.Errorf("job %s generation drift: have %q want %q", in.Name, current.Annotations[generationAnnotation], wantGeneration)
-		}
-		return nil
+		return validateProviderGeneration("job", in.Name, current.Annotations, in.Generation)
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
+
 	_, err = jobs.Create(ctx, job, metav1.CreateOptions{})
-	return err
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+
+	// GET -> CREATE is intentionally not treated as an atomic section. A
+	// takeover owner may race with an older in-flight side effect. Deterministic
+	// identity plus generation validation lets the new owner adopt the same
+	// logical Job instead of failing or creating a duplicate.
+	current, err = jobs.Get(ctx, in.Name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("adopt job %s after create race: %w", in.Name, err)
+	}
+	return validateProviderGeneration("job", in.Name, current.Annotations, in.Generation)
+}
+
+func validateProviderGeneration(kind, name string, annotations map[string]string, generation int64) error {
+	wantGeneration := strconv.FormatInt(generation, 10)
+	haveGeneration := ""
+	if annotations != nil {
+		haveGeneration = annotations[generationAnnotation]
+	}
+	if haveGeneration != wantGeneration {
+		return fmt.Errorf("%s %s generation drift: have %q want %q", kind, name, haveGeneration, wantGeneration)
+	}
+	return nil
 }
 
 func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (JobObservation, error) {
@@ -235,7 +271,7 @@ func (c *KubeClient) deleteDynamic(ctx context.Context, gvr schema.GroupVersionR
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
-	_, err = resource.Get(ctx, name, metav1.GetOptions{})
+	_, err = resource.Get(ctx, obj.GetName(), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return true, nil
 	}
