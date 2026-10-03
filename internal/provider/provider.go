@@ -7,6 +7,7 @@ import (
 )
 
 type PoolProjection struct {
+	Provider            string
 	PoolID              domain.ID
 	ProjectID           domain.ID
 	ClusterID           domain.ID
@@ -24,6 +25,7 @@ type PoolObservation struct {
 }
 
 type WorkloadProjection struct {
+	Provider           string
 	WorkloadID         domain.ID
 	ProjectID          domain.ID
 	PoolID             domain.ID
@@ -56,4 +58,10 @@ type PoolProvider interface {
 type WorkloadProvider interface {
 	ReconcileWorkload(context.Context, WorkloadProjection) (WorkloadObservation, error)
 	DeleteWorkload(context.Context, WorkloadProjection) (DeletionObservation, error)
+}
+
+
+type Adapter interface {
+	PoolProvider
+	WorkloadProvider
 }
