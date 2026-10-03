@@ -37,7 +37,7 @@ func (c *Clients) Discover(ctx context.Context) (domain.ClusterCapabilities, err
 	}
 
 	if supported, apiVersion := discoverDRA(c.Core.Discovery()); supported {
-		capabilities.DRASupported = true
+		capabilities.DRAAPIAvailable = true
 		capabilities.DRAAPIVersion = apiVersion
 	}
 
