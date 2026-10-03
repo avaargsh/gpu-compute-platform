@@ -110,6 +110,7 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 				ID:         "pool-1",
 				Generation: 3,
 				Spec: map[string]any{
+					"provider":  "kueue",
 					"projectID": "project-1",
 					"namespace": "project-1",
 					"accelerators": []any{
@@ -132,6 +133,7 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 				ID:         "train-1",
 				Generation: 4,
 				Spec: map[string]any{
+					"provider":  "kueue",
 					"projectID": "project-1",
 					"poolID":    "pool-1",
 					"namespace": "project-1",
@@ -172,6 +174,9 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 	}
 	if control.reported[0].LeaseOwner != "agent-test" {
 		t.Fatalf("explicit lease owner not propagated: %#v", control.reported)
+	}
+	if runtime.workload.Provider != "kueue" {
+		t.Fatalf("workload provider identity was not propagated: %#v", runtime.workload)
 	}
 	if runtime.workload.AcceleratorBinding.ResourceName != "vendor.example/gpu" {
 		t.Fatalf("workload binding was not resolved: %#v", runtime.workload.AcceleratorBinding)
