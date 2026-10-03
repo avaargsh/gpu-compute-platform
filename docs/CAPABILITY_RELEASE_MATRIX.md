@@ -27,17 +27,27 @@ Volcano, KServe, llm-d, LWS, or SGLang role switching.
 Cluster Capability Registration is the only discovery boundary between cluster
 implementation details and the management plane.
 
-Current v0.1 facts are deliberately small:
+The frozen v0.1 facts are deliberately small:
 
 - Kubernetes version
 - Kueue available
 - portable accelerator classes observed on nodes
 - Agent version and heartbeat
 
-Future stages may extend the registered facts with fields such as scheduler
-name/version, DRA support, fractional-GPU support, serving-provider features,
-and supported accelerator classes. Those fields are **facts**, not scheduling
-policy.
+Stage B extends that inventory without enabling another execution path:
+
+- installed scheduler facts as `{name, version?}`; version is reported only
+  when it can be observed from the running scheduler deployment;
+- `draApiAvailable` plus the observed `resource.k8s.io` API version;
+- `accelerators` remains the inventory of portable accelerator classes, not
+  vendor resource names or a placement policy.
+
+DRA API availability is not a claim that a DRA driver, DeviceClass, or
+accelerator allocation path is supported. Likewise, an observed KAI/Volcano
+scheduler would remain inventory until its provider recovery contract and
+acceptance evidence exist.
+
+All capability-registration fields are **facts**, not scheduling policy.
 
 The control plane may use registered facts for admission, compatibility checks,
 placement eligibility, and UX. It must not reproduce KAI, Volcano, Kueue,
@@ -104,8 +114,8 @@ serving execution path.
 Stage B starts only after the frozen Stage A gates remain green. The entry work
 is deliberately split from provider implementation:
 
-1. extend Cluster Capability Registration with scheduler name/version, DRA
-   support, and accelerator classes as reported facts only;
+1. extend Cluster Capability Registration with scheduler name/version,
+   DRA API availability/version, and accelerator classes as reported facts only;
 2. define a `ClusterBinding -> provider adapter` SPI aligned with the existing
    ensure/materialize/observe/finalize lifecycle boundary;
 3. select exactly one optional scheduler path (KAI or Volcano) and write its
@@ -118,6 +128,10 @@ of scope until a chosen Stage B provider has contract + real-GPU evidence.
 
 Kueue remains a valid peer provider; KAI/Volcano do not replace the control
 plane's lifecycle model.
+
+The first Stage B slice is facts-only. It must not add a second runtime adapter,
+change `ClusterBinding.Provider` semantics, or promote DRA/KAI/Volcano execution
+into the v0.1 acceptance claim.
 
 ### Stage C — serving provider
 
