@@ -79,11 +79,11 @@ func TestLifecycleRegistersDiscoveredCapabilities(t *testing.T) {
 	control := &lifecycleControl{}
 	runner := NewRunner("cluster-a", control, &fakeRuntime{})
 	capabilities := domain.ClusterCapabilities{
-		Kueue:         true,
-		Schedulers:    []domain.SchedulerCapability{{Name: "kueue", Version: "v0.19.6"}},
-		DRAAPIAvailable:  true,
-		DRAAPIVersion: "resource.k8s.io/v1",
-		Accelerators:  []string{"h100-80g", "metax-c500"},
+		Kueue:           true,
+		Schedulers:      []domain.SchedulerCapability{{Name: "kueue", Version: "v0.19.6"}},
+		DRAAPIAvailable: true,
+		DRAAPIVersion:   "resource.k8s.io/v1",
+		Accelerators:    []string{"h100-80g", "metax-c500"},
 	}
 	lifecycle := NewLifecycle(
 		"cluster-a",
