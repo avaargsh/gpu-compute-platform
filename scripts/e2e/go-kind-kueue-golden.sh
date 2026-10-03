@@ -188,8 +188,8 @@ go build -o /tmp/gpu-cluster-agent ./cmd/cluster-agent
 
 put "/api/v1/projects/$PROJECT_ID/binding" "{\"metadata\":{\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"clusterId\":\"$CLUSTER_ID\",\"namespace\":\"$NAMESPACE\"}"
 put "/api/v1/compute-pools/$POOL_ID/binding" "{\"metadata\":{\"generation\":1},\"poolId\":\"$POOL_ID\",\"clusterId\":\"$CLUSTER_ID\",\"provider\":\"kueue\"}"
-put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"h100-80g\",\"quota\":4}],\"acceleratorBindings\":[{\"class\":\"h100-80g\",\"resourceName\":\"$ACCELERATOR_RESOURCE\",\"flavor\":\"$ACCELERATOR_FLAVOR\",\"nodeLabels\":{\"nvidia.com/gpu.product\":\"NVIDIA-H100-80GB-HBM3\",\"topology.kubernetes.io/zone\":\"gpu-zone-a\",\"ai.compute/rack\":\"rack-a01\"}}],\"scheduling\":{\"mode\":\"default\"}}}"
-put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"h100-80g\",\"quota\":1}}}"
+put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":4}],\"acceleratorBindings\":[{\"class\":\"$ACCELERATOR_CLASS\",\"resourceName\":\"$ACCELERATOR_RESOURCE\",\"flavor\":\"$ACCELERATOR_FLAVOR\",\"nodeLabels\":{\"nvidia.com/gpu.product\":\"NVIDIA-H100-80GB-HBM3\",\"topology.kubernetes.io/zone\":\"gpu-zone-a\",\"ai.compute/rack\":\"rack-a01\"}}],\"scheduling\":{\"mode\":\"default\"}}}"
+put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":1}}}"
 
 AGENT_INSTANCE_ID=agent-a AGENT_SYNC_INTERVAL=60s \
   CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" \
@@ -284,7 +284,7 @@ after_uid="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.m
 
 # Replaying desired state must not drift the resolved Kubernetes projection.
 before="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o json)"
-put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"h100-80g\",\"quota\":1}}}"
+put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":1}}}"
 sleep 3
 after="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o json)"
 BEFORE="$before" AFTER="$after" python - <<'PY'
@@ -304,7 +304,7 @@ PY
 
 # Active workload execution intent is immutable. A changed generation/spec must
 # use Delete -> provider cleanup -> Finalize -> Recreate rather than hot replacement.
-replacement_code="$(curl -sS -o /tmp/workload-replacement.out -w '%{http_code}' -X PUT   "$BASE_URL/api/v1/workloads/$WORKLOAD_ID"   -H 'Content-Type: application/json'   -d "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":2},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.37\",\"command\":[\"sh\",\"-c\",\"echo replacement\"],\"accelerator\":{\"class\":\"h100-80g\",\"quota\":1}}}")"
+replacement_code="$(curl -sS -o /tmp/workload-replacement.out -w '%{http_code}' -X PUT   "$BASE_URL/api/v1/workloads/$WORKLOAD_ID"   -H 'Content-Type: application/json'   -d "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":2},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.37\",\"command\":[\"sh\",\"-c\",\"echo replacement\"],\"accelerator\":{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":1}}}")"
 [[ "$replacement_code" == "409" ]] || { echo "active workload replacement returned HTTP $replacement_code" >&2; cat /tmp/workload-replacement.out >&2; exit 1; }
 generation="$(kubectl get job "job-$WORKLOAD_ID" -n "$NAMESPACE" -o jsonpath='{.metadata.annotations.ai\.compute/generation}')"
 [[ "$generation" == "1" ]] || { echo "rejected replacement changed provider generation to $generation" >&2; exit 1; }
