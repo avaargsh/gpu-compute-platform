@@ -73,8 +73,11 @@ func TestResourceAPIProjectsWorkloadDesiredState(t *testing.T) {
 	if !found || got.Generation != 7 {
 		t.Fatalf("unexpected desired identity: %#v", got)
 	}
-	if got.Spec["projectID"] != domain.ID("project-1") || got.Spec["poolID"] != domain.ID("pool-h100") || got.Spec["namespace"] != "project-1" {
-		t.Fatalf("unexpected desired placement: %#v", got.Spec)
+	if got.Spec["provider"] != "kueue" ||
+		got.Spec["projectID"] != domain.ID("project-1") ||
+		got.Spec["poolID"] != domain.ID("pool-h100") ||
+		got.Spec["namespace"] != "project-1" {
+		t.Fatalf("unexpected desired placement/provider identity: %#v", got.Spec)
 	}
 }
 
