@@ -85,7 +85,7 @@ is either:
 
 ## Evolution stages
 
-### Stage A — v0.1 closeout (current)
+### Stage A — v0.1 closeout (frozen)
 
 - freeze lifecycle race, tombstone atomicity, lease fencing, recovery, and
   capability-registration evidence;
@@ -93,19 +93,28 @@ is either:
 - keep DRA/HAMi/KAI/Volcano/Serving execution paths deferred;
 - record upstream scheduler fixes here without changing the supported surface.
 
-Exit criterion: deterministic acceptance contracts and the real kind/Kueue
-Golden Path remain green with capability registration included.
+Frozen baseline: deterministic acceptance contracts and the real kind/Kueue
+Golden Path remain green with capability registration included. Stage A changes
+are limited to gate hardening, bug fixes, and watch-only upstream signal
+updates; they must not add a new scheduler, accelerator allocation mode, or
+serving execution path.
 
 ### Stage B — optional scheduler paths
 
-After Stage A is frozen:
+Stage B starts only after the frozen Stage A gates remain green. The entry work
+is deliberately split from provider implementation:
 
-- extend Cluster Capability Registration to report KAI or Volcano facts;
-- introduce an optional scheduler/provider adapter selected through
-  `ClusterBinding`;
-- add real fractional/HAMi coexistence regression only at this stage;
-- cover resource identification, quota boundaries, and LWS multi-replica naming
-  if they become part of the chosen path.
+1. extend Cluster Capability Registration with scheduler name/version, DRA
+   support, and accelerator classes as reported facts only;
+2. define a `ClusterBinding -> provider adapter` SPI aligned with the existing
+   ensure/materialize/observe/finalize lifecycle boundary;
+3. select exactly one optional scheduler path (KAI or Volcano) and write its
+   recovery contract first, reusing generation, lease fencing, and tombstones;
+4. run a real-GPU pilot and write observation/evidence back through the existing
+   evidence model before any new acceptance row is promoted.
+
+Fractional/HAMi coexistence, DRA execution, and serving integrations remain out
+of scope until a chosen Stage B provider has contract + real-GPU evidence.
 
 Kueue remains a valid peer provider; KAI/Volcano do not replace the control
 plane's lifecycle model.
