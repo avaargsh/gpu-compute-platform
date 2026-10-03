@@ -160,11 +160,11 @@ func TestClusterStatusReturnsRegisteredCapabilities(t *testing.T) {
 		AgentVersion:      "v0.2.0",
 		KubernetesVersion: "v1.34.1",
 		Capabilities: domain.ClusterCapabilities{
-			Kueue:         true,
-			Schedulers:    []domain.SchedulerCapability{{Name: "kueue", Version: "v0.19.6"}},
-			DRAAPIAvailable:  true,
-			DRAAPIVersion: "resource.k8s.io/v1",
-			Accelerators:  []string{"h100-80g", "metax-c500"},
+			Kueue:           true,
+			Schedulers:      []domain.SchedulerCapability{{Name: "kueue", Version: "v0.19.6"}},
+			DRAAPIAvailable: true,
+			DRAAPIVersion:   "resource.k8s.io/v1",
+			Accelerators:    []string{"h100-80g", "metax-c500"},
 		},
 	}
 	body, err := json.Marshal(registration)
