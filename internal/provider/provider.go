@@ -60,7 +60,6 @@ type WorkloadProvider interface {
 	DeleteWorkload(context.Context, WorkloadProjection) (DeletionObservation, error)
 }
 
-
 type Adapter interface {
 	PoolProvider
 	WorkloadProvider
