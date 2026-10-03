@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
@@ -27,6 +28,7 @@ func imagesFromReader(r io.Reader) ([]string, error) {
 		collectImages(doc, &images)
 	}
 
+	sort.Strings(images)
 	return images, nil
 }
 
