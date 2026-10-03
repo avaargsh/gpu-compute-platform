@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
@@ -67,7 +68,7 @@ func (c *Clients) Discover(ctx context.Context) (domain.ClusterCapabilities, err
 }
 
 func (c *Clients) discoverKueueVersion(ctx context.Context) string {
-	deployments, err := c.Core.AppsV1().Deployments(metav1.NamespaceAll).List(
+	pods, err := c.Core.CoreV1().Pods(metav1.NamespaceAll).List(
 		ctx,
 		metav1.ListOptions{LabelSelector: "app.kubernetes.io/name=kueue"},
 	)
@@ -75,21 +76,37 @@ func (c *Clients) discoverKueueVersion(ctx context.Context) string {
 		return ""
 	}
 
-	for _, deployment := range deployments.Items {
-		if version := strings.TrimSpace(deployment.Labels["app.kubernetes.io/version"]); version != "" {
-			return version
+	versions := map[string]struct{}{}
+	for _, pod := range pods.Items {
+		if pod.Status.Phase != corev1.PodRunning || !podReady(pod.Status.Conditions) {
+			continue
 		}
-		for _, container := range deployment.Spec.Template.Spec.Containers {
+		for _, container := range pod.Spec.Containers {
 			if container.Name != "manager" && !strings.Contains(container.Image, "/kueue") {
 				continue
 			}
 			if version := imageTag(container.Image); version != "" {
-				return version
+				versions[version] = struct{}{}
 			}
 		}
 	}
 
+	if len(versions) != 1 {
+		return ""
+	}
+	for version := range versions {
+		return version
+	}
 	return ""
+}
+
+func podReady(conditions []corev1.PodCondition) bool {
+	for _, condition := range conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 func imageTag(image string) string {
