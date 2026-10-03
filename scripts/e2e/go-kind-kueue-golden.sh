@@ -11,6 +11,7 @@ set -euo pipefail
 : "${WORKLOAD_ID:=train-golden}"
 : "${INVALID_WORKLOAD_ID:=train-invalid}"
 : "${ACCELERATOR_RESOURCE:=nvidia.com/gpu}"
+: "${ACCELERATOR_CLASS:=h100-80g}"
 : "${ACCELERATOR_FLAVOR:=h100-80g}"
 
 cleanup() {
@@ -36,7 +37,7 @@ wait_cluster_capabilities() {
   local deadline=$((SECONDS + TIMEOUT_SECONDS)) payload
   while (( SECONDS < deadline )); do
     payload="$(curl -fsS "$BASE_URL/api/v1/clusters/$CLUSTER_ID/status" 2>/dev/null || true)"
-    if PAYLOAD="$payload" ACCELERATOR_FLAVOR="$ACCELERATOR_FLAVOR" python - <<'PY'
+    if PAYLOAD="$payload" ACCELERATOR_CLASS="$ACCELERATOR_CLASS" python - <<'PY'
 import json, os
 try:
     data=json.loads(os.environ["PAYLOAD"])
@@ -47,7 +48,7 @@ accelerators=caps.get("accelerators") or []
 ok=(
     data.get("clusterId") is not None
     and caps.get("kueue") is True
-    and os.environ["ACCELERATOR_FLAVOR"] in accelerators
+    and os.environ["ACCELERATOR_CLASS"] in accelerators
     and bool(data.get("kubernetesVersion"))
     and bool(data.get("lastHeartbeatAt"))
 )
@@ -175,7 +176,7 @@ kubectl apply --server-side -f "https://github.com/kubernetes-sigs/kueue/release
 kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout="${TIMEOUT_SECONDS}s"
 
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
-kubectl label node "$node" topology.kubernetes.io/zone=gpu-zone-a ai.compute/rack=rack-a01 "ai.compute/accelerator-class=$ACCELERATOR_FLAVOR" --overwrite
+kubectl label node "$node" topology.kubernetes.io/zone=gpu-zone-a ai.compute/rack=rack-a01 "ai.compute/accelerator-class=$ACCELERATOR_CLASS" --overwrite
 bash scripts/e2e/install-fake-gpu.sh
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
@@ -196,12 +197,12 @@ AGENT_INSTANCE_ID=agent-a AGENT_SYNC_INTERVAL=60s \
 AGENT_A_PID=$!
 
 capability_status="$(wait_cluster_capabilities)"
-CAPABILITY_STATUS="$capability_status" ACCELERATOR_FLAVOR="$ACCELERATOR_FLAVOR" python - <<'PY'
+CAPABILITY_STATUS="$capability_status" ACCELERATOR_CLASS="$ACCELERATOR_CLASS" python - <<'PY'
 import json, os
 data=json.loads(os.environ["CAPABILITY_STATUS"])
 caps=data["capabilities"]
 assert caps["kueue"] is True, caps
-assert os.environ["ACCELERATOR_FLAVOR"] in caps.get("accelerators", []), caps
+assert os.environ["ACCELERATOR_CLASS"] in caps.get("accelerators", []), caps
 PY
 
 result="$(wait_workload)"
