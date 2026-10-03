@@ -15,11 +15,11 @@ func TestPostgresAgentRegistrationPersistsCapabilitiesAndHeartbeat(t *testing.T)
 	ctx := context.Background()
 	clusterID := domain.ID("cluster-capability-registration")
 	capabilities := domain.ClusterCapabilities{
-		Kueue:         true,
-		Schedulers:    []domain.SchedulerCapability{{Name: "kueue", Version: "v0.19.6"}},
-		DRAAPIAvailable:  true,
-		DRAAPIVersion: "resource.k8s.io/v1",
-		Accelerators:  []string{"h100-80g", "metax-c500"},
+		Kueue:           true,
+		Schedulers:      []domain.SchedulerCapability{{Name: "kueue", Version: "v0.19.6"}},
+		DRAAPIAvailable: true,
+		DRAAPIVersion:   "resource.k8s.io/v1",
+		Accelerators:    []string{"h100-80g", "metax-c500"},
 	}
 
 	if err := store.Register(ctx, agent.Registration{
