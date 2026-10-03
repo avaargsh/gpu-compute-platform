@@ -97,4 +97,8 @@ jobs:
           chmod +x /tmp/kind
           sudo mv /tmp/kind /usr/local/bin/kind
       - name: Run Go Golden Path
+        env:
+          # Prove the portable accelerator class is independent from the
+          # provider-specific Kueue ResourceFlavor name.
+          ACCELERATOR_FLAVOR: kueue-h100
         run: bash scripts/e2e/go-kind-kueue-golden.sh
