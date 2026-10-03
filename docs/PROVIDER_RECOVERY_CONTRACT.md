@@ -65,6 +65,34 @@ The platform must converge without creating a second logical resource.
 Every provider that creates workload-owned execution objects must satisfy these
 rules.
 
+### 0. Provider identity is frozen with desired state
+
+`ClusterBinding.Provider` selects the adapter, but it is not a live routing
+switch. Once a pool binding exists, changing its provider in place is rejected.
+The selected provider is copied into ComputePool and Workload desired specs and
+therefore travels with the resource generation through reconcile, retry, delete,
+and takeover.
+
+```text
+ClusterBinding(provider=kueue)
+        |
+        v
+Desired generation N { provider: kueue }
+        |
+        +-- reconcile -> kueue adapter
+        +-- retry     -> kueue adapter
+        +-- delete    -> kueue adapter
+        +-- takeover  -> kueue adapter
+```
+
+A future provider change must use an explicit migration or delete/recreate
+contract. It must never reinterpret an active generation through another
+adapter. Desired objects created before this field existed use the frozen v0.1
+compatibility default `kueue`.
+
+Unknown provider names fail closed and do not fall back to another registered
+adapter.
+
 ### 1. Stable logical identity
 
 The provider object name or idempotency key is derived from the platform
@@ -219,3 +247,7 @@ lease takeover.
 
 Future providers (DRA, HAMi, vendor-specific accelerators, or other schedulers)
 must fit this contract rather than introduce a parallel recovery model.
+
+The Stage B provider SPI intentionally registers only Kueue at first. A second
+adapter is promotable only after its deterministic identity, create/adopt,
+observation, deletion, and recovery behavior satisfy this document.
