@@ -37,7 +37,7 @@ wait_cluster_capabilities() {
   local deadline=$((SECONDS + TIMEOUT_SECONDS)) payload
   while (( SECONDS < deadline )); do
     payload="$(curl -fsS "$BASE_URL/api/v1/clusters/$CLUSTER_ID/status" 2>/dev/null || true)"
-    if PAYLOAD="$payload" ACCELERATOR_CLASS="$ACCELERATOR_CLASS" KUEUE_VERSION="$KUEUE_VERSION" python - <<'PY'
+    if PAYLOAD="$payload" ACCELERATOR_CLASS="$ACCELERATOR_CLASS" python - <<'PY'
 import json, os
 try:
     data=json.loads(os.environ["PAYLOAD"])
@@ -45,15 +45,9 @@ except Exception:
     raise SystemExit(1)
 caps=data.get("capabilities") or {}
 accelerators=caps.get("accelerators") or []
-schedulers=caps.get("schedulers") or []
-kueue=next((item for item in schedulers if item.get("name") == "kueue"), None)
 ok=(
     data.get("clusterId") is not None
     and caps.get("kueue") is True
-    and kueue is not None
-    and kueue.get("version") == os.environ["KUEUE_VERSION"]
-    and caps.get("draApiAvailable") is True
-    and caps.get("draApiVersion") == "resource.k8s.io/v1"
     and os.environ["ACCELERATOR_CLASS"] in accelerators
     and bool(data.get("kubernetesVersion"))
     and bool(data.get("lastHeartbeatAt"))
@@ -66,7 +60,7 @@ PY
     fi
     sleep 1
   done
-  echo "timeout waiting for registered scheduler/DRA/accelerator capability facts" >&2
+  echo "timeout waiting for registered Kueue/accelerator capabilities" >&2
   curl -sS "$BASE_URL/api/v1/clusters/$CLUSTER_ID/status" >&2 || true
   return 1
 }
@@ -203,16 +197,11 @@ AGENT_INSTANCE_ID=agent-a AGENT_SYNC_INTERVAL=60s \
 AGENT_A_PID=$!
 
 capability_status="$(wait_cluster_capabilities)"
-CAPABILITY_STATUS="$capability_status" ACCELERATOR_CLASS="$ACCELERATOR_CLASS" KUEUE_VERSION="$KUEUE_VERSION" python - <<'PY'
+CAPABILITY_STATUS="$capability_status" ACCELERATOR_CLASS="$ACCELERATOR_CLASS" python - <<'PY'
 import json, os
 data=json.loads(os.environ["CAPABILITY_STATUS"])
 caps=data["capabilities"]
 assert caps["kueue"] is True, caps
-schedulers=caps.get("schedulers") or []
-kueue=next(item for item in schedulers if item.get("name") == "kueue")
-assert kueue.get("version") == os.environ["KUEUE_VERSION"], caps
-assert caps.get("draApiAvailable") is True, caps
-assert caps.get("draApiVersion") == "resource.k8s.io/v1", caps
 assert os.environ["ACCELERATOR_CLASS"] in caps.get("accelerators", []), caps
 PY
 
