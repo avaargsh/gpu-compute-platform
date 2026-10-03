@@ -50,6 +50,7 @@ func (a *ResourceAPI) UpsertComputePool(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	spec := map[string]any{
+		"provider":            poolPlacement.Provider,
 		"projectID":           in.ProjectID,
 		"namespace":           projectPlacement.Namespace,
 		"accelerators":        in.Spec.Accelerators,
@@ -101,6 +102,7 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	spec := map[string]any{
+		"provider":    poolPlacement.Provider,
 		"projectID":   in.ProjectID,
 		"poolID":      in.PoolID,
 		"namespace":   projectPlacement.Namespace,
