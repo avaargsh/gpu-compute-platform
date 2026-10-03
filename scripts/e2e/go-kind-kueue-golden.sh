@@ -52,7 +52,7 @@ ok=(
     and caps.get("kueue") is True
     and kueue is not None
     and kueue.get("version") == os.environ["KUEUE_VERSION"]
-    and caps.get("draSupported") is True
+    and caps.get("draApiAvailable") is True
     and caps.get("draApiVersion") == "resource.k8s.io/v1"
     and os.environ["ACCELERATOR_CLASS"] in accelerators
     and bool(data.get("kubernetesVersion"))
@@ -211,7 +211,7 @@ assert caps["kueue"] is True, caps
 schedulers=caps.get("schedulers") or []
 kueue=next(item for item in schedulers if item.get("name") == "kueue")
 assert kueue.get("version") == os.environ["KUEUE_VERSION"], caps
-assert caps.get("draSupported") is True, caps
+assert caps.get("draApiAvailable") is True, caps
 assert caps.get("draApiVersion") == "resource.k8s.io/v1", caps
 assert os.environ["ACCELERATOR_CLASS"] in caps.get("accelerators", []), caps
 PY
