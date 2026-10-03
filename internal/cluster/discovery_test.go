@@ -74,8 +74,8 @@ func TestDiscoverFindsKueueDRAAndAccelerators(t *testing.T) {
 		capabilities.Schedulers[0].Version != "v0.19.6" {
 		t.Fatalf("unexpected scheduler facts: %#v", capabilities.Schedulers)
 	}
-	if !capabilities.DRASupported || capabilities.DRAAPIVersion != "resource.k8s.io/v1" {
-		t.Fatalf("unexpected DRA facts: supported=%t apiVersion=%q", capabilities.DRASupported, capabilities.DRAAPIVersion)
+	if !capabilities.DRAAPIAvailable || capabilities.DRAAPIVersion != "resource.k8s.io/v1" {
+		t.Fatalf("unexpected DRA facts: supported=%t apiVersion=%q", capabilities.DRAAPIAvailable, capabilities.DRAAPIVersion)
 	}
 	if len(capabilities.Accelerators) != 1 || capabilities.Accelerators[0] != "h100-80g" {
 		t.Fatalf("unexpected accelerators: %#v", capabilities.Accelerators)
