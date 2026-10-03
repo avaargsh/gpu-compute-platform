@@ -129,9 +129,23 @@ of scope until a chosen Stage B provider has contract + real-GPU evidence.
 Kueue remains a valid peer provider; KAI/Volcano do not replace the control
 plane's lifecycle model.
 
-The first Stage B slice is facts-only. It must not add a second runtime adapter,
-change `ClusterBinding.Provider` semantics, or promote DRA/KAI/Volcano execution
-into the v0.1 acceptance claim.
+The first Stage B slice is facts-only. It must not add a second runtime adapter
+or promote DRA/KAI/Volcano execution into the v0.1 acceptance claim.
+
+The second Stage B slice establishes the provider SPI contract without adding a
+second provider:
+
+- `ClusterBinding.Provider` is immutable for an existing pool;
+- provider identity is copied into desired state and carried through portable
+  Pool/Workload projections;
+- the Cluster Agent runtime selects a registered `provider.Adapter`;
+- the registry contains only `kueue`;
+- legacy v0.1 desired objects without a provider field recover through the
+  explicit frozen `kueue` compatibility default;
+- unknown providers fail closed rather than falling back to Kueue.
+
+A KAI or Volcano adapter remains deferred until its recovery contract and
+real-GPU evidence exist.
 
 ### Stage C — serving provider
 
