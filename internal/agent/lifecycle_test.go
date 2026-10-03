@@ -79,8 +79,11 @@ func TestLifecycleRegistersDiscoveredCapabilities(t *testing.T) {
 	control := &lifecycleControl{}
 	runner := NewRunner("cluster-a", control, &fakeRuntime{})
 	capabilities := domain.ClusterCapabilities{
-		Kueue:        true,
-		Accelerators: []string{"h100-80g", "metax-c500"},
+		Kueue:           true,
+		Schedulers:      []domain.SchedulerCapability{{Name: "kueue", Version: "v0.19.6"}},
+		DRAAPIAvailable: true,
+		DRAAPIVersion:   "resource.k8s.io/v1",
+		Accelerators:    []string{"h100-80g", "metax-c500"},
 	}
 	lifecycle := NewLifecycle(
 		"cluster-a",
@@ -97,7 +100,13 @@ func TestLifecycleRegistersDiscoveredCapabilities(t *testing.T) {
 	_ = lifecycle.Run(ctx)
 
 	got := control.lastRegistration.Capabilities
-	if !got.Kueue || len(got.Accelerators) != 2 ||
+	if !got.Kueue ||
+		len(got.Schedulers) != 1 ||
+		got.Schedulers[0].Name != "kueue" ||
+		got.Schedulers[0].Version != "v0.19.6" ||
+		!got.DRAAPIAvailable ||
+		got.DRAAPIVersion != "resource.k8s.io/v1" ||
+		len(got.Accelerators) != 2 ||
 		got.Accelerators[0] != "h100-80g" ||
 		got.Accelerators[1] != "metax-c500" {
 		t.Fatalf("registered capabilities=%#v", got)

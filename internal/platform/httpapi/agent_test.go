@@ -160,8 +160,11 @@ func TestClusterStatusReturnsRegisteredCapabilities(t *testing.T) {
 		AgentVersion:      "v0.2.0",
 		KubernetesVersion: "v1.34.1",
 		Capabilities: domain.ClusterCapabilities{
-			Kueue:        true,
-			Accelerators: []string{"h100-80g", "metax-c500"},
+			Kueue:           true,
+			Schedulers:      []domain.SchedulerCapability{{Name: "kueue", Version: "v0.19.6"}},
+			DRAAPIAvailable: true,
+			DRAAPIVersion:   "resource.k8s.io/v1",
+			Accelerators:    []string{"h100-80g", "metax-c500"},
 		},
 	}
 	body, err := json.Marshal(registration)
@@ -214,6 +217,11 @@ func TestClusterStatusReturnsRegisteredCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !status.Capabilities.Kueue ||
+		len(status.Capabilities.Schedulers) != 1 ||
+		status.Capabilities.Schedulers[0].Name != "kueue" ||
+		status.Capabilities.Schedulers[0].Version != "v0.19.6" ||
+		!status.Capabilities.DRAAPIAvailable ||
+		status.Capabilities.DRAAPIVersion != "resource.k8s.io/v1" ||
 		len(status.Capabilities.Accelerators) != 2 ||
 		status.Capabilities.Accelerators[1] != "metax-c500" {
 		t.Fatalf("unexpected capabilities: %#v", status.Capabilities)

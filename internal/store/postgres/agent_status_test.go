@@ -15,8 +15,11 @@ func TestPostgresAgentRegistrationPersistsCapabilitiesAndHeartbeat(t *testing.T)
 	ctx := context.Background()
 	clusterID := domain.ID("cluster-capability-registration")
 	capabilities := domain.ClusterCapabilities{
-		Kueue:        true,
-		Accelerators: []string{"h100-80g", "metax-c500"},
+		Kueue:           true,
+		Schedulers:      []domain.SchedulerCapability{{Name: "kueue", Version: "v0.19.6"}},
+		DRAAPIAvailable: true,
+		DRAAPIVersion:   "resource.k8s.io/v1",
+		Accelerators:    []string{"h100-80g", "metax-c500"},
 	}
 
 	if err := store.Register(ctx, agent.Registration{
@@ -47,6 +50,10 @@ func TestPostgresAgentRegistrationPersistsCapabilitiesAndHeartbeat(t *testing.T)
 		t.Fatalf("unexpected versions: %#v", status.Registration)
 	}
 	if !status.Capabilities.Kueue ||
+		len(status.Capabilities.Schedulers) != 1 ||
+		status.Capabilities.Schedulers[0].Version != "v0.19.6" ||
+		!status.Capabilities.DRAAPIAvailable ||
+		status.Capabilities.DRAAPIVersion != "resource.k8s.io/v1" ||
 		len(status.Capabilities.Accelerators) != 2 ||
 		status.Capabilities.Accelerators[0] != "h100-80g" ||
 		status.Capabilities.Accelerators[1] != "metax-c500" {
