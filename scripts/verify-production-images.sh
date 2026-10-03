@@ -18,23 +18,13 @@ if (( ${#files[@]} == 0 )); then
   exit 0
 fi
 
-images=()
-for file in "${files[@]}"; do
-  while IFS= read -r image; do
-    [[ -n "$image" ]] || continue
-    images+=("$image")
-  done < <(
-    awk '
-      /^[[:space:]]*image:[[:space:]]*/ {
-        value=$0
-        sub(/^[[:space:]]*image:[[:space:]]*/, "", value)
-        sub(/[[:space:]]*#.*/, "", value)
-        gsub(/^["'"'"']|["'"'"']$/, "", value)
-        print value
-      }
-    ' "$file"
-  )
-done
+tmp_images="$(mktemp)"
+trap 'rm -f "$tmp_images"' EXIT
+
+# Parse YAML structurally rather than line-matching `image:` keys. This keeps
+# the gate fail-closed for valid flow-style YAML and multi-document manifests.
+go run ./cmd/manifest-images "${files[@]}" >"$tmp_images"
+mapfile -t images <"$tmp_images"
 
 if (( ${#images[@]} == 0 )); then
   echo "Supply-chain check: production manifests contain no container images."
