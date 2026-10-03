@@ -15,10 +15,18 @@ type ClusterStatus struct {
 	Capabilities ClusterCapabilities `json:"capabilities"`
 }
 
+type SchedulerCapability struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+}
+
 type ClusterCapabilities struct {
-	Kueue        bool     `json:"kueue"`
-	Serving      bool     `json:"serving"`
-	Accelerators []string `json:"accelerators,omitempty"`
+	Kueue          bool                  `json:"kueue"`
+	Serving        bool                  `json:"serving"`
+	Schedulers     []SchedulerCapability `json:"schedulers,omitempty"`
+	DRASupported   bool                  `json:"draSupported"`
+	DRAAPIVersion  string                `json:"draApiVersion,omitempty"`
+	Accelerators   []string              `json:"accelerators,omitempty"`
 }
 
 type ProjectBinding struct {
