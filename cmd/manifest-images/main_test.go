@@ -36,8 +36,8 @@ spec:
 
 	want := []string{
 		"busybox:latest",
-		"registry.example/init@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		"registry.example/app@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		"registry.example/init@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("imagesFromReader() = %#v, want %#v", got, want)
