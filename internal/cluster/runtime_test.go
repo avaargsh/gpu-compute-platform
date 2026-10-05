@@ -39,7 +39,7 @@ func TestRuntimeDispatchesFrozenProviderIdentity(t *testing.T) {
 	kueueAdapter := &recordingAdapter{}
 	otherAdapter := &recordingAdapter{}
 	runtime, err := NewRuntimeWithAdapters(map[string]provider.Adapter{
-		"kueue": kueueAdapter,
+		"kueue":     kueueAdapter,
 		"test-only": otherAdapter,
 	})
 	if err != nil {
@@ -47,7 +47,7 @@ func TestRuntimeDispatchesFrozenProviderIdentity(t *testing.T) {
 	}
 
 	if _, err := runtime.ReconcilePool(context.Background(), provider.PoolProjection{
-		Provider: "kueue",
+		Provider:   "kueue",
 		Generation: 7,
 	}); err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestRuntimeDispatchesFrozenProviderIdentity(t *testing.T) {
 	}
 
 	if _, err := runtime.ReconcileWorkload(context.Background(), provider.WorkloadProjection{
-		Provider: "test-only",
+		Provider:   "test-only",
 		Generation: 8,
 	}); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestRuntimeFailsClosedForMissingOrUnknownProvider(t *testing.T) {
 
 	for _, name := range []string{"", "volcano"} {
 		_, err := runtime.ReconcilePool(context.Background(), provider.PoolProjection{
-			Provider: name,
+			Provider:   name,
 			Generation: 1,
 		})
 		if err == nil {
