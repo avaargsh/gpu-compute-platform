@@ -84,6 +84,7 @@ func TestLifecycleRegistersDiscoveredCapabilities(t *testing.T) {
 		DRAAPIAvailable: true,
 		DRAAPIVersion:   "resource.k8s.io/v1",
 		Accelerators:    []string{"h100-80g", "metax-c500"},
+		ProviderAdapters: []string{"kueue"},
 	}
 	lifecycle := NewLifecycle(
 		"cluster-a",
@@ -108,7 +109,9 @@ func TestLifecycleRegistersDiscoveredCapabilities(t *testing.T) {
 		got.DRAAPIVersion != "resource.k8s.io/v1" ||
 		len(got.Accelerators) != 2 ||
 		got.Accelerators[0] != "h100-80g" ||
-		got.Accelerators[1] != "metax-c500" {
+		got.Accelerators[1] != "metax-c500" ||
+		len(got.ProviderAdapters) != 1 ||
+		got.ProviderAdapters[0] != "kueue" {
 		t.Fatalf("registered capabilities=%#v", got)
 	}
 }
