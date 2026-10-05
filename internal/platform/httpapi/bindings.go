@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	"github.com/avaargsh/gpu-compute-platform/internal/provider"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
@@ -56,6 +57,10 @@ func (a *BindingAPI) UpsertPool(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.PoolID != poolID {
 		http.Error(w, "pool id must match path", http.StatusBadRequest)
+		return
+	}
+	if !provider.IsSupportedAdapter(in.Provider) {
+		http.Error(w, "unsupported provider adapter: "+in.Provider, http.StatusBadRequest)
 		return
 	}
 	if err := a.store.UpsertClusterBinding(r.Context(), in); err != nil {
