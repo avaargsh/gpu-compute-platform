@@ -150,7 +150,7 @@ Kueue provider: supported
 Provider SPI: implemented
 Provider catalog: kueue only
 Second provider: not registered
-DRA execution: not implemented
+DRA execution: internal ResourceClaim primitive exists; public path disabled
 HAMi/fractional: not implemented
 Serving: not implemented
 Multi-cluster placement policy: not implemented
