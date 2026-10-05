@@ -46,7 +46,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("discover cluster capabilities: %v", err)
 	}
-	log.Printf("cluster capabilities: kueue=%t schedulers=%v dra=%t draApiVersion=%q accelerators=%v", capabilities.Kueue, capabilities.Schedulers, capabilities.DRAAPIAvailable, capabilities.DRAAPIVersion, capabilities.Accelerators)
+	capabilities.ProviderAdapters = runtime.ProviderNames()
+	log.Printf("cluster capabilities: kueue=%t schedulers=%v dra=%t draApiVersion=%q accelerators=%v providerAdapters=%v", capabilities.Kueue, capabilities.Schedulers, capabilities.DRAAPIAvailable, capabilities.DRAAPIVersion, capabilities.Accelerators, capabilities.ProviderAdapters)
 
 	control := httpclient.New(controlPlaneURL, &http.Client{Timeout: 10 * time.Second})
 
