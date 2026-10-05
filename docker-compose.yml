@@ -43,7 +43,7 @@ services:
       AGENT_INSTANCE_ID: ${AGENT_INSTANCE_ID:-}
       AGENT_SYNC_INTERVAL: ${AGENT_SYNC_INTERVAL:-15s}
     volumes:
-      - ${KUBECONFIG:-$HOME/.kube/config}:/kube/config:ro
+      - ${KUBECONFIG:-./.kube/config}:/kube/config:ro
     depends_on:
       - control-plane
     restart: unless-stopped
