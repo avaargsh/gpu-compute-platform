@@ -27,6 +27,7 @@ type ClusterCapabilities struct {
 	DRAAPIAvailable bool                  `json:"draApiAvailable"`
 	DRAAPIVersion   string                `json:"draApiVersion,omitempty"`
 	Accelerators    []string              `json:"accelerators,omitempty"`
+	ProviderAdapters []string             `json:"providerAdapters,omitempty"`
 }
 
 type ProjectBinding struct {
