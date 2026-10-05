@@ -15,10 +15,10 @@ func TestPostgresClusterBindingKeepsProviderIdentityImmutable(t *testing.T) {
 	ctx := context.Background()
 
 	initial := domain.ClusterBinding{
-		Metadata: domain.Metadata{Generation: 1},
-		PoolID: "pool-provider-identity",
+		Metadata:  domain.Metadata{Generation: 1},
+		PoolID:    "pool-provider-identity",
 		ClusterID: "cluster-a",
-		Provider: "kueue",
+		Provider:  "kueue",
 	}
 	if err := store.UpsertClusterBinding(ctx, initial); err != nil {
 		t.Fatal(err)
