@@ -1,77 +1,122 @@
 # AI Compute Control Plane v2 — Go Architecture
 
-## Product domain
+## Implemented product domain
 
 ```text
-Tenant
-└── Project
-    ├── ComputePool
-    ├── Workload
-    └── Serving
+Project
+├── ProjectBinding
+├── ComputePool
+│   └── ClusterBinding
+└── Workload
 ```
 
-Projects are management-plane objects. They are not owned by a Kubernetes cluster.
-Placement is explicit through ProjectBinding and ClusterBinding.
+Serving/model objects remain future architecture and are not part of the current
+Go product contract.
 
 ## Runtime boundary
 
 ```text
-Vue Console
+Client / CLI
     |
-    | REST /api/v1
     v
 Go Control Plane
-    ^          |
-    |          | pull desired state
-    | register |
-    | heartbeat|
-    | report   v
+    |
+    | PostgreSQL desired state
+    v
 Cluster Agent
     |
-    | provider reconciliation / observation
+    | desired provider identity
     v
-Kubernetes + Kueue + accelerator stack
+provider.Adapter registry
+    |
+    +--> kueue
+    v
+Kubernetes / Kueue / accelerator stack
+    |
+    v
+Observation + Evidence
+    |
+    v
+PostgreSQL
 ```
 
 ## Source of truth
 
 PostgreSQL is the management-plane source of truth.
 
-Kubernetes is an execution provider. Kubernetes resources are projections of platform desired state, not a second product source of truth.
+Kubernetes resources are projections of platform desired state. They are not a
+second product database.
 
 ## Core invariants
 
-1. Tenant and Project define isolation and ownership.
-2. ComputePool is the portable compute contract.
-3. Workload and Serving consume ComputePool capacity.
-4. Accelerator classes are portable product identifiers; providers translate them to concrete resources.
-5. Scheduling is delegated to scheduler providers. The platform does not implement a scheduler.
-6. Project placement and pool placement are explicit bindings.
-7. Every reconciled resource carries desired generation and observed generation.
-8. Conditions and evidence are first-class status.
-9. The cluster agent owns downstream observation and provider reconciliation.
-10. Cluster execution capabilities are discovered in the compute plane and persisted as control-plane facts at registration time.
-11. Capability status records factual versions, capabilities and heartbeat timestamps; availability policy is evaluated separately rather than encoded into discovery.
-12. The public API does not expose arbitrary Kubernetes CRUD as the product model.
+1. ComputePool is the portable capacity contract.
+2. Workload references a ComputePool and does not persist scheduler-selected
+   node/GPU identities.
+3. Project placement and pool placement are explicit bindings.
+4. `ClusterBinding.clusterId` and `provider` are immutable while active.
+5. Accelerator classes are portable; concrete resource names/flavors/node labels
+   live in bindings.
+6. Desired and observed state are generation-aware.
+7. The Cluster Agent owns provider mutation and independent observation.
+8. Resource-scoped leases fence observation/finalization, not the remote API call.
+9. Reconciliation is at-least-once with deterministic provider identity.
+10. Capability registration reports facts; it never selects a scheduler/provider.
+11. Unsupported provider adapter names fail before entering a new binding.
+12. The public API does not expose generic Kubernetes CRUD as the product model.
 
-## Initial Golden Path
+## Provider identity path
 
 ```text
-Tenant
-  -> Project
-  -> ProjectBinding
-  -> ComputePool
-  -> ClusterBinding
-  -> Kueue resources
-  -> Workload
-  -> admitted
-  -> Pods Ready
-  -> ObservedState
+PUT ClusterBinding(provider=kueue)
+        |
+        | product catalog validation
+        v
+immutable binding
+        |
+        v
+desired ComputePool / Workload provider=kueue
+        |
+        v
+Cluster Agent Runtime registry
+        |
+        v
+internal/provider/kueue
 ```
 
-Serving follows after the batch Golden Path is stable.
+The Runtime must not derive a provider from scheduler discovery.
 
-## Go repository shape
+## Cluster capability registration
+
+The Agent publishes two classes of facts:
+
+### Cluster-observed facts
+
+- Kubernetes version;
+- scheduler names and observable versions;
+- DRA API availability/version;
+- portable accelerator classes.
+
+### Agent execution facts
+
+- `providerAdapters[]`: adapter names registered in the running Agent.
+
+Example:
+
+```json
+{
+  "schedulers": [{"name": "kueue", "version": "v0.19.6"}],
+  "draApiAvailable": true,
+  "draApiVersion": "resource.k8s.io/v1",
+  "accelerators": ["h100-80g"],
+  "providerAdapters": ["kueue"]
+}
+```
+
+A cluster can theoretically report an observed scheduler without having a
+promoted execution adapter for it. That distinction is required for safe Stage B
+experimentation.
+
+## Repository runtime shape
 
 ```text
 cmd/
@@ -79,49 +124,43 @@ cmd/
   cluster-agent/
 
 internal/
-  domain/
   agent/
-  platform/
-    httpapi/
+  cluster/
+  domain/
+  platform/httpapi/
   provider/
-    kubernetes/
     kueue/
   store/
+    agentstore/
     postgres/
 ```
 
-The first implementation remains a modular monolith. Service decomposition is intentionally deferred.
+The active system remains a modular monolith plus Cluster Agent. Service
+decomposition is deferred.
 
+Historical Python application/frontend code is not part of the canonical runtime
+path.
 
-## Cluster capability registration
+## Stage B boundary
 
-The Cluster Agent discovers execution facts from its local Kubernetes cluster and
-publishes them during registration:
+Current:
 
 ```text
-Kubernetes discovery
-      |
-      v
-ClusterCapabilities
-  - Kueue
-  - Serving
-  - accelerator classes
-      |
-      v
-Agent Registration
-      |
-      v
-PostgreSQL cluster_agents.capabilities
-      |
-      v
-GET /api/v1/clusters/{clusterID}/status
+Kueue provider: supported
+Provider SPI: implemented
+Provider catalog: kueue only
+Second provider: not registered
+DRA execution: not implemented
+HAMi/fractional: not implemented
+Serving: not implemented
+Multi-cluster placement policy: not implemented
 ```
 
-This is deliberately an inventory of observed execution capabilities, not a
-scheduler and not a second desired-state model. Future placement preflight may
-consume these facts, but registration itself does not make placement decisions.
+A second provider can be implemented behind the SPI before validation, but
+promotion is a separate catalog + Runtime registration change.
 
-The control plane stores `lastHeartbeatAt` instead of materializing a permanent
-`connected` boolean. Liveness thresholds depend on deployment policy and Agent
-sync cadence and should be evaluated from the timestamp rather than hidden in
-capability discovery.
+See:
+
+- [PROVIDER_ADAPTER_SPI.md](PROVIDER_ADAPTER_SPI.md)
+- [PROVIDER_RECOVERY_CONTRACT.md](PROVIDER_RECOVERY_CONTRACT.md)
+- [STAGE_B_PROVIDER_CONFORMANCE.md](STAGE_B_PROVIDER_CONFORMANCE.md)
