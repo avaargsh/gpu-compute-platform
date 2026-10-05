@@ -35,6 +35,10 @@ func (a *ResourceAPI) UpsertComputePool(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "resource id must match path", http.StatusBadRequest)
 		return
 	}
+	if err := validateComputePoolSpec(in.Spec); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	projectPlacement, err := a.placement.ResolveProject(r.Context(), in.ProjectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -130,7 +134,8 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 			errors.Is(err, agentstore.ErrDesiredDeleting) ||
 			errors.Is(err, agentstore.ErrComputePoolNotFound) ||
 			errors.Is(err, agentstore.ErrComputePoolDeleting) ||
-			errors.Is(err, agentstore.ErrAcceleratorBindingNotFound) {
+			errors.Is(err, agentstore.ErrAcceleratorBindingNotFound) ||
+			errors.Is(err, agentstore.ErrProviderIdentityMismatch) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
@@ -296,4 +301,50 @@ func (a *ResourceAPI) GetComputePool(w http.ResponseWriter, r *http.Request) {
 	out.Status.Kind = desired.Kind
 	out.Status.ID = desired.ID
 	writeJSON(w, http.StatusOK, out)
+}
+
+
+func validateComputePoolSpec(spec domain.ComputePoolSpec) error {
+	bindings := make(map[string]domain.AcceleratorBinding, len(spec.AcceleratorBindings))
+	for _, binding := range spec.AcceleratorBindings {
+		if binding.Class == "" || binding.Flavor == "" {
+			return fmt.Errorf("accelerator binding class and flavor are required")
+		}
+		mode := binding.AllocationMode
+		if mode == "" {
+			mode = domain.AcceleratorAllocationExtendedResource
+		}
+		switch mode {
+		case domain.AcceleratorAllocationExtendedResource:
+			if binding.ResourceName == "" {
+				return fmt.Errorf("extended-resource binding %q requires resourceName", binding.Class)
+			}
+			if binding.DRA != nil {
+				return fmt.Errorf("extended-resource binding %q must not include dra settings", binding.Class)
+			}
+		case domain.AcceleratorAllocationDRA:
+			return fmt.Errorf("allocation mode %q is not enabled in the current product surface", mode)
+		default:
+			return fmt.Errorf("unsupported accelerator allocation mode %q", mode)
+		}
+		if binding.Partition != nil {
+			if binding.Partition.Kind != domain.AcceleratorPartitionMIG || binding.Partition.Profile == "" {
+				return fmt.Errorf("unsupported accelerator partition for %q", binding.Class)
+			}
+		}
+		if _, exists := bindings[binding.Class]; exists {
+			return fmt.Errorf("duplicate accelerator binding %q", binding.Class)
+		}
+		bindings[binding.Class] = binding
+	}
+
+	for _, accelerator := range spec.Accelerators {
+		if accelerator.Class == "" || accelerator.Quota <= 0 {
+			return fmt.Errorf("accelerator class and positive quota are required")
+		}
+		if _, ok := bindings[accelerator.Class]; !ok {
+			return fmt.Errorf("accelerator binding not found: %s", accelerator.Class)
+		}
+	}
+	return nil
 }
