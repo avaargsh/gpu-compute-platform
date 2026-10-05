@@ -60,6 +60,17 @@ report current observation
 
 The platform must converge without creating a second logical resource.
 
+## Binding identity before provider execution
+
+A `ClusterBinding` freezes both cluster identity and provider identity for an
+active pool binding. Raising the binding generation may update metadata for the
+same provider, but it must not switch `kueue -> volcano`, `kueue -> dra`, or
+any other provider in place.
+
+A provider change requires an explicit future migration/delete-recreate path.
+This prevents retries, deletion, and recovery for one logical generation from
+crossing provider boundaries.
+
 ## Required provider invariants
 
 Every provider that creates workload-owned execution objects must satisfy these
