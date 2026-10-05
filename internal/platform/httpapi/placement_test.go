@@ -141,3 +141,31 @@ func TestBindingAPIRejectsProviderRebind(t *testing.T) {
 		t.Fatalf("provider rebind status=%d, want 409", changed.StatusCode)
 	}
 }
+
+
+func TestBindingAPIRejectsUnsupportedProviderBeforePersist(t *testing.T) {
+	bindings := NewMemoryPlacementResolver()
+	server := httptest.NewServer(NewRouterWithDependencies(agentstore.NewMemory(), bindings))
+	defer server.Close()
+
+	req, err := http.NewRequest(
+		http.MethodPut,
+		server.URL+"/api/v1/compute-pools/pool-unsupported/binding",
+		bytes.NewBufferString(`{"metadata":{"generation":1},"poolId":"pool-unsupported","clusterId":"cluster-a","provider":"volcano"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", resp.StatusCode)
+	}
+	if _, err := bindings.ResolvePool(context.Background(), "pool-unsupported"); err == nil {
+		t.Fatal("unsupported provider binding must not persist")
+	}
+}
