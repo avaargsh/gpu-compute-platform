@@ -112,3 +112,18 @@ func TestRuntimeRequiresExplicitNonNilAdapters(t *testing.T) {
 		t.Fatal("nil provider adapter must fail closed")
 	}
 }
+
+
+func TestRuntimeProviderNamesAreStable(t *testing.T) {
+	runtime, err := NewRuntimeWithAdapters(map[string]provider.Adapter{
+		"test-b": &recordingAdapter{},
+		"test-a": &recordingAdapter{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := runtime.ProviderNames()
+	if len(got) != 2 || got[0] != "test-a" || got[1] != "test-b" {
+		t.Fatalf("provider names=%v, want [test-a test-b]", got)
+	}
+}
