@@ -46,6 +46,9 @@ func TestPlacementMigrationCutoverAtomicallyMovesBinding(t *testing.T) {
 	if placement.ClusterID != "cluster-b" {
 		t.Fatalf("cluster=%s, want cluster-b", placement.ClusterID)
 	}
+	if placement.Provider != "kueue" {
+		t.Fatalf("placement migration changed provider=%s, want kueue", placement.Provider)
+	}
 	migration, err := bindings.GetPlacementMigration(ctx, "pool-1", "migration-1")
 	if err != nil {
 		t.Fatal(err)
