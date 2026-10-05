@@ -681,3 +681,39 @@ func TestMemoryFinalizeDesiredOwnedIsIdempotentAfterLostAck(t *testing.T) {
 		t.Fatalf("future replay err=%v, want ErrDesiredNotFound", err)
 	}
 }
+
+
+func TestMemoryCreateWorkloadDesiredRejectsProviderMismatch(t *testing.T) {
+	store := NewMemory()
+	ctx := context.Background()
+	store.SetDesired("cluster-a", []agent.DesiredResource{{
+		Kind: "ComputePool",
+		ID: "pool-provider",
+		Generation: 1,
+		Spec: map[string]any{
+			"provider": "kueue",
+			"acceleratorBindings": []domain.AcceleratorBinding{{
+				Class: "h100", ResourceName: "nvidia.com/gpu", Flavor: "h100",
+			}},
+		},
+	}})
+
+	err := store.CreateWorkloadDesired(
+		ctx,
+		"cluster-a",
+		"pool-provider",
+		"h100",
+		agent.DesiredResource{
+			Kind: "Workload",
+			ID: "train-provider",
+			Generation: 1,
+			Spec: map[string]any{
+				"provider": "volcano",
+				"poolID": "pool-provider",
+			},
+		},
+	)
+	if !errors.Is(err, ErrProviderIdentityMismatch) {
+		t.Fatalf("err=%v, want ErrProviderIdentityMismatch", err)
+	}
+}
