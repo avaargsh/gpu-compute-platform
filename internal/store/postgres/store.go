@@ -329,10 +329,17 @@ FOR UPDATE
 	}
 
 	var projected struct {
+		Provider            string                      `json:"provider"`
 		AcceleratorBindings []domain.AcceleratorBinding `json:"acceleratorBindings"`
 	}
 	if err := json.Unmarshal(poolSpec, &projected); err != nil {
 		return fmt.Errorf("decode compute pool desired spec: %w", err)
+	}
+	workloadProvider, _ := in.Spec["provider"].(string)
+	if projected.Provider != "" || workloadProvider != "" {
+		if projected.Provider == "" || workloadProvider == "" || projected.Provider != workloadProvider {
+			return agentstore.ErrProviderIdentityMismatch
+		}
 	}
 	bindingFound := false
 	for _, binding := range projected.AcceleratorBindings {
