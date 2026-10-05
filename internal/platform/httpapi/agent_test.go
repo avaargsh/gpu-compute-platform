@@ -165,6 +165,7 @@ func TestClusterStatusReturnsRegisteredCapabilities(t *testing.T) {
 			DRAAPIAvailable: true,
 			DRAAPIVersion:   "resource.k8s.io/v1",
 			Accelerators:    []string{"h100-80g", "metax-c500"},
+			ProviderAdapters: []string{"kueue"},
 		},
 	}
 	body, err := json.Marshal(registration)
@@ -223,7 +224,9 @@ func TestClusterStatusReturnsRegisteredCapabilities(t *testing.T) {
 		!status.Capabilities.DRAAPIAvailable ||
 		status.Capabilities.DRAAPIVersion != "resource.k8s.io/v1" ||
 		len(status.Capabilities.Accelerators) != 2 ||
-		status.Capabilities.Accelerators[1] != "metax-c500" {
+		status.Capabilities.Accelerators[1] != "metax-c500" ||
+		len(status.Capabilities.ProviderAdapters) != 1 ||
+		status.Capabilities.ProviderAdapters[0] != "kueue" {
 		t.Fatalf("unexpected capabilities: %#v", status.Capabilities)
 	}
 	if status.LastHeartbeatAt == nil || !status.LastHeartbeatAt.Equal(heartbeatAt) {
