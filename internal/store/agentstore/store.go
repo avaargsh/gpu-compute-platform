@@ -12,6 +12,7 @@ import (
 var ErrStaleGeneration = errors.New("stale generation")
 var ErrIdentityConflict = errors.New("resource identity conflict")
 var ErrPlacementMigrationRequired = errors.New("placement migration required")
+var ErrProviderMigrationRequired = errors.New("provider migration required")
 var ErrPlacementSourceMismatch = errors.New("placement migration source does not match current binding")
 var ErrPlacementMigrationConflict = errors.New("placement migration identity conflict")
 var ErrPlacementMigrationNotFound = errors.New("placement migration not found")
