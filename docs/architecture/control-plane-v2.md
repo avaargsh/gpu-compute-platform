@@ -1,12 +1,36 @@
-# AI Compute Control Plane v2
+# AI Compute Control Plane v2 — Target Architecture
+
+Status: **target architecture, not current feature inventory**.
+
+For the implemented Go system, read
+[../CONTROL_PLANE_V2_GO.md](../CONTROL_PLANE_V2_GO.md).
 
 ## Purpose
 
-Evolve the project from a multi-cloud GPU job MVP into a Kubernetes-native AI compute control plane.
+Evolve the project into a Kubernetes-native AI compute control plane without
+reimplementing scheduler, device-allocation, serving-controller or runtime
+mechanics.
 
-The control plane owns user-facing intent, policy, lifecycle, status and economics. It delegates admission, placement, device allocation and model-serving mechanics to specialized providers instead of implementing a second scheduler inside the platform.
+The platform should own portable intent, lifecycle, policy, evidence and
+provider selection. Specialized upstream systems should own their native
+execution algorithms.
 
-## Domain model
+## Current implemented core
+
+```text
+Project
+  -> ComputePool
+  -> Workload
+  -> ClusterBinding(provider=kueue)
+  -> Cluster Agent
+  -> Kueue adapter
+```
+
+Only Kueue is a registered execution provider today.
+
+## Long-term domain direction
+
+Potential future objects:
 
 ```text
 Tenant / Project
@@ -14,9 +38,6 @@ Tenant / Project
   ComputePool -------- AcceleratorClass
       |
    Workload
-   |-- TrainingJob
-   |-- BatchJob
-   `-- Workspace
       |
     Model -------- ModelRevision
       |
@@ -25,145 +46,77 @@ Tenant / Project
   Deployment -------- Endpoint
 ```
 
-### ComputePool
+Model/ServingConfig/Deployment/Endpoint are not current product claims.
 
-A logical pool of accelerator capacity available to one or more projects.
+## Long-term provider decomposition
 
-It describes policy and eligibility, not individual GPU IDs. A pool may map to a Kubernetes cluster, queue/cohort, node pool, cloud capacity pool, or another provider-specific capacity boundary.
-
-### AcceleratorClass
-
-Portable accelerator requirements such as vendor, model/family, memory class and sharing/isolation capabilities.
-
-Provider-specific resource names and node labels belong in provider bindings rather than application-facing workload objects.
-
-### Workload
-
-A desired compute workload. Initial workload kinds are TrainingJob, BatchJob and Workspace.
-
-A workload requests resources and references a ComputePool. It must not persist scheduler-selected physical GPU IDs as desired state.
-
-### Model / ModelRevision
-
-Model is the logical registry object. ModelRevision is an immutable or versioned artifact reference produced by training/import and consumed by serving.
-
-### ServingConfig
-
-Portable serving intent:
-
-- runtime: vLLM, SGLang, or another runtime provider
-- accelerator requirements
-- tensor/pipeline/expert parallelism
-- quantization
-- model/runtime arguments
-- autoscaling and SLO hints
-
-### Deployment
-
-Desired model-serving release. Deployment references ModelRevision and ServingConfig; it does not directly represent a Pod, container, node or GPU device.
-
-### Endpoint
-
-Stable traffic identity in front of one or more deployments. Endpoint owns traffic policy, rollout/shadow policy, rate limits and externally visible serving status.
-
-## Provider boundaries
+The architecture may eventually separate:
 
 ```text
-Control Plane
-   |
-   +-- SchedulerProvider
-   |     +-- Kueue
-   |     +-- Volcano
-   |     `-- KAI
-   |
-   +-- DeviceProvider
-   |     +-- Kubernetes DRA
-   |     +-- HAMi
-   |     `-- legacy extended resources
-   |
-   +-- ServingProvider
-   |     +-- KServe / LLMInferenceService
-   |     +-- llm-d
-   |     `-- native Kubernetes compatibility provider
-   |
-   `-- RuntimeProvider
-         +-- vLLM
-         `-- SGLang
+Scheduler provider
+Device-allocation provider
+Serving provider
+Runtime provider
 ```
 
-Provider bindings translate portable desired state into provider-specific resources. Provider implementation details must not leak into the core domain model.
+Candidate technologies include Kueue, Volcano, KAI, Kubernetes DRA, HAMi,
+KServe, llm-d, vLLM and SGLang.
 
-## Ownership boundaries
+This is a decomposition guide, not a list of implemented adapters.
 
-The platform SHOULD own:
+Stage B currently has one generic execution `provider.Adapter` boundary for the
+existing ComputePool + Workload lifecycle. Do not prematurely create four
+independent plugin frameworks before real use cases require them.
 
-- tenant/project identity and authorization
-- desired workload and serving state
-- model/revision lifecycle
-- quota and budget policy
-- provider bindings
-- normalized status
-- usage/cost accounting
-- SLO/evidence surfaces
+## Ownership rule
 
-The platform SHOULD delegate:
+The platform owns:
 
-- queue admission and quota borrowing to Kueue or equivalent
-- gang scheduling and topology-aware placement to a scheduler
-- physical device allocation to Kubernetes device mechanisms/providers
-- distributed workload orchestration to established workload controllers
-- inference replica/routing mechanics to serving providers
+- portable desired state;
+- explicit placement/provider bindings;
+- lifecycle/finalization;
+- normalized observation/evidence;
+- policy and future economics/SLO surfaces.
 
-## Migration strategy
+The platform delegates:
 
-This is an incremental migration, not a rewrite.
-
-1. Introduce the portable domain objects and provider interfaces without replacing existing APIs.
-2. Wrap existing Kubernetes and cloud adapters as compatibility providers.
-3. Move queue admission, placement and device allocation behind provider interfaces.
-4. Introduce ModelRevision -> ServingConfig -> Deployment -> Endpoint as the serving path.
-5. Add modern inference providers while retaining the native Kubernetes path as fallback.
-6. Remove compatibility fields only after their consumers have migrated.
-
-## Security baseline
-
-- Never put object-storage or cloud long-lived credentials directly in workload specs or Pod environment variables.
-- Prefer workload identity; otherwise use referenced Kubernetes Secrets or provider-native secret stores.
-- Pin runtime images by version or digest for reproducible deployments.
-- Keep physical GPU IDs, node names and vendor-specific labels out of portable desired state.
+- queue admission and quota borrowing;
+- gang/topology scheduling;
+- physical device allocation;
+- workload-controller mechanics;
+- inference routing/replica mechanics.
 
 ## Compatibility rule
 
-Legacy providers are allowed to use provider-specific fields internally. New public APIs and domain objects must remain provider-neutral unless the field is explicitly namespaced as a provider extension.
+Provider-native fields remain inside provider bindings/implementations. Public
+portable intent must not contain physical GPU IDs, selected nodes or arbitrary
+scheduler internals.
 
+## DRA direction
 
-## Device allocation path
+Kubernetes DRA is a future device-allocation option, not a current execution
+path.
 
-The preferred modern device path is Kubernetes Dynamic Resource Allocation (DRA).
+Current Stage B only reports whether the DRA API is visible:
 
 ```text
-AcceleratorClass
-      |
- DeviceProvider binding
-      |
-  DeviceClass
-      |
- ResourceClaim
-      |
- kube-scheduler + DRA driver
-      |
- ResourceSlice / CDI
-      |
- physical or partitioned device
+draApiAvailable
+draApiVersion
 ```
 
-The portable API describes accelerator intent; DeviceClass names, extended-resource
-names and vendor-specific slicing controls remain provider bindings.
+That fact does not imply a driver, DeviceClass or accepted allocation path.
 
-For Kubernetes clusters that have not migrated to DRA, compatibility providers may
-translate the same intent to legacy extended resources or HAMi-specific resources.
-This is a migration mechanism, not a second public resource model.
+If DRA is implemented later, ResourceClaim lifecycle must reuse the current
+generation, lease, observation, evidence and deletion/finalization contract.
 
-Kubernetes 1.37 also supports DRA-backed extended resources, allowing legacy Pod
-resource requests to migrate to DRA allocation without changing every workload at
-once.
+## Evolution rule
+
+Use:
+
+```text
+Adopt -> Integrate -> Contribute upstream -> Build
+```
+
+A new provider is justified only when the existing supported adapter cannot
+cover a validated workload requirement and the candidate can conform to the
+existing recovery model.
