@@ -84,8 +84,8 @@ jobs:
           go build ./cmd/cluster-agent
       - name: Build container targets
         run: |
-          docker build -f Dockerfile.control-plane --target control-plane -t gpu-control-plane:test .
-          docker build -f Dockerfile.control-plane --target cluster-agent -t gpu-cluster-agent:test .
+          docker build --target control-plane -t gpu-control-plane:test .
+          docker build --target cluster-agent -t gpu-cluster-agent:test .
 
   golden-path:
     name: Golden Path / kind + Kueue
