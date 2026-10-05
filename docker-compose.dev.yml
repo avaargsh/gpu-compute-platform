@@ -51,7 +51,7 @@ services:
       - .:/src
       - go_mod_cache:/go/pkg/mod
       - go_build_cache:/root/.cache/go-build
-      - ${KUBECONFIG:-$HOME/.kube/config}:/kube/config:ro
+      - ${KUBECONFIG:-./.kube/config}:/kube/config:ro
     depends_on:
       - control-plane-dev
 
