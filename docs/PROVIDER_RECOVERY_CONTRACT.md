@@ -81,15 +81,16 @@ rules.
 The provider object name or idempotency key is derived from the platform
 resource identity, not from the Agent process or reconcile attempt.
 
-For the Kueue/Kubernetes provider:
+For the accepted Kueue/Kubernetes path:
 
 ```text
 Workload train-1
   -> Job job-train-1
-
-DRA Workload train-1
-  -> ResourceClaim accelerator-train-1
 ```
+
+The Kueue package also contains future DRA identity primitives such as
+`ResourceClaim accelerator-train-1`, but the public API does not enable DRA
+allocation today.
 
 Retries and takeover owners address the same provider object.
 
@@ -228,5 +229,5 @@ The deterministic release suite includes:
 The kind/Kueue Golden Path separately proves stable Job UID across a real Agent
 lease takeover.
 
-Future providers (DRA, HAMi, vendor-specific accelerators, or other schedulers)
+Future promoted paths (DRA, HAMi, vendor-specific accelerators, or other schedulers)
 must fit this contract rather than introduce a parallel recovery model.
