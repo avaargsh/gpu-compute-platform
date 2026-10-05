@@ -3,12 +3,11 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/provider"
 	"github.com/avaargsh/gpu-compute-platform/internal/provider/kueue"
 )
-
-const KueueProviderName = "kueue"
 
 type Runtime struct {
 	adapters map[string]provider.Adapter
@@ -20,7 +19,7 @@ func NewRuntime(clients *Clients) (*Runtime, error) {
 	}
 	kubeClient := kueue.NewKubeClient(clients.Core, clients.Dynamic)
 	return NewRuntimeWithAdapters(map[string]provider.Adapter{
-		KueueProviderName: kueue.NewProvider(kubeClient),
+		provider.KueueAdapterName: kueue.NewProvider(kubeClient),
 	})
 }
 
@@ -48,6 +47,18 @@ func NewRuntimeWithAdapters(adapters map[string]provider.Adapter) (*Runtime, err
 		frozen[name] = adapter
 	}
 	return &Runtime{adapters: frozen}, nil
+}
+
+func (r *Runtime) ProviderNames() []string {
+	if r == nil {
+		return nil
+	}
+	names := make([]string, 0, len(r.adapters))
+	for name := range r.adapters {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (r *Runtime) adapter(name string) (provider.Adapter, error) {
