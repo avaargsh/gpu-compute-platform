@@ -85,7 +85,13 @@ Evidence is an audit pointer. It does not mean the provider object still exists.
 
 ## Future DRA path
 
-DRA is **not** part of the current accepted workload lifecycle.
+DRA is **not** part of the current public/accepted workload lifecycle.
+
+The Kueue implementation contains ResourceClaim/Pod projection primitives and
+delete ordering needed for future DRA work. Those primitives are intentionally
+not reachable through the public ComputePool API today: `allocationMode=dra`
+is rejected until a complete capability + provider + real-hardware acceptance
+path is promoted.
 
 A future adapter may translate portable accelerator intent into:
 
