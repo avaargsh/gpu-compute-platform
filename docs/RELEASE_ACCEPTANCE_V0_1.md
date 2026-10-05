@@ -97,8 +97,10 @@ CREATE
                                   -> different generation: fail closed
 ```
 
-The Kueue/Kubernetes provider binds workload identity to stable Job and
-ResourceClaim names and annotates them with `ai.compute/generation`. It does not
+The accepted Kueue/Kubernetes path binds workload identity to a stable Job name
+and annotates it with `ai.compute/generation`. Internal DRA primitives also use
+stable ResourceClaim names, but DRA is not enabled by the public v0.1/Stage B
+product path. The provider does not
 create attempt-specific execution identities. This prevents lease takeover from
 turning one logical workload into duplicate provider resources.
 
