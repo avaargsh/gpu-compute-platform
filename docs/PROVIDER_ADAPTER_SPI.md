@@ -61,10 +61,17 @@ provider from discovered cluster capabilities.
 Today only:
 
 ```text
-kueue -> internal/provider/kueue
+product catalog:       kueue
+Cluster Agent registry: kueue
+implementation:        internal/provider/kueue
 ```
 
 is registered by the production Cluster Agent.
+
+The API rejects a new `ClusterBinding` whose provider is absent from the
+product provider catalog. The Agent independently publishes
+`providerAdapters[]` so control-plane status can distinguish executable
+adapter support from scheduler discovery facts.
 
 ## Adding a second provider
 
@@ -81,3 +88,17 @@ Before registration it must prove:
 
 Provider selection policy remains a separate future concern. Stage B only makes
 the execution boundary explicit.
+
+
+## Discovery is not registration
+
+`ClusterCapabilities.schedulers[]` records scheduler software observed in the
+cluster. `ClusterCapabilities.providerAdapters[]` records adapters registered
+in the Agent binary. They are deliberately different.
+
+For example, observing Volcano in a cluster must not make
+`ClusterBinding.provider=volcano` legal until the product catalog and Runtime
+registry are explicitly promoted.
+
+See [STAGE_B_PROVIDER_CONFORMANCE.md](STAGE_B_PROVIDER_CONFORMANCE.md) for the
+implementation-before-promotion contract.
