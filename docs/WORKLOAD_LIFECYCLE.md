@@ -1,106 +1,113 @@
 # Workload Accelerator Lifecycle
 
-The v2 control plane treats accelerator allocation as a provider lifecycle, not as a second scheduler.
+The current accepted workload path is:
 
 ```text
 Portable Workload Intent
         |
         v
-Reserve
-  Kueue QuotaReserved
+Kueue quota/admission
         |
         v
-Allocate
-  extended-resource request
-  OR DRA ResourceClaim
+Kubernetes Job
         |
         v
-Bind
-  Kueue Admitted -> Pod scheduled/ready
+extended-resource request
         |
         v
-Run
-  provider observation + evidence
+Pod scheduled / ready
         |
         v
-Release
-  delete Job -> delete workload-owned ResourceClaim
+provider observation + evidence
         |
         v
-Audit
-  final observation -> evidence refs -> finalizer/tombstone
+delete Job / observe gone
+        |
+        v
+final observation
+        |
+        v
+finalize + tombstone
 ```
 
-## Ownership boundary
+## Current ownership boundary
 
-The control plane owns portable intent, desired generation, lifecycle/finalization state and durable evidence references.
+The control plane owns portable intent, desired generation, provider binding,
+lifecycle/finalization and durable evidence references.
 
-The cluster agent owns reconciliation side effects.
+The Cluster Agent owns provider side effects and independent observation.
 
-Kueue owns quota reservation/admission. Kubernetes and the accelerator provider own concrete device allocation and pod binding. The platform must not reproduce scheduler or DRA internals.
+Kueue owns quota reservation/admission. Kubernetes and the accelerator stack own
+concrete scheduling/device assignment.
 
-## Allocation modes
+## Current allocation mode
 
-### Extended resource
+Today the accepted path uses extended resources.
 
-A portable accelerator class resolves to a concrete resource name and Kueue flavor.
+Example:
 
 ```text
-h100-80g
-  -> allocationMode: extended-resource
-  -> nvidia.com/gpu
-  -> ResourceFlavor h100-80g
+portable class: h100-80g
+    -> AcceleratorBinding
+       resourceName: nvidia.com/gpu
+       flavor: kueue-h100
+    -> Job resources.requests[nvidia.com/gpu]
 ```
 
-MIG remains a partition of this model when exposed as an extended resource.
+The public Workload does not request a physical GPU ID.
 
-### DRA
+## Evidence contract
 
-A portable accelerator class resolves to a DRA DeviceClass and the workload owns a ResourceClaim.
+Current extended-resource evidence includes stable provider pointers such as:
 
 ```text
-portable class
-  -> allocationMode: dra
+k8s://<cluster>/namespaces/<ns>/jobs/<job>
+kueue://<cluster>/namespaces/<ns>/workloads/<workload>
+```
+
+Evidence is an audit pointer. It does not mean the provider object still exists.
+
+## Lifecycle invariants
+
+1. Workload execution intent is immutable while active.
+2. Identical same-generation requests are idempotent.
+3. Changed active workloads use Delete -> Cleanup -> Finalize -> Recreate.
+4. Provider object identity is deterministic.
+5. Provider-created execution objects carry desired generation.
+6. Same-generation replay adopts owned objects.
+7. Conflicting generations fail closed.
+8. Deletion is replay-safe and observe-until-gone.
+9. Final deletion evidence is reported before finalization.
+10. Failed report/finalize operations replay safely.
+11. ComputePool cleanup waits for dependent Workloads.
+12. Shared pool resources are not garbage-collected without explicit ownership.
+13. Observation/finalization are fenced by current reconcile-lease ownership.
+
+## Future DRA path
+
+DRA is **not** part of the current accepted workload lifecycle.
+
+A future adapter may translate portable accelerator intent into:
+
+```text
+DeviceClass
   -> ResourceClaim
   -> Pod resourceClaim reference
 ```
 
-The ResourceClaim is workload-owned lifecycle state. It must be removed only after the Job has been removed or observed gone.
+If implemented, ResourceClaim must remain provider-owned lifecycle state and fit
+the existing contract:
 
-## Lifecycle evidence contract
+- deterministic identity;
+- generation marker;
+- create/adopt;
+- independent observation;
+- lease-fenced publication;
+- Job cleanup before claim cleanup where required;
+- observe all workload-owned provider resources gone before finalization.
 
-The provider returns stable evidence references for resources that participated in allocation and release.
+DRA must not create a second public workload model or a second recovery state
+machine.
 
-For an extended-resource workload:
-
-```text
-k8s://<cluster>/namespaces/<ns>/jobs/<job>
-kueue://<cluster>/namespaces/<ns>/workloads/<workload>
-```
-
-For a DRA workload:
-
-```text
-k8s://<cluster>/namespaces/<ns>/jobs/<job>
-k8s://<cluster>/namespaces/<ns>/resourceclaims/<claim>
-kueue://<cluster>/namespaces/<ns>/workloads/<workload>
-```
-
-Release evidence is not proof that a resource still exists. It is an audit pointer identifying the provider object whose deletion was reconciled.
-
-## Release invariants
-
-1. Deletion is idempotent and replay-safe.
-2. Workload cleanup is independent of ComputePool readiness; a failed/stale pool must not strand workload-owned resources.
-3. Job deletion is reconciled before DRA ResourceClaim deletion.
-4. A DRA workload is not `Gone` until both Job and ResourceClaim are gone.
-5. Final deletion evidence is reported before desired state is finalized.
-6. Failed evidence reporting or finalization replays provider deletion safely.
-7. ComputePool cleanup waits until dependent Workloads have finalized.
-8. Shared pool resources such as ResourceFlavor are not deleted by a workload release.
-9. Provider-created Job and ResourceClaim objects carry the desired generation. An existing object from another generation fails closed instead of being reported as converged.
-10. `ObservedGeneration` records the desired generation the agent processed, including failed reconciliation; convergence is expressed by conditions. A stale provider object therefore reports `Ready=False / ReconcileFailed` for the current generation rather than success.
-11. v0.1 does not hot-replace immutable Jobs. The public Workload API treats an active Workload as immutable execution intent: identical same-generation PUTs are idempotent, while same-generation spec mutations and higher-generation in-place replacements return conflict.
-12. A changed Workload follows Delete -> provider cleanup -> Finalize -> Recreate with a generation higher than the tombstone. Internal desired-state/migration APIs remain lower-level mechanisms and are not the public replacement contract.
-
-These invariants define the v0.1 workload lifecycle boundary. Future DRA/HAMi/provider integrations must fit this contract rather than add a parallel lifecycle model.
+HAMi/fractional allocation has the same rule: implementation may change provider
+projection, not management-plane lifecycle semantics.
