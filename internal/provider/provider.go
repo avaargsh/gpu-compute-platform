@@ -30,7 +30,7 @@ type PoolObservation struct {
 }
 
 type WorkloadProjection struct {
-	Provider            string
+	Provider           string
 	WorkloadID         domain.ID
 	ProjectID          domain.ID
 	PoolID             domain.ID
