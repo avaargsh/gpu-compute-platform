@@ -22,6 +22,7 @@ func boundRouter(store agentstore.Store, projectCluster, poolCluster domain.ID) 
 		ID:         "pool-h100",
 		Generation: 1,
 		Spec: map[string]any{
+			"provider":  "kueue",
 			"projectID": "project-1",
 			"namespace": "project-1",
 			"acceleratorBindings": []domain.AcceleratorBinding{{
@@ -373,5 +374,59 @@ func TestResourceAPIPreservesIdenticalReplayAfterPoolDeletionStarts(t *testing.T
 	}`)
 	if got := put("train-new", newBody); got != http.StatusConflict {
 		t.Fatalf("new workload under deleting pool status=%d, want 409", got)
+	}
+}
+
+
+func TestResourceAPIRejectsDRAComputePoolUntilProductPathIsEnabled(t *testing.T) {
+	store := agentstore.NewMemory()
+	placement := NewMemoryPlacementResolver()
+	placement.BindProject(domain.ProjectBinding{
+		Metadata: domain.Metadata{Generation: 1},
+		ProjectID: "project-1",
+		ClusterID: "cluster-a",
+		Namespace: "project-1",
+	})
+	placement.BindPool(domain.ClusterBinding{
+		Metadata: domain.Metadata{Generation: 1},
+		PoolID: "pool-dra",
+		ClusterID: "cluster-a",
+		Provider: "kueue",
+	})
+	server := httptest.NewServer(NewRouterWithDependencies(store, placement))
+	defer server.Close()
+
+	body := []byte(`{
+		"metadata":{"id":"pool-dra","generation":1},
+		"projectId":"project-1",
+		"spec":{
+			"accelerators":[{"class":"h100-dra","quota":1}],
+			"acceleratorBindings":[{
+				"class":"h100-dra",
+				"allocationMode":"dra",
+				"flavor":"h100-dra",
+				"resourceName":"",
+				"dra":{"deviceClassName":"gpu.nvidia.com"}
+			}],
+			"scheduling":{"mode":"default"}
+		}
+	}`)
+	resp, err := server.Client().Do(mustRequest(
+		t,
+		http.MethodPut,
+		server.URL+"/api/v1/compute-pools/pool-dra",
+		body,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", resp.StatusCode)
+	}
+	if _, found, err := store.GetDesired(context.Background(), "cluster-a", "ComputePool", "pool-dra"); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("unsupported DRA pool must not enter desired state")
 	}
 }
