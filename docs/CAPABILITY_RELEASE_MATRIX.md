@@ -145,8 +145,10 @@ Stage A receives only compatibility fixes and gate hardening.
 9. run a real-GPU pilot;
 10. promote only if evidence is sufficient.
 
-DRA execution, HAMi/fractional GPU and serving remain out of scope for this
-Stage B provider slice.
+The Kueue package already has internal ResourceClaim projection primitives, but
+the public ComputePool API rejects `allocationMode=dra`; no DRA execution path
+is promoted or accepted. HAMi/fractional GPU and serving remain out of scope for
+this Stage B provider slice.
 
 ### Stage C — serving provider
 
