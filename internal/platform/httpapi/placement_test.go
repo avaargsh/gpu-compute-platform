@@ -110,7 +110,6 @@ func TestProjectBindingAPIRejectsCrossClusterRebind(t *testing.T) {
 	}
 }
 
-
 func TestBindingAPIRejectsProviderRebind(t *testing.T) {
 	bindings := NewMemoryPlacementResolver()
 	server := httptest.NewServer(NewRouterWithDependencies(agentstore.NewMemory(), bindings))
