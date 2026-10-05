@@ -102,8 +102,11 @@ Next functional slice:
 3. keep it unregistered until the later centralized acceptance pass;
 4. only after contract + real-GPU evidence promote it into the capability matrix.
 
-DRA execution, HAMi/fractional GPU, serving providers and multi-cluster placement
-remain later slices.
+The Kueue package contains internal DRA ResourceClaim projection primitives, but
+the public ComputePool API currently rejects `allocationMode=dra`. DRA is
+therefore **not an enabled product path** and has no acceptance claim.
+HAMi/fractional GPU, serving providers and multi-cluster placement remain later
+slices.
 
 ## Invariants
 
