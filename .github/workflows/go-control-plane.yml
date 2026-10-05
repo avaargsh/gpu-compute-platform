@@ -7,13 +7,18 @@ concurrency:
 on:
   push:
     branches:
-      - feat/control-plane-v2-go
+      - master
   pull_request:
     paths:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
+      - "Dockerfile"
       - "Dockerfile.control-plane"
+      - "Dockerfile.dev"
+      - "docker-compose.yml"
+      - "docker-compose.dev.yml"
+      - ".env.example"
       - "Makefile"
       - "scripts/go-format.sh"
       - "scripts/e2e/go-kind-kueue-golden.sh"
@@ -23,6 +28,9 @@ on:
       - "manifests/production/**"
       - "config/production/**"
       - "internal/**/*.sql"
+      - "docs/PROVIDER_ADAPTER_SPI.md"
+      - "docs/PROVIDER_RECOVERY_CONTRACT.md"
+      - "docs/CAPABILITY_RELEASE_MATRIX.md"
       - ".github/workflows/go-control-plane.yml"
 
 jobs:
