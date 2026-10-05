@@ -183,6 +183,13 @@ func (m *Memory) CreateWorkloadDesired(
 	if pool.DeletionTimestamp != nil {
 		return ErrComputePoolDeleting
 	}
+	poolProvider, _ := pool.Spec["provider"].(string)
+	workloadProvider, _ := in.Spec["provider"].(string)
+	if poolProvider != "" || workloadProvider != "" {
+		if poolProvider == "" || workloadProvider == "" || poolProvider != workloadProvider {
+			return ErrProviderIdentityMismatch
+		}
+	}
 	bound, err := acceleratorBindingExists(
 		pool.Spec,
 		acceleratorClass,
