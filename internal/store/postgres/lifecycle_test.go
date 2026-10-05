@@ -610,3 +610,45 @@ ON CONFLICT (cluster_id, kind, resource_id) DO UPDATE SET generation = 7
 		t.Fatalf("finalized generation=%d found=%t err=%v", finalized, found, err)
 	}
 }
+
+
+func TestPostgresCreateWorkloadDesiredRejectsProviderMismatch(t *testing.T) {
+	db := openContractDB(t)
+	store := New(db)
+	ctx := context.Background()
+	clusterID := domain.ID("cluster-provider-mismatch")
+	poolID := domain.ID("pool-provider-mismatch")
+
+	if err := store.UpsertDesired(ctx, clusterID, agent.DesiredResource{
+		Kind: "ComputePool",
+		ID: poolID,
+		Generation: 1,
+		Spec: map[string]any{
+			"provider": "kueue",
+			"acceleratorBindings": []domain.AcceleratorBinding{{
+				Class: "h100", ResourceName: "nvidia.com/gpu", Flavor: "h100",
+			}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := store.CreateWorkloadDesired(
+		ctx,
+		clusterID,
+		poolID,
+		"h100",
+		agent.DesiredResource{
+			Kind: "Workload",
+			ID: "train-provider-mismatch",
+			Generation: 1,
+			Spec: map[string]any{
+				"provider": "volcano",
+				"poolID": poolID,
+			},
+		},
+	)
+	if !errors.Is(err, agentstore.ErrProviderIdentityMismatch) {
+		t.Fatalf("err=%v, want ErrProviderIdentityMismatch", err)
+	}
+}
