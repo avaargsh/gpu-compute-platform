@@ -1,177 +1,182 @@
 # Capability and Release Matrix
 
-This document separates **release-supported capabilities** from **upstream signals we are watching**.
+This document separates **implemented product capability**, **accepted execution
+capability**, and **watch-only upstream signals**.
 
-The rule is intentionally conservative:
+A feature can exist in code without being promoted into the accepted execution
+surface.
 
-> Freeze the v0.1 Golden Path first. A scheduler, accelerator allocation mode,
-> serving stack, or runtime feature becomes a supported capability only after it
-> has an explicit provider contract and an acceptance row here.
-
-## v0.1 frozen baseline
+## Accepted baseline
 
 | Layer | Accepted combination | Status | Evidence |
 | --- | --- | --- | --- |
-| Kubernetes | kind node `v1.34.0` | supported in v0.1 | `scripts/e2e/go-kind-kueue-golden.sh` |
-| Scheduler / queueing | Kueue `v0.19.6` | supported in v0.1 | real kind/Kueue Golden Path |
-| GPU facts | Run:ai Fake GPU Operator `0.2.0`, H100 profile | supported in v0.1 acceptance | fake-GPU convergence + portable `h100-80g` binding |
-| Allocation | extended resource `nvidia.com/gpu` | supported in v0.1 | Job projection + observation/evidence |
-| Control plane | PostgreSQL desired/observed state, generation, lease, tombstone | supported in v0.1 | `make acceptance-contract` |
-| Provider path | Kubernetes + Kueue | **only execution path in v0.1** | provider recovery contract |
+| Kubernetes | kind node `v1.34.0` | accepted baseline | `scripts/e2e/go-kind-kueue-golden.sh` |
+| Scheduler / queueing | Kueue `v0.19.6` | accepted | kind/Kueue Golden Path |
+| GPU facts | Run:ai Fake GPU Operator `0.2.0`, H100 profile | acceptance fixture | portable `h100-80g` binding |
+| Allocation | extended resource `nvidia.com/gpu` | accepted baseline | Job projection + observation/evidence |
+| Control plane | PostgreSQL desired/observed state, generation, lease, tombstone | accepted baseline | `make acceptance-contract` |
+| Provider adapter | `kueue` | **only registered production adapter** | provider recovery contract + Golden Path |
 
-The v0.1 release claim does **not** include DRA, HAMi/fractional GPU, KAI,
-Volcano, KServe, llm-d, LWS, or SGLang role switching.
+The accepted claim does **not** include DRA execution, HAMi/fractional GPU,
+KAI, Volcano, KServe, llm-d, LWS, or SGLang role switching.
+
+## Stage B implemented surface
+
+These capabilities now exist in mainline code but do not by themselves promote
+another execution provider:
+
+- scheduler facts: `schedulers[].{name, version?}`;
+- DRA API fact: `draApiAvailable` + `draApiVersion`;
+- portable accelerator inventory: `accelerators[]`;
+- Agent execution capability: `providerAdapters[]`;
+- immutable `ClusterBinding.clusterId`;
+- immutable `ClusterBinding.provider`;
+- provider identity copied into desired ComputePool / Workload state;
+- `provider.Adapter` SPI;
+- API rejection of providers outside the product provider catalog;
+- Runtime fail-closed behavior for missing/unregistered adapters.
+
+### Fact separation
+
+```text
+schedulers[]
+    = software observed in the cluster
+
+providerAdapters[]
+    = adapters registered in the Cluster Agent
+
+ClusterBinding.provider
+    = immutable adapter selected for one pool
+```
+
+These are intentionally not interchangeable.
+
+Observing a scheduler does not register an adapter. Registering an adapter does
+not prove the scheduler is installed. A binding never causes the Runtime to
+guess a replacement provider.
 
 ## Capability-driven rule
 
-Cluster Capability Registration is the only discovery boundary between cluster
-implementation details and the management plane.
+Cluster Capability Registration is the discovery boundary between cluster facts
+and the management plane.
 
-The frozen v0.1 facts are deliberately small:
+Capability fields are facts, not scheduling policy. The management plane may
+use them for compatibility/preflight/UX, but must not reproduce scheduler,
+device-allocation or serving-provider algorithms.
 
-- Kubernetes version
-- Kueue available
-- portable accelerator classes observed on nodes
-- Agent version and heartbeat
-
-Stage B extends that inventory without enabling another execution path:
-
-- installed scheduler facts as `{name, version?}`; version is reported only
-  when it can be observed from the running scheduler deployment;
-- `draApiAvailable` plus the observed `resource.k8s.io` API version;
-- `accelerators` remains the inventory of portable accelerator classes, not
-  vendor resource names or a placement policy.
-
-DRA API availability is not a claim that a DRA driver, DeviceClass, or
-accelerator allocation path is supported. Likewise, an observed KAI/Volcano
-scheduler would remain inventory until its provider recovery contract and
-acceptance evidence exist.
-
-All capability-registration fields are **facts**, not scheduling policy.
-
-The control plane may use registered facts for admission, compatibility checks,
-placement eligibility, and UX. It must not reproduce KAI, Volcano, Kueue,
-KServe, llm-d, DRA, or accelerator-provider scheduling/allocation semantics.
+DRA API availability means only that the Kubernetes API is visible. It is not
+evidence of a DRA driver, DeviceClass, compatible accelerator or accepted DRA
+allocation path.
 
 ## Provider adapter rule
 
-Kueue is the only v0.1 execution provider.
-
-Future integrations enter through optional provider adapters and must map back
-to the same portable intent and lifecycle contracts:
+Every execution provider must map to the same lifecycle:
 
 ```text
 Portable intent
-    -> ClusterBinding / provider selection
-    -> Provider adapter projection
-    -> generation-aware provider object
-    -> observation + evidence
+    -> immutable ClusterBinding.provider
+    -> desired provider identity
+    -> provider.Adapter
+    -> deterministic provider objects
+    -> independent observation + evidence
     -> lease-fenced commit
     -> delete / finalize / tombstone
 ```
 
-A provider is not allowed to create a parallel source of truth or a second
-recovery model.
+A provider may not create a parallel source of truth or recovery model.
+
+Implementation and promotion are separate. A candidate adapter may be developed
+behind the SPI while remaining absent from both the product provider catalog
+and the production Runtime registry.
+
+See [STAGE_B_PROVIDER_CONFORMANCE.md](STAGE_B_PROVIDER_CONFORMANCE.md).
 
 ## Watch-only upstream matrix
 
-These rows are **signals to preserve in compatibility planning**, not acceptance
-claims.
+These rows are planning signals, not acceptance claims.
 
-| Upstream | Version observed | Relevant changes | Current platform action |
+| Upstream | Version observed | Why it matters | Current action |
 | --- | --- | --- | --- |
-| KAI Scheduler | `0.18.2` | fractional GPU memory/fraction limits; NRI/fractional runtime-class interaction fix; nvFraction-aware node scaling; default PodGroup behavior when Karta lacks gang instructions | record only; no KAI provider or HAMi/fractional acceptance in v0.1 |
-| Volcano | `1.15.3` | DRA aggregate-device-count overflow fix; stale PodGroup annotation update fix; not-ready placeholder-node snapshot fix | record only; no Volcano or real-DRA acceptance in v0.1 |
-| LWS | later stage | multi-replica naming stability is relevant to leader/worker identity | observe until Scheduler/Serving stages |
-| KServe | `0.21+` target | serving provider candidate; resource claims, Canary, autoscaling integration are capability facts | Stage C only |
-| llm-d | `0.10` target | serving/router baseline and supply-chain reference | Stage C only |
-| SGLang | runtime role-switch capable builds | P/D role switch has drain/rebuild/failure semantics | Stage D only; no platform intent field yet |
+| KAI Scheduler | `0.18.2` | GPU-aware scheduling / fractional GPU semantics | candidate research only; not registered |
+| Volcano | `1.15.3` | batch/gang scheduling and DRA-related fixes | candidate research only; not registered |
+| Kubernetes DRA | API discovery only | future device-allocation path | report API fact only; no execution |
+| HAMi | later slice | fractional GPU compatibility | defer until scheduler-provider contract is proven |
+| LWS | later stage | multi-replica identity | Stage C+ research |
+| KServe | `0.21+` target | serving-provider candidate | Stage C only |
+| llm-d | `0.10` target | serving/router baseline | Stage C only |
+| SGLang | role-switch capable builds | elastic inference runtime | Stage D only |
 
-Do not chase every release candidate. Update this matrix only when a combination
-is either:
-
-1. promoted into an acceptance gate, or
-2. important enough to affect the design of a future provider contract.
+Update this table only when upstream changes alter a provider contract or a
+combination is promoted into acceptance.
 
 ## Evolution stages
 
-### Stage A — v0.1 closeout (frozen)
+### Stage A — frozen baseline
 
-- freeze lifecycle race, tombstone atomicity, lease fencing, recovery, and
-  capability-registration evidence;
-- keep Fake GPU + Kueue stable;
-- keep DRA/HAMi/KAI/Volcano/Serving execution paths deferred;
-- record upstream scheduler fixes here without changing the supported surface.
+Completed and frozen:
 
-Frozen baseline: deterministic acceptance contracts and the real kind/Kueue
-Golden Path remain green with capability registration included. Stage A changes
-are limited to gate hardening, bug fixes, and watch-only upstream signal
-updates; they must not add a new scheduler, accelerator allocation mode, or
-serving execution path.
+- lifecycle race/tombstone atomicity;
+- lease fencing and takeover;
+- at-least-once provider recovery;
+- capability registration baseline;
+- Kueue + fake-GPU Golden Path.
 
-### Stage B — optional scheduler paths
+Stage A receives only compatibility fixes and gate hardening.
 
-Stage B starts only after the frozen Stage A gates remain green. The entry work
-is deliberately split from provider implementation:
+### Stage B — optional scheduler provider
 
-1. extend Cluster Capability Registration with scheduler name/version,
-   DRA API availability/version, and accelerator classes as reported facts only;
-2. define a `ClusterBinding -> provider adapter` SPI aligned with the existing
-   ensure/materialize/observe/finalize lifecycle boundary;
-3. select exactly one optional scheduler path (KAI or Volcano) and write its
-   recovery contract first, reusing generation, lease fencing, and tombstones;
-4. run a real-GPU pilot and write observation/evidence back through the existing
-   evidence model before any new acceptance row is promoted.
+**Completed entry work:**
 
-Fractional/HAMi coexistence, DRA execution, and serving integrations remain out
-of scope until a chosen Stage B provider has contract + real-GPU evidence.
+1. scheduler/DRA/accelerator capability facts;
+2. provider identity invariant;
+3. provider adapter SPI;
+4. provider catalog + Agent `providerAdapters[]` distinction.
 
-Kueue remains a valid peer provider; KAI/Volcano do not replace the control
-plane's lifecycle model.
+**Current implementation work:**
 
-The first Stage B slice is facts-only. It must not add a second runtime adapter,
-change `ClusterBinding.Provider` semantics, or promote DRA/KAI/Volcano execution
-into the v0.1 acceptance claim.
+5. choose exactly one candidate (KAI or Volcano);
+6. implement its adapter against
+   [STAGE_B_PROVIDER_CONFORMANCE.md](STAGE_B_PROVIDER_CONFORMANCE.md);
+7. keep the candidate unregistered while functionality is aligned.
+
+**Later centralized validation:**
+
+8. run recovery/chaos/conformance acceptance;
+9. run a real-GPU pilot;
+10. promote only if evidence is sufficient.
+
+DRA execution, HAMi/fractional GPU and serving remain out of scope for this
+Stage B provider slice.
 
 ### Stage C — serving provider
 
-- introduce KServe 0.21+ as an optional Serving provider;
-- align llm-d 0.10 images/router baseline and remove stale connector references;
-- expose DRA-claim, Canary, and direct autoscaling support as capability facts;
-- keep CRD manipulation inside the Cluster Agent/provider adapter.
+Future only:
 
-The management plane declares intent; it does not become a KServe/llm-d
-controller implementation.
+- define portable ModelRevision / ServingConfig / Deployment / Endpoint boundary;
+- introduce one serving provider behind its own contract;
+- keep CRD manipulation inside the Cluster Agent/provider implementation.
+
+No serving provider is currently part of the supported product surface.
 
 ### Stage D — elastic inference runtime
 
-SGLang role switching remains a runtime capability observation until there is a
-measured TTFT/TPOT pressure that justifies dynamic P:D intent.
-
-Any future role switch must be modeled as a recoverable transaction:
-
-```text
-drain requests
-    -> freeze generation/lease ownership
-    -> transfer or invalidate KV ownership
-    -> teardown communication resources
-    -> rebuild role-specific runtime state / CUDA graphs
-    -> synchronize router state
-    -> verify
-    -> commit observation
-```
-
-Failure must map to the existing generation + lease + tombstone/recovery model,
-rather than adding an unrelated runtime state machine.
+Future only. Any P/D or role-switch operation must reuse generation, lease,
+evidence and recovery semantics rather than create an unrelated state machine.
 
 ## Promotion rule
 
-A deferred capability becomes supported only when all of the following exist:
+A candidate becomes a supported provider only when all are true:
 
-- explicit capability-registration facts;
-- provider adapter boundary;
-- generation-aware deterministic identity;
+- explicit capability facts required by the provider;
+- implementation behind `provider.Adapter`;
+- product provider catalog entry;
+- Cluster Agent Runtime registration;
+- deterministic generation-aware identity;
 - lease-fenced observation/finalization;
 - replay-safe deletion/recovery;
-- supply-chain-pinned production images;
-- a named acceptance matrix row and executable Golden Path evidence.
+- supply-chain-pinned production images where applicable;
+- named acceptance row;
+- centralized executable recovery evidence;
+- real-GPU evidence for the promoted path.
+
+Catalog/registry changes are the **last** promotion step, not the first.
