@@ -26,6 +26,7 @@ var ErrDesiredDeleting = errors.New("desired resource is deleting")
 var ErrComputePoolNotFound = errors.New("compute pool desired state not found")
 var ErrComputePoolDeleting = errors.New("compute pool is deleting")
 var ErrAcceleratorBindingNotFound = errors.New("accelerator class is not bound by compute pool")
+var ErrProviderIdentityMismatch = errors.New("workload provider does not match compute pool provider")
 var ErrLeaseLost = errors.New("reconcile lease ownership lost")
 
 const ProviderCleanupFinalizer = "gpu-compute-platform.io/provider-cleanup"
