@@ -76,6 +76,9 @@ func TestResourceAPIProjectsWorkloadDesiredState(t *testing.T) {
 	if got.Spec["projectID"] != domain.ID("project-1") || got.Spec["poolID"] != domain.ID("pool-h100") || got.Spec["namespace"] != "project-1" {
 		t.Fatalf("unexpected desired placement: %#v", got.Spec)
 	}
+	if got.Spec["provider"] != "kueue" {
+		t.Fatalf("desired workload lost frozen provider identity: %#v", got.Spec)
+	}
 }
 
 func TestResourceAPIRejectsPathBodyIdentityMismatch(t *testing.T) {

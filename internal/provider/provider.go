@@ -6,7 +6,13 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 )
 
+type Adapter interface {
+	PoolProvider
+	WorkloadProvider
+}
+
 type PoolProjection struct {
+	Provider            string
 	PoolID              domain.ID
 	ProjectID           domain.ID
 	ClusterID           domain.ID
@@ -24,6 +30,7 @@ type PoolObservation struct {
 }
 
 type WorkloadProjection struct {
+	Provider           string
 	WorkloadID         domain.ID
 	ProjectID          domain.ID
 	PoolID             domain.ID
