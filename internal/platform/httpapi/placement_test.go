@@ -20,13 +20,14 @@ func TestMemoryPlacementRejectsCrossClusterRebind(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertClusterBinding(context.Background(), domain.ClusterBinding{
-		Metadata: domain.Metadata{Generation: 2}, PoolID: "pool-1", ClusterID: "cluster-a", Provider: "volcano",
-	}); err != nil {
-		t.Fatalf("same-cluster update: %v", err)
-	}
 	err := store.UpsertClusterBinding(context.Background(), domain.ClusterBinding{
-		Metadata: domain.Metadata{Generation: 3}, PoolID: "pool-1", ClusterID: "cluster-b", Provider: "volcano",
+		Metadata: domain.Metadata{Generation: 2}, PoolID: "pool-1", ClusterID: "cluster-a", Provider: "volcano",
+	})
+	if !errors.Is(err, agentstore.ErrProviderMigrationRequired) {
+		t.Fatalf("provider change error=%v, want provider migration required", err)
+	}
+	err = store.UpsertClusterBinding(context.Background(), domain.ClusterBinding{
+		Metadata: domain.Metadata{Generation: 3}, PoolID: "pool-1", ClusterID: "cluster-b", Provider: "kueue",
 	})
 	if !errors.Is(err, agentstore.ErrPlacementMigrationRequired) {
 		t.Fatalf("error=%v, want placement migration required", err)
@@ -106,5 +107,37 @@ func TestProjectBindingAPIRejectsCrossClusterRebind(t *testing.T) {
 	router.ServeHTTP(moveResponse, move)
 	if moveResponse.Code != http.StatusConflict {
 		t.Fatalf("cross-cluster project binding status=%d body=%s", moveResponse.Code, moveResponse.Body.String())
+	}
+}
+
+func TestBindingAPIRejectsProviderRebind(t *testing.T) {
+	bindings := NewMemoryPlacementResolver()
+	server := httptest.NewServer(NewRouterWithDependencies(agentstore.NewMemory(), bindings))
+	defer server.Close()
+
+	put := func(body string) *http.Response {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/compute-pools/pool-provider/binding", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp
+	}
+
+	first := put(`{"metadata":{"generation":1},"poolId":"pool-provider","clusterId":"cluster-a","provider":"kueue"}`)
+	first.Body.Close()
+	if first.StatusCode != http.StatusNoContent {
+		t.Fatalf("first status=%d", first.StatusCode)
+	}
+
+	changed := put(`{"metadata":{"generation":2},"poolId":"pool-provider","clusterId":"cluster-a","provider":"volcano"}`)
+	defer changed.Body.Close()
+	if changed.StatusCode != http.StatusConflict {
+		t.Fatalf("provider rebind status=%d, want 409", changed.StatusCode)
 	}
 }

@@ -93,6 +93,7 @@ ON CONFLICT (pool_id) DO UPDATE SET
     generation = EXCLUDED.generation,
     updated_at = now()
 WHERE cluster_bindings.cluster_id = EXCLUDED.cluster_id
+  AND cluster_bindings.provider = EXCLUDED.provider
   AND cluster_bindings.generation <= EXCLUDED.generation
 `, in.PoolID, in.ClusterID, in.Provider, in.Metadata.Generation)
 	if err != nil {
@@ -106,16 +107,20 @@ WHERE cluster_bindings.cluster_id = EXCLUDED.cluster_id
 		return nil
 	}
 	var currentCluster domain.ID
+	var currentProvider string
 	var currentGeneration int64
 	if err := s.db.QueryRowContext(ctx, `
-SELECT cluster_id, generation
+SELECT cluster_id, provider, generation
 FROM cluster_bindings
 WHERE pool_id = $1
-`, in.PoolID).Scan(&currentCluster, &currentGeneration); err != nil {
+`, in.PoolID).Scan(&currentCluster, &currentProvider, &currentGeneration); err != nil {
 		return err
 	}
 	if currentCluster != in.ClusterID {
 		return agentstore.ErrPlacementMigrationRequired
+	}
+	if currentProvider != in.Provider {
+		return agentstore.ErrProviderMigrationRequired
 	}
 	return agentstore.ErrStaleGeneration
 }
