@@ -15,7 +15,7 @@ Changes to reconciliation or provider execution must preserve:
 - durable deletion/finalization evidence and tombstone fencing;
 - fail-closed behavior when ownership or generation is ambiguous.
 
-Read [the provider recovery contract](docs/provider-side-effect-recovery.md)
+Read [the provider recovery contract](docs/PROVIDER_RECOVERY_CONTRACT.md)
 before changing provider side-effect semantics.
 
 ## Validation
@@ -36,11 +36,15 @@ Golden Path. PostgreSQL contract tests require `TEST_POSTGRES_DSN`.
 For lifecycle fixes, include a regression at the failed boundary and describe the
 trigger, observable result, and recovery semantics in the pull request.
 
-## v0.1 scope
+## Stage B scope
 
-Keep HAMi/DRA/MIG integration, additional providers, and multi-cluster placement
-outside the frozen v0.1 lifecycle unless they are introduced as separately reviewed
-follow-up slices.
+The v0.1 Kueue lifecycle remains the compatibility baseline. New provider work
+must use the existing adapter SPI and recovery contract.
+
+A second provider may be implemented behind the SPI, but it must remain
+unregistered until the centralized validation pass proves its recovery and
+real-hardware evidence. DRA execution, HAMi/fractional GPU, serving providers
+and multi-cluster placement remain separate later slices.
 
 ## License
 
