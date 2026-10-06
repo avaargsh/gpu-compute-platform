@@ -305,8 +305,8 @@ func indexAcceleratorBindings(desired []DesiredResource) (map[domain.ID]map[stri
 		}
 		poolBindings := make(map[string]domain.AcceleratorBinding, len(projection.AcceleratorBindings))
 		for _, binding := range projection.AcceleratorBindings {
-			if binding.Class == "" || binding.ResourceName == "" {
-				return nil, fmt.Errorf("accelerator binding common fields are incomplete in pool %s", item.ID)
+			if binding.Class == "" {
+				return nil, fmt.Errorf("accelerator binding class is required in pool %s", item.ID)
 			}
 			if _, exists := poolBindings[binding.Class]; exists {
 				return nil, fmt.Errorf("duplicate accelerator binding %s in pool %s", binding.Class, item.ID)
