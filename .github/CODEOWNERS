@@ -1,0 +1,5 @@
+# Repository ownership
+# CODEOWNERS is routing metadata. It does not replace CI or acceptance evidence.
+
+* @avaargsh
+/.github/ @avaargsh
