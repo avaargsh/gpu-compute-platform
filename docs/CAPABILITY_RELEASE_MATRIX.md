@@ -84,8 +84,8 @@ claims.
 
 | Upstream | Version observed | Relevant changes | Current platform action |
 | --- | --- | --- | --- |
-| KAI Scheduler | `0.18.2` | fractional GPU memory/fraction limits; NRI/fractional runtime-class interaction fix; nvFraction-aware node scaling; default PodGroup behavior when Karta lacks gang instructions | record only; no KAI provider or HAMi/fractional acceptance in v0.1 |
-| Volcano | `1.15.3` | DRA aggregate-device-count overflow fix; stale PodGroup annotation update fix; not-ready placeholder-node snapshot fix | record only; no Volcano or real-DRA acceptance in v0.1 |
+| KAI Scheduler | `0.18.1` | fractional-GPU quota/binding fixes; avoids treating unrelated `*gpu` extended resources such as HAMi `nvidia.com/vgpu` as whole-GPU capacity; v0.18 line continues NvFractions and GPU-sharing work | record only; no KAI provider or HAMi/fractional acceptance in v0.1 |
+| Volcano | `1.15.2` | fixes DRA capacity-accounting DoS/overflow risk; rechecks device feasibility after reclaim; includes additional HAMi/PodGroup correctness fixes | record only; no Volcano or real-DRA acceptance in v0.1 |
 | LWS | later stage | multi-replica naming stability is relevant to leader/worker identity | observe until Scheduler/Serving stages |
 | KServe | `0.21+` target | serving provider candidate; resource claims, Canary, autoscaling integration are capability facts | Stage C only |
 | llm-d | `0.10` target | serving/router baseline and supply-chain reference | Stage C only |
