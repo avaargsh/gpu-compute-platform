@@ -1,286 +1,128 @@
-# GPU 计算平台 - Docker 开发环境设置指南
+# Go Control Plane 容器构建与本地验证
 
-## 📖 概述
+> 当前默认运行时是 **Go Control Plane + Cluster Agent**。旧 Python/FastAPI Compose 栈不属于当前 Golden Path；不要把 `docker-compose.yml` / `docker-compose.dev.yml` 当作 v0.1 发布入口。
 
-本文档描述如何使用 Docker 和 Docker Compose 快速启动 GPU 计算平台的开发环境。
+## 1. 构建镜像
 
-## 🚀 快速开始
-
-### 前置要求
-
-1. **Docker** 和 **Docker Compose** 已安装
-2. **NVIDIA Container Toolkit** (如需要GPU支持)
-3. **至少 4GB 可用内存**
-
-### 1. 环境配置
+根目录 `Dockerfile` 是新部署与开发脚本的默认入口。
 
 ```bash
-# 复制环境变量模板
-cp .env.example .env
+# 默认镜像：control-plane
+docker build -t gpu-control-plane:dev .
 
-# 编辑环境变量 (可选，默认配置已可工作)
-vi .env
+# 显式 target
+docker build --target control-plane -t gpu-control-plane:dev .
+docker build --target cluster-agent -t gpu-cluster-agent:dev .
 ```
 
-### 2. 启动开发环境
+`Dockerfile.control-plane` 暂时作为兼容构建入口保留，CI 会同时验证；后续新引用应统一使用根 `Dockerfile`。
+
+## 2. 运行 Control Plane
+
+Control Plane 默认监听 8080。
+
+### 无 PostgreSQL
 
 ```bash
-# 启动开发环境 (包含热重载)
-./scripts/start-docker.sh dev
-
-# 或启动生产环境
-./scripts/start-docker.sh prod
-
-# 带监控服务启动
-./scripts/start-docker.sh dev --with-monitoring
+docker run --rm -p 8080:8080 gpu-control-plane:dev
 ```
 
-### 3. 验证服务
+未设置 `DATABASE_URL` 时使用内存 store，仅适合本地开发和 API 验证。
 
-启动成功后，访问以下服务：
-
-- **🔗 API 服务**: http://localhost:8000
-- **📚 API 文档**: http://localhost:8000/docs
-- **🎨 前端界面**: http://localhost:3000 (仅开发模式)
-- **📊 MLflow**: http://localhost:5000
-- **🗄️ 数据库**: postgresql://postgres:postgres@localhost:5432/gpu_platform
-
-## 🏗️ 架构说明
-
-### 生产环境 (`docker-compose.yml`)
-
-```mermaid
-graph TD
-    A[Load Balancer] --> B[FastAPI App]
-    B --> C[PostgreSQL]
-    B --> D[Redis]
-    B --> E[MLflow]
-    F[Celery Worker] --> D
-    F --> C
-    G[Prometheus] --> B
-    H[Grafana] --> G
-```
-
-**服务组件**:
-- **app**: 主应用服务 (FastAPI + Vue.js 构建版本)
-- **celery-worker**: 后台任务处理
-- **postgres**: PostgreSQL 数据库
-- **redis**: 缓存和消息队列
-- **mlflow**: 机器学习实验跟踪
-- **prometheus/grafana**: 监控服务 (可选)
-
-### 开发环境 (`docker-compose.dev.yml`)
-
-**特点**:
-- 热重载支持
-- 源码挂载
-- 独立前端开发服务器
-- 调试工具集成
-
-## 🐳 Docker 镜像说明
-
-### 多阶段构建 (`Dockerfile`)
-
-1. **frontend-builder**: 构建 Vue.js 前端
-2. **python-base**: 基础 Python + CUDA 环境
-3. **deps**: 安装 Python 依赖
-4. **app**: 最终应用镜像
-
-### 优化特性
-
-- **多阶段构建**: 减少最终镜像大小
-- **Layer 缓存**: 依赖层缓存优化构建速度
-- **非 root 用户**: 安全性提升
-- **健康检查**: 自动服务健康监测
-
-## 📋 常用命令
-
-### 服务管理
+### 使用 PostgreSQL
 
 ```bash
-# 查看服务状态
-docker-compose -f docker-compose.dev.yml ps
-
-# 查看服务日志
-docker-compose -f docker-compose.dev.yml logs -f app-dev
-
-# 重启单个服务
-docker-compose -f docker-compose.dev.yml restart app-dev
-
-# 停止所有服务
-docker-compose -f docker-compose.dev.yml down
-
-# 清理数据和网络
-docker-compose -f docker-compose.dev.yml down -v
+docker run --rm -p 8080:8080 \
+  -e DATABASE_URL='postgres://gpu:gpu@host.docker.internal:5432/gpu_platform?sslmode=disable' \
+  gpu-control-plane:dev
 ```
 
-### 数据库操作
+生产/发布验收语义以 PostgreSQL Source of Truth 为准。
+
+## 3. Cluster Agent
+
+Cluster Agent 不是独立的云 GPU broker。它连接一个 Kubernetes 集群，发现 capability facts，并按冻结的 provider identity 执行 reconcile。
+
+运行至少需要：
+
+```text
+CLUSTER_ID
+CONTROL_PLANE_URL
+```
+
+可选：
+
+```text
+AGENT_INSTANCE_ID
+AGENT_SYNC_INTERVAL
+```
+
+由于 Agent 需要真实 Kubernetes API，手工 `docker run` 还需正确挂载 kubeconfig / service-account 环境。仓库推荐优先使用完整 Golden Path 验证，而不是维护另一套 Docker-only 假环境。
+
+## 4. 推荐验收路径
 
 ```bash
-# 连接数据库
-docker-compose -f docker-compose.dev.yml exec postgres psql -U postgres -d gpu_platform
-
-# 运行数据库迁移
-docker-compose -f docker-compose.dev.yml exec app-dev alembic upgrade head
-
-# 创建新迁移
-docker-compose -f docker-compose.dev.yml exec app-dev alembic revision --autogenerate -m "Add new table"
+make fmt-check
+make vet
+make test
+make build
+make acceptance-contract
+make supply-chain-check
+make e2e-golden
 ```
 
-### 调试和开发
+`make e2e-golden` 会：
 
-```bash
-# 进入应用容器
-docker-compose -f docker-compose.dev.yml exec app-dev bash
+1. 创建/复用 `kind-golden`；
+2. 安装 Kueue；
+3. 安装 Fake GPU Operator；
+4. 注册稳定 H100 capability；
+5. 启动 Go Control Plane 与两个 Cluster Agent 进程；
+6. 验证 desired -> provider side effect -> observation/evidence；
+7. 验证 lease fencing、takeover、generation fencing；
+8. 验证 provider cleanup、tombstone 与 hard delete。
 
-# 运行测试
-docker-compose -f docker-compose.dev.yml exec app-dev pytest
+这是当前最可信的“能否工作”证据。
 
-# 安装新的 Python 包
-docker-compose -f docker-compose.dev.yml exec app-dev uv pip install package-name
+## 5. 容器职责边界
 
-# 启动 Jupyter Notebook (可选)
-docker-compose -f docker-compose.dev.yml --profile jupyter up jupyter
-```
+### control-plane
 
-### 前端开发
+负责：
 
-```bash
-# 查看前端日志
-docker-compose -f docker-compose.dev.yml logs -f frontend-dev
+- REST API；
+- Desired State；
+- Project/Cluster binding；
+- PostgreSQL persistence；
+- reconcile lease authority；
+- observation/evidence ingestion；
+- finalization/tombstone。
 
-# 安装前端依赖
-docker-compose -f docker-compose.dev.yml exec frontend-dev npm install package-name
+不负责 GPU 驱动、CUDA runtime 或 scheduler 实现。
 
-# 构建前端
-docker-compose -f docker-compose.dev.yml exec frontend-dev npm run build
-```
+### cluster-agent
 
-## 🔧 环境变量配置
+负责：
 
-### 核心配置
+- Kubernetes capability discovery；
+- desired-state pull；
+- provider adapter dispatch；
+- Kueue/Kubernetes projection；
+- downstream observation；
+- evidence reporting。
 
-| 变量名 | 描述 | 默认值 | 示例 |
-|--------|------|--------|------|
-| `ENVIRONMENT` | 运行环境 | `development` | `production` |
-| `DATABASE_URL` | 数据库连接 | `postgresql://...` | `sqlite:///./db.sqlite` |
-| `SECRET_KEY` | 应用密钥 | `dev-secret-key...` | `your-secret-key` |
-| `DEBUG` | 调试模式 | `true` | `false` |
+当前仅注册 `kueue` adapter。
 
-### GPU 提供商配置
+## 6. 旧 Compose 文件
 
-配置相应的云厂商 API 密钥以启用 GPU 功能：
+仓库仍有早期 Python/FastAPI 时代的 `docker-compose.yml`、`docker-compose.dev.yml` 及相关脚本/前端代码。它们用于历史迁移参考，不在当前 CI/Golden Path 支持范围内。
 
-```bash
-# 阿里云
-ALIBABA_ACCESS_KEY_ID=your_key
-ALIBABA_ACCESS_KEY_SECRET=your_secret
+不要基于这些文件判断当前系统的：
 
-# 腾讯云
-TENCENT_SECRET_ID=your_id
-TENCENT_SECRET_KEY=your_key
+- API 端口与接口；
+- provider 模型；
+- Celery/Redis 依赖；
+- 云厂商调度能力；
+- 发布可用性。
 
-# RunPod
-RUNPOD_API_KEY=your_api_key
-```
-
-## 🚨 故障排除
-
-### 常见问题
-
-1. **端口冲突**
-   ```bash
-   # 检查端口使用情况
-   netstat -tlnp | grep :8000
-   # 修改 docker-compose.yml 中的端口映射
-   ```
-
-2. **内存不足**
-   ```bash
-   # 检查 Docker 内存限制
-   docker info | grep Memory
-   # 增加 Docker Desktop 内存配置
-   ```
-
-3. **GPU 支持问题**
-   ```bash
-   # 检查 NVIDIA Docker 支持
-   docker info | grep nvidia
-   # 安装 nvidia-container-toolkit
-   ```
-
-4. **数据库连接失败**
-   ```bash
-   # 检查数据库容器状态
-   docker-compose -f docker-compose.dev.yml logs postgres
-   # 重启数据库服务
-   docker-compose -f docker-compose.dev.yml restart postgres
-   ```
-
-### 清理和重置
-
-```bash
-# 完全清理环境
-docker-compose -f docker-compose.dev.yml down -v --remove-orphans
-docker system prune -a
-
-# 重新构建镜像
-docker-compose -f docker-compose.dev.yml build --no-cache
-
-# 重置数据库
-docker-compose -f docker-compose.dev.yml exec postgres dropdb gpu_platform -U postgres
-docker-compose -f docker-compose.dev.yml exec postgres createdb gpu_platform -U postgres
-```
-
-## 📊 监控和日志
-
-### 服务监控
-
-启用监控服务后，可访问：
-- **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3000 (admin/admin)
-
-### 日志管理
-
-```bash
-# 查看所有服务日志
-docker-compose logs -f
-
-# 查看特定服务日志
-docker-compose logs -f app-dev
-
-# 日志过滤
-docker-compose logs --since 1h app-dev
-```
-
-## 🔐 安全配置
-
-### 生产环境安全清单
-
-- [ ] 更改默认数据库密码
-- [ ] 设置强密码 SECRET_KEY
-- [ ] 配置防火墙规则
-- [ ] 启用 HTTPS
-- [ ] 限制 CORS 源
-- [ ] 设置 Redis 密码
-- [ ] 配置日志轮转
-
-### 开发环境注意事项
-
-- 使用默认密码仅适用于开发环境
-- 不要在生产环境中启用 DEBUG 模式
-- 定期更新依赖版本
-- 使用 `.env` 文件管理敏感配置
-
-## 🤝 贡献指南
-
-1. Fork 项目
-2. 创建特性分支: `git checkout -b feature/new-feature`
-3. 在开发环境中测试更改
-4. 提交更改: `git commit -am 'Add new feature'`
-5. 推送分支: `git push origin feature/new-feature`
-6. 创建 Pull Request
-
----
-
-如有问题，请查看项目主 README 或提交 issue。
+当前事实以 `README.md`、`CONTROL_PLANE_V2_GO.md`、`PROVIDER_ADAPTER_SPI.md` 和 `RELEASE_ACCEPTANCE_V0_1.md` 为准。
