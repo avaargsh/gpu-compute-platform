@@ -109,7 +109,6 @@ func TestWorkloadReconcilerDoesNotCallProviderWhenPoolObservationIsStale(t *test
 	}
 }
 
-
 func TestWorkloadReconcilerLeavesProviderSpecificBindingValidationToProvider(t *testing.T) {
 	fp := &fakeWorkloadProvider{}
 	r := NewWorkloadReconciler(fp)
