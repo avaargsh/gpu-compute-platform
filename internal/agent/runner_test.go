@@ -410,3 +410,53 @@ func TestRunnerDeletionReplaysAfterFinalizeFailure(t *testing.T) {
 		t.Fatalf("failed finalize must release its lease before replay, releases=%d", control.releaseCalls)
 	}
 }
+
+
+func TestRunnerPreservesProviderSpecificBindingWithoutKueueFields(t *testing.T) {
+	control := &fakeControlPlane{desired: []DesiredResource{
+		{
+			Kind: "ComputePool", ID: "pool-dra", Generation: 1,
+			Spec: map[string]any{
+				"namespace": "project-1",
+				"acceleratorBindings": []any{
+					map[string]any{
+						"class":          "h100-dra",
+						"allocationMode": "dra",
+						"dra":            map[string]any{"deviceClassName": "gpu.nvidia.com"},
+					},
+				},
+			},
+		},
+		{
+			Kind: "Workload", ID: "train-dra", Generation: 1,
+			Spec: map[string]any{
+				"poolID":    "pool-dra",
+				"namespace": "project-1",
+				"image":     "example/train:latest",
+				"accelerator": map[string]any{
+					"class": "h100-dra",
+					"quota": float64(1),
+				},
+			},
+		},
+	}}
+	runtime := &fakeRuntime{}
+	runner := NewRunnerWithLeaseOwner("cluster-a", control, runtime, "agent-test")
+
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.workloadCalls != 1 {
+		t.Fatalf("workload calls=%d, want 1", runtime.workloadCalls)
+	}
+	got := runtime.workload.AcceleratorBinding
+	if got.Class != "h100-dra" ||
+		got.AllocationMode != domain.AcceleratorAllocationDRA ||
+		got.DRA == nil ||
+		got.DRA.DeviceClassName != "gpu.nvidia.com" {
+		t.Fatalf("provider-specific binding was not preserved: %#v", got)
+	}
+	if got.ResourceName != "" || got.Flavor != "" {
+		t.Fatalf("generic runner invented Kueue/extended-resource fields: %#v", got)
+	}
+}
