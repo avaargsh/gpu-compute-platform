@@ -24,6 +24,7 @@ type ClusterCapabilities struct {
 	Kueue           bool                  `json:"kueue"`
 	Serving         bool                  `json:"serving"`
 	Schedulers      []SchedulerCapability `json:"schedulers,omitempty"`
+	Providers       []string              `json:"providers,omitempty"`
 	DRAAPIAvailable bool                  `json:"draApiAvailable"`
 	DRAAPIVersion   string                `json:"draApiVersion,omitempty"`
 	Accelerators    []string              `json:"accelerators,omitempty"`
