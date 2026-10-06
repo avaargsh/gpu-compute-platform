@@ -45,9 +45,11 @@ except Exception:
     raise SystemExit(1)
 caps=data.get("capabilities") or {}
 accelerators=caps.get("accelerators") or []
+providers=caps.get("providers") or []
 ok=(
     data.get("clusterId") is not None
     and caps.get("kueue") is True
+    and providers == ["kueue"]
     and os.environ["ACCELERATOR_CLASS"] in accelerators
     and bool(data.get("kubernetesVersion"))
     and bool(data.get("lastHeartbeatAt"))
@@ -202,6 +204,7 @@ import json, os
 data=json.loads(os.environ["CAPABILITY_STATUS"])
 caps=data["capabilities"]
 assert caps["kueue"] is True, caps
+assert caps.get("providers") == ["kueue"], caps
 assert os.environ["ACCELERATOR_CLASS"] in caps.get("accelerators", []), caps
 PY
 
