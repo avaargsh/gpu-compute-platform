@@ -411,7 +411,6 @@ func TestRunnerDeletionReplaysAfterFinalizeFailure(t *testing.T) {
 	}
 }
 
-
 func TestRunnerPreservesProviderSpecificBindingWithoutKueueFields(t *testing.T) {
 	control := &fakeControlPlane{desired: []DesiredResource{
 		{
