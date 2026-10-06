@@ -81,6 +81,7 @@ func TestLifecycleRegistersDiscoveredCapabilities(t *testing.T) {
 	capabilities := domain.ClusterCapabilities{
 		Kueue:           true,
 		Schedulers:      []domain.SchedulerCapability{{Name: "kueue", Version: "v0.19.6"}},
+		Providers:       []string{"kueue"},
 		DRAAPIAvailable: true,
 		DRAAPIVersion:   "resource.k8s.io/v1",
 		Accelerators:    []string{"h100-80g", "metax-c500"},
@@ -104,6 +105,8 @@ func TestLifecycleRegistersDiscoveredCapabilities(t *testing.T) {
 		len(got.Schedulers) != 1 ||
 		got.Schedulers[0].Name != "kueue" ||
 		got.Schedulers[0].Version != "v0.19.6" ||
+		len(got.Providers) != 1 ||
+		got.Providers[0] != "kueue" ||
 		!got.DRAAPIAvailable ||
 		got.DRAAPIVersion != "resource.k8s.io/v1" ||
 		len(got.Accelerators) != 2 ||

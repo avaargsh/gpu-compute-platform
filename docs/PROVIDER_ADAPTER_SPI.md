@@ -58,6 +58,11 @@ that provider name.
 Missing or unknown provider identity fails closed. The Runtime never guesses a
 provider from discovered cluster capabilities.
 
+The Cluster Agent reports its sorted runtime registry as
+`ClusterCapabilities.providers`. This is the only capability fact that means
+"this binary can dispatch this provider identity"; scheduler, DRA, and CRD
+discovery remain separate environment facts.
+
 Today only:
 
 ```text

@@ -75,6 +75,27 @@ func TestRuntimeDispatchesFrozenProviderIdentity(t *testing.T) {
 	}
 }
 
+func TestRuntimeProviderNamesAreDeterministicRegistryFacts(t *testing.T) {
+	runtime, err := NewRuntimeWithAdapters(map[string]provider.Adapter{
+		"volcano-test-only": &recordingAdapter{},
+		"kueue":             &recordingAdapter{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := runtime.ProviderNames()
+	if len(got) != 2 || got[0] != "kueue" || got[1] != "volcano-test-only" {
+		t.Fatalf("provider names=%v, want deterministic sorted registry facts", got)
+	}
+
+	got[0] = "mutated"
+	again := runtime.ProviderNames()
+	if again[0] != "kueue" {
+		t.Fatalf("provider names leaked mutable registry state: %v", again)
+	}
+}
+
 func TestRuntimeFailsClosedForMissingOrUnknownProvider(t *testing.T) {
 	runtime, err := NewRuntimeWithAdapters(map[string]provider.Adapter{
 		"kueue": &recordingAdapter{},

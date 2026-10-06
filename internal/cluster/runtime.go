@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/provider"
 	"github.com/avaargsh/gpu-compute-platform/internal/provider/kueue"
@@ -48,6 +49,21 @@ func NewRuntimeWithAdapters(adapters map[string]provider.Adapter) (*Runtime, err
 		frozen[name] = adapter
 	}
 	return &Runtime{adapters: frozen}, nil
+}
+
+// ProviderNames reports the provider identities this runtime can actually
+// dispatch. These are binary/runtime facts, not scheduler discovery results or
+// provider-selection policy.
+func (r *Runtime) ProviderNames() []string {
+	if r == nil {
+		return nil
+	}
+	names := make([]string, 0, len(r.adapters))
+	for name := range r.adapters {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (r *Runtime) adapter(name string) (provider.Adapter, error) {

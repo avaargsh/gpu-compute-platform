@@ -38,14 +38,18 @@ Stage B extends that inventory without enabling another execution path:
 
 - installed scheduler facts as `{name, version?}`; version is reported only
   when it can be observed from the running scheduler deployment;
+- `providers` lists provider adapters actually registered in the running
+  Cluster Agent binary; it is sourced from the runtime registry, not inferred
+  from scheduler or CRD discovery;
 - `draApiAvailable` plus the observed `resource.k8s.io` API version;
 - `accelerators` remains the inventory of portable accelerator classes, not
   vendor resource names or a placement policy.
 
 DRA API availability is not a claim that a DRA driver, DeviceClass, or
 accelerator allocation path is supported. Likewise, an observed KAI/Volcano
-scheduler would remain inventory until its provider recovery contract and
-acceptance evidence exist.
+scheduler remains inventory unless its provider identity is explicitly present
+in `providers` after its recovery contract and acceptance evidence are
+promoted.
 
 All capability-registration fields are **facts**, not scheduling policy.
 

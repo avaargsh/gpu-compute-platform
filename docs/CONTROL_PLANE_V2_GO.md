@@ -105,6 +105,9 @@ Kubernetes discovery
 ClusterCapabilities
   - Kueue
   - Serving
+  - scheduler facts
+  - registered provider adapters
+  - DRA API facts
   - accelerator classes
       |
       v
@@ -117,9 +120,11 @@ PostgreSQL cluster_agents.capabilities
 GET /api/v1/clusters/{clusterID}/status
 ```
 
-This is deliberately an inventory of observed execution capabilities, not a
-scheduler and not a second desired-state model. Future placement preflight may
-consume these facts, but registration itself does not make placement decisions.
+This is deliberately an inventory of execution facts, not a scheduler and not
+a second desired-state model. Scheduler/DRA/accelerator facts come from cluster
+discovery; `providers` comes from the Cluster Agent's actual adapter registry.
+Future placement preflight may consume these facts, but registration itself does
+not make placement decisions or infer provider support from installed CRDs.
 
 The control plane stores `lastHeartbeatAt` instead of materializing a permanent
 `connected` boolean. Liveness thresholds depend on deployment policy and Agent
