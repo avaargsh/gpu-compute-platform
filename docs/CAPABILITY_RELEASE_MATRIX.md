@@ -122,10 +122,13 @@ is deliberately split from provider implementation:
    DRA API availability/version, and accelerator classes as reported facts only;
 2. define a `ClusterBinding -> provider adapter` SPI aligned with the existing
    ensure/materialize/observe/finalize lifecycle boundary;
-3. select exactly one optional scheduler path (KAI or Volcano) and write its
-   recovery contract first, reusing generation, lease fencing, and tombstones;
-4. run a real-GPU pilot and write observation/evidence back through the existing
-   evidence model before any new acceptance row is promoted.
+3. use **Volcano** as the first optional-provider falsification target and
+   validate [VOLCANO_PROVIDER_RECOVERY_CONTRACT.md](VOLCANO_PROVIDER_RECOVERY_CONTRACT.md)
+   before writing/registering an adapter; KAI remains watch-only while its
+   fractional-GPU/DRA surface is still moving;
+4. only if that contract survives, implement the narrow whole-GPU Volcano slice,
+   then run a real-GPU pilot and write observation/evidence back through the
+   existing evidence model before any new acceptance row is promoted.
 
 Fractional/HAMi coexistence, DRA execution, and serving integrations remain out
 of scope until a chosen Stage B provider has contract + real-GPU evidence.
