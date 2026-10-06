@@ -133,7 +133,6 @@ func TestProjectDRAWorkloadRequiresDeviceClass(t *testing.T) {
 	}
 }
 
-
 func TestProjectWorkloadStillRequiresKueueFlavor(t *testing.T) {
 	_, err := ProjectWorkload(baseprovider.WorkloadProjection{
 		WorkloadID: "train-1",
