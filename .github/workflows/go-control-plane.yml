@@ -7,12 +7,29 @@ concurrency:
 on:
   push:
     branches:
-      - feat/control-plane-v2-go
+      - master
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "Dockerfile"
+      - "Dockerfile.control-plane"
+      - "Makefile"
+      - "scripts/go-format.sh"
+      - "scripts/e2e/go-kind-kueue-golden.sh"
+      - "scripts/e2e/install-fake-gpu.sh"
+      - "scripts/verify-production-images.sh"
+      - "deploy/production/**"
+      - "manifests/production/**"
+      - "config/production/**"
+      - "internal/**/*.sql"
+      - ".github/workflows/go-control-plane.yml"
   pull_request:
     paths:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
+      - "Dockerfile"
       - "Dockerfile.control-plane"
       - "Makefile"
       - "scripts/go-format.sh"
@@ -74,10 +91,15 @@ jobs:
         run: |
           go build ./cmd/control-plane
           go build ./cmd/cluster-agent
-      - name: Build container targets
+      - name: Build canonical container entrypoints
         run: |
-          docker build -f Dockerfile.control-plane --target control-plane -t gpu-control-plane:test .
-          docker build -f Dockerfile.control-plane --target cluster-agent -t gpu-cluster-agent:test .
+          docker build -f Dockerfile -t gpu-control-plane:test .
+          docker build -f Dockerfile --target control-plane -t gpu-control-plane:target-test .
+          docker build -f Dockerfile --target cluster-agent -t gpu-cluster-agent:test .
+      - name: Build compatibility container targets
+        run: |
+          docker build -f Dockerfile.control-plane --target control-plane -t gpu-control-plane:compat-test .
+          docker build -f Dockerfile.control-plane --target cluster-agent -t gpu-cluster-agent:compat-test .
 
   golden-path:
     name: Golden Path / kind + Kueue

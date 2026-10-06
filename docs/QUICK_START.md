@@ -1,193 +1,128 @@
-# GPU 计算平台快速启动指南
+# AI Compute Control Plane 快速启动
 
-## 🚀 快速开始
+> 当前受支持实现是 **Go Control Plane + Cluster Agent**。仓库中的 Python/FastAPI 代码属于旧实现，不是当前 Golden Path，也不应作为新部署入口。
 
-### 1. 环境准备
+## 1. 前置环境
 
-确保你的系统已安装：
-- Python 3.8+
-- Node.js 16+
-- PostgreSQL (或其他支持的数据库)
+本地开发与完整验收需要：
 
-### 2. 后端启动
+- Go 1.24+
+- Docker
+- kind
+- kubectl
+- Helm
 
-```bash
-# 1. 安装依赖
-cd gpu-compute-platform
-pip install -r requirements.txt
+仅运行单元测试和本地 Control Plane 时不要求 kind/Kueue。
 
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，配置数据库连接等信息
-
-# 3. 初始化数据库（使用Alembic迁移）
-python manage_db_v2.py migrate
-
-# 4. 创建演示数据
-python manage_db_v2.py demo-data
-
-# 5. 启动后端服务
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### 3. 前端启动
+## 2. 本地质量门禁
 
 ```bash
-# 1. 进入前端目录
-cd frontend
-
-# 2. 安装依赖
-npm install
-
-# 3. 启动开发服务器
-npm run dev
+make fmt-check
+make vet
+make test
+make build
+make acceptance-contract
+make supply-chain-check
 ```
 
-### 4. 访问系统
+这些命令验证 Go 代码格式、静态检查、单元测试、构建、v0.1 生命周期/恢复合同和生产镜像策略。
 
-- **前端界面**: http://localhost:3000
-- **API文档**: http://localhost:8000/docs
-- **API Redoc**: http://localhost:8000/redoc
+## 3. 启动 Control Plane
 
-## 🔐 演示账户
+### 内存模式
 
-系统初始化后，你可以使用以下账户登录：
-
-| 角色 | 邮箱 | 密码 | 权限 |
-|------|------|------|------|
-| 管理员 | admin@example.com | admin123 | 全部功能 |
-| 普通用户 | user@example.com | user123 | 基础功能 |
-| 测试用户1 | alice@example.com | alice123 | 基础功能 |
-| 测试用户2 | bob@example.com | bob123 | 基础功能 |
-
-## 📋 主要功能
-
-### 用户功能
-- ✅ 用户注册和登录
-- ✅ 个人信息管理
-- ✅ 密码修改
-- ✅ 角色权限控制
-
-### 任务管理
-- ✅ 创建GPU计算任务
-- ✅ 查看任务列表和详情
-- ✅ 任务状态实时更新
-- ✅ 任务日志查看
-- ✅ 任务操作（取消、重启、删除）
-
-### 系统管理（管理员）
-- ✅ 用户管理
-- ✅ 系统统计
-- ✅ 云服务商配置
-- ✅ GPU资源管理
-
-## 🛠 数据库管理工具
-
-使用 `manage_db.py` 脚本可以方便地管理数据库：
+未设置 `DATABASE_URL` 时，Control Plane 使用进程内 store，适合 API 开发和快速验证：
 
 ```bash
-# 查看数据库状态
-python manage_db.py status
-
-# 初始化数据库表结构
-python manage_db.py init
-
-# 创建演示数据
-python manage_db.py demo-data
-
-# 显示演示用户信息
-python manage_db.py demo-users
-
-# 重置数据库（谨慎使用）
-python manage_db.py reset
-
-# 删除所有表（谨慎使用）
-python manage_db.py drop
+go run ./cmd/control-plane
 ```
 
-## 🔧 配置说明
+默认监听：
 
-### 后端配置 (`.env`)
-
-```env
-# 数据库配置
-DATABASE_URL=postgresql+asyncpg://user:password@localhost/gpu_platform
-
-# JWT配置
-SECRET_KEY=your-secret-key-here
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-
-# CORS配置
-CORS_ORIGINS=["http://localhost:3000"]
-
-# 其他配置
-DEBUG=true
+```text
+http://127.0.0.1:8080
 ```
 
-### 前端配置
+### PostgreSQL 模式
 
-前端的API基础URL配置在 `frontend/src/config/index.ts` 中：
+设置 PostgreSQL DSN 后，Control Plane 使用 PostgreSQL 作为管理面的 Source of Truth：
 
-```typescript
-export const API_BASE_URL = 'http://localhost:8000'
+```bash
+export DATABASE_URL='postgres://gpu:gpu@127.0.0.1:5432/gpu_platform?sslmode=disable'
+go run ./cmd/control-plane
 ```
 
-## 📝 API 接口
+## 4. 构建容器
 
-### 认证接口
-- `POST /auth/login` - 用户登录
-- `POST /auth/register` - 用户注册
-- `POST /auth/logout` - 用户登出
-- `GET /auth/me` - 获取当前用户信息
-- `PUT /auth/profile` - 更新用户资料
-- `PUT /auth/password` - 修改密码
+根目录 `Dockerfile` 是当前默认容器入口。
 
-### 任务管理接口
-- `GET /tasks/` - 获取任务列表
-- `POST /tasks/` - 创建新任务
-- `GET /tasks/{task_id}` - 获取任务详情
-- `PUT /tasks/{task_id}` - 更新任务
-- `DELETE /tasks/{task_id}` - 删除任务
-- `POST /tasks/{task_id}/cancel` - 取消任务
-- `POST /tasks/{task_id}/restart` - 重启任务
+```bash
+# 默认产出 control-plane 镜像
+docker build -t gpu-control-plane:dev .
 
-### 云服务商接口
-- `GET /providers/` - 获取云服务商列表
-- `GET /providers/{provider}/gpus` - 获取GPU型号列表
-- `GET /providers/images` - 获取Docker镜像列表
-- `GET /providers/pricing` - 获取价格信息
+# 显式构建两个 runtime target
+docker build --target control-plane -t gpu-control-plane:dev .
+docker build --target cluster-agent -t gpu-cluster-agent:dev .
+```
 
-## 🐛 故障排除
+`Dockerfile.control-plane` 暂时保留为兼容入口，并由 CI 同步验证；新脚本和新部署应使用根 `Dockerfile`。
 
-### 数据库连接问题
-1. 检查PostgreSQL是否正在运行
-2. 确认`.env`文件中的数据库配置正确
-3. 运行 `python manage_db.py status` 检查连接
+## 5. 运行真实 Golden Path
 
-### 前端无法连接后端
-1. 确认后端服务已启动（默认端口8000）
-2. 检查前端配置中的API地址
-3. 检查CORS配置是否正确
+当前支持的执行路径只有 Kueue provider。完整验收会创建 kind 集群、安装 Kueue 与 Fake GPU Operator，并验证：
 
-### 用户无法登录
-1. 确认账户信息正确
-2. 检查是否已运行 `python manage_db.py demo-data`
-3. 查看后端日志获取详细错误信息
+```text
+Project
+  -> ProjectBinding
+  -> ComputePool
+  -> ClusterBinding(provider=kueue)
+  -> Workload
+  -> Kueue admission
+  -> Job / Pod
+  -> Observation / Evidence
+  -> Finalizer / Provider Cleanup
+  -> Tombstone / Hard Delete
+```
 
-## 📚 更多信息
+执行：
 
-- 查看 `README.md` 了解详细的项目架构
-- 访问 http://localhost:8000/docs 查看完整API文档
-- 检查各模块的代码注释获取技术细节
+```bash
+make e2e-golden
+```
 
-## 🔄 开发流程
+该路径同时覆盖 lease fencing、进程 takeover、lost-ACK/create-or-adopt、generation fencing 和删除恢复。
 
-1. **后端开发**：修改 `app/` 目录下的代码
-2. **前端开发**：修改 `frontend/` 目录下的代码
-3. **数据库变更**：使用Alembic进行迁移
-4. **测试**：运行相应的测试套件
+## 6. Cluster Agent
 
----
+Cluster Agent 需要连接 Kubernetes，并显式指定集群和 Control Plane：
 
-🎉 **恭喜！你现在可以开始使用GPU计算平台了！**
+```bash
+export CLUSTER_ID=kind-golden
+export CONTROL_PLANE_URL=http://127.0.0.1:8080
+export AGENT_INSTANCE_ID=agent-a
+export AGENT_SYNC_INTERVAL=1s
+
+go run ./cmd/cluster-agent
+```
+
+启动时 Agent 会发现本集群的 Kubernetes/Kueue/DRA/accelerator facts，并将它们作为 capability facts 注册到 Control Plane。发现结果不是调度决策，也不会自动选择 provider。
+
+## 7. 当前支持边界
+
+当前生产语义保持窄边界：
+
+- PostgreSQL 是管理面 Source of Truth。
+- Cluster Agent pull desired state 并执行 provider reconcile。
+- Kueue 是唯一已注册 provider。
+- Accelerator class 是可移植意图，由 binding 映射到 provider-specific resource/flavor。
+- DRA、HAMi、KAI、Volcano、Serving、多集群 placement 暂不作为 v0.1 执行路径。
+- Provider Adapter SPI 已建立，但第二 provider 必须独立通过 recovery/chaos/acceptance 后才能注册。
+
+继续阅读：
+
+- `docs/CONTROL_PLANE_V2_GO.md`
+- `docs/WORKLOAD_LIFECYCLE.md`
+- `docs/PROVIDER_RECOVERY_CONTRACT.md`
+- `docs/PROVIDER_ADAPTER_SPI.md`
+- `docs/RELEASE_ACCEPTANCE_V0_1.md`
+- `docs/CAPABILITY_RELEASE_MATRIX.md`

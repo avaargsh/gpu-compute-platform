@@ -1,49 +1,30 @@
-# AI Compute Control Plane image.
-# Phase 0 deliberately has no frontend or CUDA dependency. Accelerator runtime
-# integration belongs to Kubernetes nodes/providers, not the control-plane API.
+# Canonical AI Compute Control Plane container build.
+# The Go control plane and cluster agent are the supported runtime entrypoints.
+# Accelerator runtimes stay on Kubernetes nodes/providers; they are not baked
+# into the management-plane image.
 
-FROM python:3.12-slim AS python-base
+FROM golang:1.24 AS build
+WORKDIR /src
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    git \
-    build-essential \
-    libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
+COPY go.mod go.sum ./
+RUN go mod download
 
-RUN pip install --no-cache-dir uv
+COPY cmd ./cmd
+COPY internal ./internal
 
-RUN useradd -m -u 1000 appuser && mkdir -p /app && chown -R appuser:appuser /app
-USER appuser
-WORKDIR /app
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/control-plane ./cmd/control-plane && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/cluster-agent ./cmd/cluster-agent
 
-FROM python-base AS deps
-COPY --chown=appuser:appuser pyproject.toml README.md ./
-RUN uv venv .venv && . .venv/bin/activate && uv pip install -e .
+FROM gcr.io/distroless/static-debian12:nonroot AS control-plane
+COPY --from=build /out/control-plane /control-plane
+EXPOSE 8080
+ENTRYPOINT ["/control-plane"]
 
-FROM python-base AS app
-COPY --from=deps --chown=appuser:appuser /app/.venv /app/.venv
-COPY --chown=appuser:appuser app/ ./app/
-COPY --chown=appuser:appuser alembic/ ./alembic/
-COPY --chown=appuser:appuser alembic.ini ./
-COPY --chown=appuser:appuser main.py ./
-COPY --chown=appuser:appuser scripts/ ./scripts/
-COPY --chown=appuser:appuser examples/ ./examples/
-COPY --chown=appuser:appuser tests/ ./tests/
-COPY --chown=appuser:appuser pytest.ini ./
+FROM gcr.io/distroless/static-debian12:nonroot AS cluster-agent
+COPY --from=build /out/cluster-agent /cluster-agent
+ENTRYPOINT ["/cluster-agent"]
 
-RUN find scripts -type f -name '*.sh' -exec chmod +x {} +
-
-ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONPATH="/app" \
-    ENVIRONMENT="production" \
-    DATABASE_URL="postgresql+asyncpg://postgres:postgres@postgres:5432/gpu_platform" \
-    CELERY_BROKER_URL="redis://redis:6379/0" \
-    CELERY_RESULT_BACKEND="redis://redis:6379/0" \
-    REDIS_URL="redis://redis:6379/0"
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=5 \
-    CMD curl -f http://localhost:8000/healthz || exit 1
-
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Keep plain "docker build ." intuitive: it produces the control-plane image.
+FROM control-plane AS default
