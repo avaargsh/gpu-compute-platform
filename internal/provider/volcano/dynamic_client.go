@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -50,6 +51,31 @@ func (c *dynamicProjectedObjectClient) Create(
 		return nil, err
 	}
 	return resource.Create(ctx, expected.DeepCopy(), metav1.CreateOptions{})
+}
+
+func (c *dynamicProjectedObjectClient) Delete(
+	ctx context.Context,
+	expected *unstructured.Unstructured,
+) error {
+	resource, err := c.resource(expected)
+	if err != nil {
+		return err
+	}
+	return resource.Delete(ctx, expected.GetName(), metav1.DeleteOptions{})
+}
+
+func (c *dynamicProjectedObjectClient) Gone(
+	ctx context.Context,
+	expected *unstructured.Unstructured,
+) (bool, error) {
+	_, err := c.Get(ctx, expected)
+	if err == nil {
+		return false, nil
+	}
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	return false, err
 }
 
 func (c *dynamicProjectedObjectClient) resource(

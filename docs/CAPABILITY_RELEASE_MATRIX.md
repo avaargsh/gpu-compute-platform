@@ -84,12 +84,12 @@ claims.
 
 | Upstream | Version observed | Relevant changes | Current platform action |
 | --- | --- | --- | --- |
-| KAI Scheduler | `0.18.1` | fractional-GPU quota/binding fixes; avoids treating unrelated `*gpu` extended resources such as HAMi `nvidia.com/vgpu` as whole-GPU capacity; v0.18 line continues NvFractions and GPU-sharing work | record only; no KAI provider or HAMi/fractional acceptance in v0.1 |
-| Volcano | `1.15.2` | fixes DRA capacity-accounting DoS/overflow risk; rechecks device feasibility after reclaim; includes additional HAMi/PodGroup correctness fixes | record only; no Volcano or real-DRA acceptance in v0.1 |
+| KAI Scheduler | `0.18.x` watch line | NvFractions/GPU-sharing and NRI/runtime integration remain moving capability facts | record only; no KAI provider or HAMi/fractional acceptance; do not infer provider support from scheduler discovery |
+| Volcano | `1.15.x` experiment line | DRA/device accounting and PodGroup correctness changes can invalidate the provider falsification baseline | keep unregistered; rerun recovery/chaos contract before changing the pinned experiment version |
 | LWS | later stage | multi-replica naming stability is relevant to leader/worker identity | observe until Scheduler/Serving stages |
 | KServe | `0.21+` target | serving provider candidate; resource claims, Canary, autoscaling integration are capability facts | Stage C only |
 | llm-d | `0.10` target | serving/router baseline and supply-chain reference | Stage C only |
-| SGLang | runtime role-switch capable builds | P/D role switch has drain/rebuild/failure semantics | Stage D only; no platform intent field yet |
+| SGLang | runtime role-switch capable builds | P/D completion can fail semantically even when transport/HTTP succeeds; role-switch acceptance must verify transfer completeness and output semantics | Stage D only; use `SGLANG_PD_CHAOS_CONTRACT.md`; keep runtime internals opaque to the control plane |
 
 Do not chase every release candidate. Update this matrix only when a combination
 is either:
@@ -153,7 +153,9 @@ controller implementation.
 ### Stage D — elastic inference runtime
 
 SGLang role switching remains a runtime capability observation until there is a
-measured TTFT/TPOT pressure that justifies dynamic P:D intent.
+measured TTFT/TPOT pressure that justifies dynamic P:D intent. The falsification
+and evidence boundary is defined in [SGLANG_PD_CHAOS_CONTRACT.md](SGLANG_PD_CHAOS_CONTRACT.md).
+A successful HTTP response is not sufficient evidence of a valid P/D transition.
 
 Any future role switch must be modeled as a recoverable transaction:
 
