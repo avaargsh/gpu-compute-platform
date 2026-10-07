@@ -9,7 +9,7 @@ func validRuntimeTransitionEvidence() RuntimeTransitionEvidence {
 		WorkloadID: "workload-a", Generation: 7, AttemptID: "attempt-1",
 		RequestedRole: "decode", ObservedRole: "decode",
 		TransportSucceeded: true, RuntimeTerminalSuccess: true,
-		SemanticVerified: true, SemanticReference: "reference://fixture/pd-1",
+		SemanticVerified: true, SemanticReference: "aifactory://evidence/pd-1",
 		LeaseOwner: "agent-a", ChaosCase: "PD-C1",
 		EvidenceRefs: []string{"provider://sglang/attempt/attempt-1"},
 	}
@@ -50,5 +50,43 @@ func TestRuntimeTransitionEvidenceRequiresProviderEvidence(t *testing.T) {
 	in.EvidenceRefs = nil
 	if err := in.ValidateForAcceptance(); err == nil {
 		t.Fatal("expected missing evidence refs to fail")
+	}
+}
+
+func TestRuntimeTransitionEvidenceRejectsLocalSemanticReference(t *testing.T) {
+	in := validRuntimeTransitionEvidence()
+	in.SemanticReference = "reference://fixture/pd-1"
+	if err := in.ValidateForAcceptance(); err == nil {
+		t.Fatal("expected non-AI-Factory semantic reference to fail")
+	}
+}
+
+func TestRuntimeTransitionChaosMatrixFailsClosed(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*RuntimeTransitionEvidence)
+	}{
+		{"PD-C1-component-reorder-incomplete", func(in *RuntimeTransitionEvidence) { in.RuntimeTerminalSuccess = false }},
+		{"PD-C2-missing-component", func(in *RuntimeTransitionEvidence) { in.TransportSucceeded = false }},
+		{"PD-C3-empty-transfer-stuck-role", func(in *RuntimeTransitionEvidence) { in.ObservedRole = "" }},
+		{"PD-C4-chunk-boundary-semantic-mismatch", func(in *RuntimeTransitionEvidence) { in.SemanticVerified = false }},
+		{"PD-C5-layout-mismatch", func(in *RuntimeTransitionEvidence) { in.RuntimeTerminalSuccess = false }},
+		{"PD-C6-process-death-no-terminal-proof", func(in *RuntimeTransitionEvidence) { in.RuntimeTerminalSuccess = false }},
+		{"PD-C7-lost-observation-no-lease-owner", func(in *RuntimeTransitionEvidence) { in.LeaseOwner = "" }},
+		{"PD-C8-http-200-silent-corruption", func(in *RuntimeTransitionEvidence) {
+			in.TransportSucceeded = true
+			in.RuntimeTerminalSuccess = true
+			in.SemanticVerified = false
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := validRuntimeTransitionEvidence()
+			in.ChaosCase = tc.name[:5]
+			tc.mutate(&in)
+			if err := in.ValidateForAcceptance(); err == nil {
+				t.Fatal("expected chaos case to fail closed")
+			}
+		})
 	}
 }
