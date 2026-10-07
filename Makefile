@@ -39,3 +39,7 @@ install-fake-gpu:
 
 e2e-golden:
 	bash scripts/e2e/go-kind-kueue-golden.sh
+
+# Stage B falsification only; not part of v0.1 release acceptance.
+e2e-volcano-contract:
+	bash scripts/e2e/kind-volcano-contract.sh
