@@ -116,6 +116,31 @@ and tampered annotations must fail closed at the adapter boundary.
 
 No Volcano provider is registered by the production Cluster Agent at this stage.
 
+## Executable create-or-adopt classifier
+
+The Stage B package now includes a pure classifier for the deterministic-object
+recovery decision. It performs no Kubernetes writes and is not wired into the
+production registry.
+
+Given an expected projection and an observed object:
+
+- missing object -> `create`;
+- matching provider-owned identity + generation + immutable projected `spec` -> `adopt`;
+- provider/resource/generation mismatch -> fail closed;
+- same-generation image, queue, accelerator quantity, or other immutable spec
+  drift -> fail closed;
+- Kubernetes/runtime metadata such as UID, resourceVersion, status, and
+  non-platform annotations/labels may differ without changing ownership.
+
+The current comparison is intentionally strict. If a real Volcano API server
+adds defaults to the desired `spec`, the future dynamic-client adapter must
+introduce an explicit normalization rule proven by kind/Volcano tests; it must
+not weaken adoption to "same name + same generation".
+
+This classifier validates the decision boundary only. It does not yet prove a
+lost-ACK remote create, AlreadyExists race, process takeover, deletion replay,
+or stale lease-owner fencing.
+
 ## Create-or-adopt
 
 Every reconcile follows the existing provider recovery contract.
