@@ -86,6 +86,12 @@ func TestClassifyExistingObjectRejectsMalformedExpectedIdentityBeforeCreate(t *t
 	if _, err := classifyExistingObject(missingGeneration, nil); err == nil {
 		t.Fatal("missing expected generation marker must fail before create")
 	}
+
+	missingSpec := expected.DeepCopy()
+	delete(missingSpec.Object, "spec")
+	if _, err := classifyExistingObject(missingSpec, nil); err == nil {
+		t.Fatal("missing expected immutable spec must fail before create")
+	}
 }
 
 func TestClassifyExistingObjectAdoptsExactProjectionDespiteRuntimeMetadata(t *testing.T) {
