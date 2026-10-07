@@ -151,7 +151,6 @@ func TestWorkloadReconcilerLeavesProviderSpecificBindingValidationToProvider(t *
 	}
 }
 
-
 func TestWorkloadReconcilerFencesMissingProviderAndPreservesNonDefaultIdentity(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
