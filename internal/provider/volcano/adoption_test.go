@@ -261,7 +261,6 @@ func TestClassifyExistingQueueUsesSameCreateOrAdoptBoundary(t *testing.T) {
 	}
 }
 
-
 func TestClassifyExistingObjectAllowsVolcanoAndAPIServerDefaultMapFields(t *testing.T) {
 	queue, err := ProjectPool(adoptionPoolProjection())
 	if err != nil {
