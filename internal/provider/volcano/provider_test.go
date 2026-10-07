@@ -340,6 +340,13 @@ func (f *failingVolcanoObjectClient) Create(
 	return nil, context.DeadlineExceeded
 }
 
+func (f *failingVolcanoObjectClient) Update(
+	context.Context,
+	*unstructured.Unstructured,
+) (*unstructured.Unstructured, error) {
+	return nil, context.DeadlineExceeded
+}
+
 func (f *failingVolcanoObjectClient) Delete(
 	context.Context,
 	*unstructured.Unstructured,
@@ -425,6 +432,13 @@ func (c *vanishingAfterCreateClient) Create(
 	return expected.DeepCopy(), nil
 }
 
+func (c *vanishingAfterCreateClient) Update(
+	context.Context,
+	*unstructured.Unstructured,
+) (*unstructured.Unstructured, error) {
+	return nil, context.DeadlineExceeded
+}
+
 func (c *vanishingAfterCreateClient) Delete(
 	context.Context,
 	*unstructured.Unstructured,
@@ -462,11 +476,185 @@ func (c *replaceOnDeleteClient) Create(
 	return c.object.DeepCopy(), nil
 }
 
+func (c *replaceOnDeleteClient) Update(
+	_ context.Context,
+	expected *unstructured.Unstructured,
+) (*unstructured.Unstructured, error) {
+	c.object = expected.DeepCopy()
+	return c.object.DeepCopy(), nil
+}
+
 func (c *replaceOnDeleteClient) Delete(
 	_ context.Context,
 	_ *unstructured.Unstructured,
 ) error {
 	c.deleteCalls++
 	c.object = c.replacement.DeepCopy()
+	return nil
+}
+
+
+func TestVolcanoProviderUpdatesOlderQueueGenerationWithCASIdentity(t *testing.T) {
+	provider, client := fixedProvider(t)
+	v4 := adoptionPoolProjection()
+	if _, err := provider.ReconcilePool(context.Background(), v4); err != nil {
+		t.Fatal(err)
+	}
+	expectedV4, err := ProjectPool(v4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := client.Resource(volcanoQueueGVR).
+		Get(context.Background(), expectedV4.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotations := current.GetAnnotations()
+	annotations["volcano.sh/controller-note"] = "keep-me"
+	current.SetAnnotations(annotations)
+	current.SetFinalizers([]string{"volcano.sh/protect"})
+	current.Object["status"] = map[string]any{"state": "Open"}
+	if _, err := client.Resource(volcanoQueueGVR).
+		Update(context.Background(), current, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	v5 := v4
+	v5.Generation = 5
+	v5.Accelerators = []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 16}}
+	observed, err := provider.ReconcilePool(context.Background(), v5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.ObservedGeneration != 5 {
+		t.Fatalf("observed generation=%d, want 5", observed.ObservedGeneration)
+	}
+
+	expectedV5, err := ProjectPool(v5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := client.Resource(volcanoQueueGVR).
+		Get(context.Background(), expectedV5.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.GetAnnotations()[generationAnnotation] != "5" {
+		t.Fatalf("Queue generation annotation=%q, want 5", updated.GetAnnotations()[generationAnnotation])
+	}
+	capability, _, _ := unstructured.NestedStringMap(updated.Object, "spec", "capability")
+	if capability["nvidia.com/gpu"] != "16" {
+		t.Fatalf("Queue capability=%#v, want nvidia.com/gpu=16", capability)
+	}
+	if updated.GetAnnotations()["volcano.sh/controller-note"] != "keep-me" {
+		t.Fatalf("non-platform annotation was lost: %#v", updated.GetAnnotations())
+	}
+	if len(updated.GetFinalizers()) != 1 || updated.GetFinalizers()[0] != "volcano.sh/protect" {
+		t.Fatalf("controller finalizer was lost: %#v", updated.GetFinalizers())
+	}
+}
+
+func TestVolcanoProviderRejectsStaleOrSameGenerationQueueMutation(t *testing.T) {
+	provider, _ := fixedProvider(t)
+	v4 := adoptionPoolProjection()
+	if _, err := provider.ReconcilePool(context.Background(), v4); err != nil {
+		t.Fatal(err)
+	}
+	v5 := v4
+	v5.Generation = 5
+	v5.Accelerators = []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 16}}
+	if _, err := provider.ReconcilePool(context.Background(), v5); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := provider.ReconcilePool(context.Background(), v4); err == nil {
+		t.Fatal("older desired generation must not roll Queue back")
+	}
+
+	sameGenerationMutation := v5
+	sameGenerationMutation.Accelerators = []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 32}}
+	if _, err := provider.ReconcilePool(context.Background(), sameGenerationMutation); err == nil {
+		t.Fatal("same-generation Queue spec drift must fail closed")
+	}
+}
+
+func TestVolcanoProviderLostQueueUpdateAckAdoptsCommittedGeneration(t *testing.T) {
+	v4 := adoptionPoolProjection()
+	current, err := ProjectPool(v4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v5 := v4
+	v5.Generation = 5
+	v5.Accelerators = []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 16}}
+
+	client := &lostUpdateAckClient{
+		object: current.DeepCopy(),
+	}
+	provider := newProvider(client)
+
+	_, err = provider.ReconcilePool(context.Background(), v5)
+	if err == nil || !baseprovider.IsRetryable(err) {
+		t.Fatalf("lost Queue update ACK must be retryable: %v", err)
+	}
+	if client.updateCalls != 1 {
+		t.Fatalf("update calls=%d, want 1", client.updateCalls)
+	}
+
+	observed, err := provider.ReconcilePool(context.Background(), v5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.ObservedGeneration != 5 {
+		t.Fatalf("replayed observation generation=%d, want 5", observed.ObservedGeneration)
+	}
+	if client.updateCalls != 1 {
+		t.Fatalf("lost-ACK replay issued duplicate Queue update: %d", client.updateCalls)
+	}
+}
+
+type lostUpdateAckClient struct {
+	object      *unstructured.Unstructured
+	updateCalls int
+}
+
+func (c *lostUpdateAckClient) Get(
+	_ context.Context,
+	expected *unstructured.Unstructured,
+) (*unstructured.Unstructured, error) {
+	if c.object == nil {
+		return nil, apierrors.NewNotFound(
+			schema.GroupResource{
+				Group:    expected.GroupVersionKind().Group,
+				Resource: expected.GetKind(),
+			},
+			expected.GetName(),
+		)
+	}
+	return c.object.DeepCopy(), nil
+}
+
+func (c *lostUpdateAckClient) Create(
+	_ context.Context,
+	expected *unstructured.Unstructured,
+) (*unstructured.Unstructured, error) {
+	c.object = expected.DeepCopy()
+	return c.object.DeepCopy(), nil
+}
+
+func (c *lostUpdateAckClient) Update(
+	_ context.Context,
+	expected *unstructured.Unstructured,
+) (*unstructured.Unstructured, error) {
+	c.updateCalls++
+	c.object = expected.DeepCopy()
+	return nil, context.DeadlineExceeded
+}
+
+func (c *lostUpdateAckClient) Delete(
+	context.Context,
+	*unstructured.Unstructured,
+) error {
+	c.object = nil
 	return nil
 }
