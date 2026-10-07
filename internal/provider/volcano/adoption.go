@@ -2,7 +2,6 @@ package volcano
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -99,11 +98,45 @@ func classifyExistingObject(expected, existing *unstructured.Unstructured) (exis
 	if err != nil || !existingFound {
 		return "", providerObjectConflict("existing provider object spec is missing")
 	}
-	if !reflect.DeepEqual(expectedSpec, existingSpec) {
+	if !projectionSubsetMatches(expectedSpec, existingSpec) {
 		return "", providerObjectConflict("immutable provider projection differs")
 	}
 
 	return existingObjectAdopt, nil
+}
+
+// projectionSubsetMatches requires the live object to preserve every field
+// emitted by our deterministic provider projection while allowing the API
+// server or Volcano admission/defaulting to add extra map fields. Slice shape
+// stays exact so extra tasks/containers cannot be silently adopted.
+func projectionSubsetMatches(expected, existing any) bool {
+	switch want := expected.(type) {
+	case map[string]any:
+		got, ok := existing.(map[string]any)
+		if !ok {
+			return false
+		}
+		for key, value := range want {
+			actual, exists := got[key]
+			if !exists || !projectionSubsetMatches(value, actual) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		got, ok := existing.([]any)
+		if !ok || len(want) != len(got) {
+			return false
+		}
+		for i := range want {
+			if !projectionSubsetMatches(want[i], got[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return fmt.Sprint(want) == fmt.Sprint(existing)
+	}
 }
 
 func providerOwnedAnnotationKeys(kind string) []string {
