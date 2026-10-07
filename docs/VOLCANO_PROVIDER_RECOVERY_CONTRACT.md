@@ -87,6 +87,12 @@ Provider-side names must be derived deterministically from platform identity:
 
 - Queue identity derives from ComputePool ID;
 - VolcanoJob identity derives from Workload ID and project namespace;
+- Kubernetes object names use a DNS-safe, length-bounded slug **plus the first
+  64 bits of SHA-256 over the original platform ID**. Slug normalization alone
+  is not sufficient: `a_b`, `a.b`, and `a-b` must not all map to one provider
+  object. The entire original ID remains in the ownership annotations;
+- the projector requires the explicitly bound `provider=volcano` and a positive
+  desired generation; it must never infer provider identity from scheduler facts;
 - every platform-owned provider object carries:
   - platform resource ID;
   - desired generation;
@@ -97,6 +103,18 @@ Provider-side names must be derived deterministically from platform identity:
 Controller-created PodGroups and Pods are not independent platform resources.
 Their owner references and parent VolcanoJob identity are evidence inputs, not
 new desired-state objects.
+
+## Scope of the current projection proof
+
+The pure `internal/provider/volcano` projector now tests generation, provider
+identity, deterministic collision-resistant naming, and portable whole-GPU
+projection. It does **not** create or adopt live Volcano objects. The future
+adapter must independently compare ownership annotations, immutable workload
+projection, and observed provider objects before adoption. A hash suffix alone
+is not an authorization or ownership proof; hash collisions, foreign objects,
+and tampered annotations must fail closed at the adapter boundary.
+
+No Volcano provider is registered by the production Cluster Agent at this stage.
 
 ## Create-or-adopt
 
