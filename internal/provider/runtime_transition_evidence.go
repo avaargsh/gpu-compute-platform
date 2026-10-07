@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const semanticEvidencePrefix = "aifactory://evidence/"
+
 // RuntimeTransitionEvidence is a provider-neutral falsification envelope for
 // experimental runtime transitions such as prefill/decode role switching.
 // Provider-native transfer details remain opaque EvidenceRefs.
@@ -45,6 +47,15 @@ func (e RuntimeTransitionEvidence) ValidateForAcceptance() error {
 	if !strings.HasPrefix(e.ImageDigest, "sha256:") || len(strings.TrimPrefix(e.ImageDigest, "sha256:")) != 64 {
 		return fmt.Errorf("image digest must be an immutable sha256 digest")
 	}
+	if !strings.HasPrefix(e.SemanticReference, semanticEvidencePrefix) ||
+		strings.TrimSpace(strings.TrimPrefix(e.SemanticReference, semanticEvidencePrefix)) == "" {
+		return fmt.Errorf("semantic reference must use %s<bundle-id>", semanticEvidencePrefix)
+	}
+	switch e.ChaosCase {
+	case "PD-C1", "PD-C2", "PD-C3", "PD-C4", "PD-C5", "PD-C6", "PD-C7", "PD-C8":
+	default:
+		return fmt.Errorf("unsupported P/D chaos case %q", e.ChaosCase)
+	}
 	if e.RequestedRole != e.ObservedRole {
 		return fmt.Errorf("runtime role mismatch: requested %q observed %q", e.RequestedRole, e.ObservedRole)
 	}
@@ -59,6 +70,11 @@ func (e RuntimeTransitionEvidence) ValidateForAcceptance() error {
 	}
 	if len(e.EvidenceRefs) == 0 {
 		return fmt.Errorf("provider evidence refs are required")
+	}
+	for _, ref := range e.EvidenceRefs {
+		if strings.TrimSpace(ref) == "" {
+			return fmt.Errorf("provider evidence refs must not contain empty values")
+		}
 	}
 	return nil
 }
