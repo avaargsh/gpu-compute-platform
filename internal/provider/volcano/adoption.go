@@ -18,9 +18,10 @@ const (
 // classifyExistingObject is the Stage B create-or-adopt decision boundary.
 //
 // A missing deterministic provider object may be created. An existing object is
-// adoptable only when the provider-owned identity markers and immutable
-// projected spec match exactly. Kubernetes/controller metadata and status are
-// intentionally ignored; provider-owned ai.compute/* labels are not.
+// adoptable only when the provider-owned identity markers match and every
+// immutable field emitted by our projection is still present with the same
+// value. API server / Volcano defaulted map fields may be additional. Runtime
+// metadata and status are ignored; provider-owned ai.compute/* labels are not.
 //
 // This helper does not perform remote side effects. A future Volcano client must
 // call it after GET and again after an AlreadyExists race before reporting an
