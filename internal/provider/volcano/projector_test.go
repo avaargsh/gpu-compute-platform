@@ -2,6 +2,7 @@ package volcano
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 
 func TestProjectPoolUsesPortableClassAndExtendedResourceWithoutKueueFlavor(t *testing.T) {
 	obj, err := ProjectPool(baseprovider.PoolProjection{
+		Provider:   ProviderName,
 		PoolID:     "Pool_H100.V1",
 		ProjectID:  "project-1",
 		ClusterID:  "cluster-a",
@@ -34,7 +36,7 @@ func TestProjectPoolUsesPortableClassAndExtendedResourceWithoutKueueFlavor(t *te
 	if obj.GetAPIVersion() != "scheduling.volcano.sh/v1beta1" || obj.GetKind() != "Queue" {
 		t.Fatalf("unexpected Volcano Queue GVK: %s %s", obj.GetAPIVersion(), obj.GetKind())
 	}
-	if obj.GetName() != "vq-pool-h100-v1" {
+	if obj.GetName() != queueName("Pool_H100.V1") {
 		t.Fatalf("queue name=%q, want deterministic normalized identity", obj.GetName())
 	}
 
@@ -65,6 +67,7 @@ func TestProjectPoolUsesPortableClassAndExtendedResourceWithoutKueueFlavor(t *te
 
 func TestProjectWorkloadBuildsDeterministicVolcanoJob(t *testing.T) {
 	obj, err := ProjectWorkload(baseprovider.WorkloadProjection{
+		Provider:   ProviderName,
 		WorkloadID: "Train_One.V1",
 		ProjectID:  "project-1",
 		PoolID:     "Pool_H100.V1",
@@ -89,7 +92,7 @@ func TestProjectWorkloadBuildsDeterministicVolcanoJob(t *testing.T) {
 	if obj.GetAPIVersion() != "batch.volcano.sh/v1alpha1" || obj.GetKind() != "Job" {
 		t.Fatalf("unexpected VolcanoJob GVK: %s %s", obj.GetAPIVersion(), obj.GetKind())
 	}
-	if obj.GetName() != "job-train-one-v1" || obj.GetNamespace() != "project-1" {
+	if obj.GetName() != resourceName("job", "Train_One.V1") || obj.GetNamespace() != "project-1" {
 		t.Fatalf("unexpected workload identity: %s/%s", obj.GetNamespace(), obj.GetName())
 	}
 
@@ -104,7 +107,7 @@ func TestProjectWorkloadBuildsDeterministicVolcanoJob(t *testing.T) {
 	scheduler, _, _ := unstructured.NestedString(obj.Object, "spec", "schedulerName")
 	queue, _, _ := unstructured.NestedString(obj.Object, "spec", "queue")
 	minAvailable, _, _ := unstructured.NestedInt64(obj.Object, "spec", "minAvailable")
-	if scheduler != "volcano" || queue != "vq-pool-h100-v1" || minAvailable != 1 {
+	if scheduler != "volcano" || queue != queueName("Pool_H100.V1") || minAvailable != 1 {
 		t.Fatalf("unexpected Volcano scheduling projection: scheduler=%q queue=%q min=%d", scheduler, queue, minAvailable)
 	}
 
@@ -142,6 +145,7 @@ func TestProjectWorkloadBuildsDeterministicVolcanoJob(t *testing.T) {
 
 func TestVolcanoProjectionFailsClosedOutsideInitialContract(t *testing.T) {
 	base := baseprovider.PoolProjection{
+		Provider:   ProviderName,
 		PoolID:     "pool-a",
 		ClusterID:  "cluster-a",
 		Namespace:  "project-a",
@@ -237,8 +241,10 @@ func TestProjectWorkloadRejectsUnsupportedAllocationAndBindingMismatch(t *testin
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := ProjectWorkload(baseprovider.WorkloadProjection{
+				Provider:   ProviderName,
 				WorkloadID: "train-1",
 				PoolID:     "pool-a",
+				ClusterID:  "cluster-a",
 				Namespace:  "project-a",
 				Generation: 1,
 				Image:      "example/train:latest",
@@ -251,5 +257,98 @@ func TestProjectWorkloadRejectsUnsupportedAllocationAndBindingMismatch(t *testin
 				t.Fatalf("%s unexpectedly projected", tt.name)
 			}
 		})
+	}
+}
+
+func TestVolcanoNamesCannotAliasDistinctPlatformIDs(t *testing.T) {
+	for _, pair := range [][2]string{
+		{"Pool_H100.V1", "pool-h100-v1"},
+		{"foo_bar", "foo.bar"},
+		{"pool-ABC", "pool-abc"},
+		{"x/y", "x:y"},
+	} {
+		a, b := resourceName("vq", pair[0]), resourceName("vq", pair[1])
+		if a == b {
+			t.Fatalf("distinct IDs %q and %q collide at name %q", pair[0], pair[1], a)
+		}
+		if a != resourceName("vq", pair[0]) || b != resourceName("vq", pair[1]) {
+			t.Fatal("provider resource naming must be deterministic across replay")
+		}
+	}
+
+	dnsLabel := regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	for _, id := range []string{
+		"simple",
+		"LONG_ID_WITH_MANY_PARTS." + strings.Repeat("Z", 190),
+		"unicode-日本語",
+		"////:::",
+	} {
+		for _, prefix := range []string{"vq", "job"} {
+			got := resourceName(prefix, id)
+			if len(got) > 63 || !dnsLabel.MatchString(got) {
+				t.Fatalf("unsafe provider name for %q: %q", id, got)
+			}
+		}
+	}
+}
+
+func TestVolcanoProjectionRequiresFrozenProviderAndPositiveGeneration(t *testing.T) {
+	pool := baseprovider.PoolProjection{
+		Provider:   ProviderName,
+		PoolID:     "pool-one",
+		ClusterID:  "cluster-a",
+		Namespace:  "project-a",
+		Generation: 1,
+		Accelerators: []domain.AcceleratorRequest{{
+			Class: "h100-80g", Quota: 1,
+		}},
+		AcceleratorBindings: []domain.AcceleratorBinding{{
+			Class: "h100-80g", ResourceName: "nvidia.com/gpu",
+		}},
+	}
+	workload := baseprovider.WorkloadProjection{
+		Provider:   ProviderName,
+		WorkloadID: "train-one",
+		PoolID:     "pool-one",
+		ClusterID:  "cluster-a",
+		Namespace:  "project-a",
+		Generation: 1,
+		Image:      "train:stable",
+		Accelerator: domain.AcceleratorRequest{
+			Class: "h100-80g", Quota: 1,
+		},
+		AcceleratorBinding: domain.AcceleratorBinding{
+			Class: "h100-80g", ResourceName: "nvidia.com/gpu",
+		},
+	}
+	if _, err := ProjectPool(pool); err != nil {
+		t.Fatalf("valid Volcano pool fixture: %v", err)
+	}
+	if _, err := ProjectWorkload(workload); err != nil {
+		t.Fatalf("valid Volcano workload fixture: %v", err)
+	}
+	for _, name := range []string{"", "kueue", "volcano-other"} {
+		t.Run("provider="+name, func(t *testing.T) {
+			mutatedPool, mutatedWorkload := pool, workload
+			mutatedPool.Provider = name
+			mutatedWorkload.Provider = name
+			if _, err := ProjectPool(mutatedPool); err == nil {
+				t.Fatal("Volcano pool projector must reject non-Volcano provider")
+			}
+			if _, err := ProjectWorkload(mutatedWorkload); err == nil {
+				t.Fatal("Volcano workload projector must reject non-Volcano provider")
+			}
+		})
+	}
+	for _, generation := range []int64{0, -1} {
+		mutatedPool, mutatedWorkload := pool, workload
+		mutatedPool.Generation = generation
+		mutatedWorkload.Generation = generation
+		if _, err := ProjectPool(mutatedPool); err == nil {
+			t.Fatalf("Volcano pool accepted generation %d", generation)
+		}
+		if _, err := ProjectWorkload(mutatedWorkload); err == nil {
+			t.Fatalf("Volcano workload accepted generation %d", generation)
+		}
 	}
 }
