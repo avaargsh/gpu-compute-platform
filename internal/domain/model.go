@@ -44,13 +44,14 @@ const (
 	AcceleratorAllocationDRA              = "dra"
 )
 
-// AcceleratorBinding resolves a portable accelerator class into the concrete
-// allocation mechanism, resource and Kueue flavor exposed by a compute pool.
+// AcceleratorBinding resolves a portable accelerator class into concrete
+// provider execution facts. Flavor is optional and provider-specific; Kueue
+// requires it, while other providers may not.
 type AcceleratorBinding struct {
 	Class          string                `json:"class"`
 	AllocationMode string                `json:"allocationMode,omitempty"`
 	ResourceName   string                `json:"resourceName"`
-	Flavor         string                `json:"flavor"`
+	Flavor         string                `json:"flavor,omitempty"`
 	NodeLabels     map[string]string     `json:"nodeLabels,omitempty"`
 	Partition      *AcceleratorPartition `json:"partition,omitempty"`
 	DRA            *DRAAllocation        `json:"dra,omitempty"`

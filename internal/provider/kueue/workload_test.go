@@ -132,3 +132,23 @@ func TestProjectDRAWorkloadRequiresDeviceClass(t *testing.T) {
 		t.Fatal("DRA projection must fail closed without a device class")
 	}
 }
+
+func TestProjectWorkloadStillRequiresKueueFlavor(t *testing.T) {
+	_, err := ProjectWorkload(baseprovider.WorkloadProjection{
+		WorkloadID: "train-1",
+		PoolID:     "pool-h100",
+		Namespace:  "project-1",
+		Image:      "example/train:latest",
+		Accelerator: domain.AcceleratorRequest{
+			Class: "h100-80g",
+			Quota: 1,
+		},
+		AcceleratorBinding: domain.AcceleratorBinding{
+			Class:        "h100-80g",
+			ResourceName: "nvidia.com/gpu",
+		},
+	})
+	if err == nil {
+		t.Fatal("Kueue projector must keep provider-specific flavor validation")
+	}
+}

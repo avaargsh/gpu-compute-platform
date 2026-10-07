@@ -75,9 +75,6 @@ func resolveAcceleratorBinding(bindings []domain.AcceleratorBinding, class strin
 	if resolved.Class == "" {
 		return domain.AcceleratorBinding{}, fmt.Errorf("accelerator binding not found: %s", class)
 	}
-	if resolved.ResourceName == "" || resolved.Flavor == "" {
-		return domain.AcceleratorBinding{}, fmt.Errorf("accelerator binding is incomplete: %s", class)
-	}
 	return resolved, nil
 }
 
