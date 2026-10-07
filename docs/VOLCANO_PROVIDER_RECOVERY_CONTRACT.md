@@ -370,3 +370,7 @@ any of the following is required:
 
 A failed falsification is useful evidence. The project does not need a second
 provider merely to claim pluggability.
+
+## Real-cluster falsification harness
+
+`make e2e-volcano-contract` runs an experiment-only kind path pinned to Volcano `v1.15.3`. It installs the real upstream controller/scheduler, projects a deterministic VolcanoJob, requires controller-created PodGroup/Pod evidence, proves same-generation replay preserves the VolcanoJob UID, and requires parent/child cleanup before success. The kind node receives only a fake `example.com/gpu` extended-resource capacity for scheduler-contract validation; this is explicitly **not** real-GPU evidence and the target is not part of `make acceptance-contract` or the frozen v0.1 Kueue Golden Path.
