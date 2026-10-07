@@ -50,7 +50,7 @@ func TestWorkloadReconcilerResolvesPoolAcceleratorBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fp.last.AcceleratorBinding.ResourceName != "vendor.example/gpu" || fp.last.AcceleratorBinding.Flavor != "h100" {
+	if fp.last.AcceleratorBinding.ResourceName != "vendor.example/gpu" || fp.last.AcceleratorBinding.Flavor != "h100" || fp.last.Provider != "kueue" {
 		t.Fatalf("binding was not resolved: %#v", fp.last.AcceleratorBinding)
 	}
 }
@@ -66,7 +66,7 @@ func TestWorkloadReconcilerFailsClosedWhenClassIsUnbound(t *testing.T) {
 		},
 		domain.ComputePool{Metadata: domain.Metadata{ID: "pool-1"}, ProjectID: "project-1"},
 		domain.ProjectBinding{ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "project-1"},
-		domain.ClusterBinding{PoolID: "pool-1", ClusterID: "cluster-a"},
+		domain.ClusterBinding{PoolID: "pool-1", ClusterID: "cluster-a", Provider: "kueue"},
 	)
 	if err == nil {
 		t.Fatal("expected unbound accelerator class to fail")
@@ -81,7 +81,7 @@ func TestWorkloadReconcilerDoesNotCallProviderWhenPoolIsNotReady(t *testing.T) {
 		domain.ComputePool{Metadata: domain.Metadata{ID: "pool-1", Generation: 2}, ProjectID: "project-1",
 			Status: domain.ResourceStatus{ObservedGeneration: 2, Conditions: []domain.Condition{{Type: "Ready", Status: "False"}}}},
 		domain.ProjectBinding{ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "project-1"},
-		domain.ClusterBinding{PoolID: "pool-1", ClusterID: "cluster-a"},
+		domain.ClusterBinding{PoolID: "pool-1", ClusterID: "cluster-a", Provider: "kueue"},
 	)
 	if err == nil {
 		t.Fatal("expected not-ready compute pool to block workload")
@@ -99,7 +99,7 @@ func TestWorkloadReconcilerDoesNotCallProviderWhenPoolObservationIsStale(t *test
 		domain.ComputePool{Metadata: domain.Metadata{ID: "pool-1", Generation: 3}, ProjectID: "project-1",
 			Status: domain.ResourceStatus{ObservedGeneration: 2, Conditions: []domain.Condition{{Type: "Ready", Status: "True"}}}},
 		domain.ProjectBinding{ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "project-1"},
-		domain.ClusterBinding{PoolID: "pool-1", ClusterID: "cluster-a"},
+		domain.ClusterBinding{PoolID: "pool-1", ClusterID: "cluster-a", Provider: "kueue"},
 	)
 	if err == nil {
 		t.Fatal("expected stale compute pool observation to block workload")
@@ -148,5 +148,57 @@ func TestWorkloadReconcilerLeavesProviderSpecificBindingValidationToProvider(t *
 	}
 	if got.ResourceName != "" || got.Flavor != "" {
 		t.Fatalf("generic reconciler invented provider-specific fields: %#v", got)
+	}
+}
+
+func TestWorkloadReconcilerFencesMissingProviderAndPreservesNonDefaultIdentity(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		provider string
+		allowed  bool
+	}{
+		{name: "missing provider fails closed", provider: "", allowed: false},
+		{name: "non-default provider is projected verbatim", provider: "volcano-test-only", allowed: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fp := &fakeWorkloadProvider{}
+			workload := domain.Workload{
+				Metadata:  domain.Metadata{ID: "train-1", Generation: 3},
+				ProjectID: "project-1",
+				PoolID:    "pool-1",
+				Spec: domain.WorkloadSpec{
+					Image:       "example/train:latest",
+					Accelerator: domain.AcceleratorRequest{Class: "h100-80g", Quota: 1},
+				},
+			}
+			pool := domain.ComputePool{
+				Metadata:  domain.Metadata{ID: "pool-1", Generation: 2},
+				ProjectID: "project-1",
+				Status: domain.ResourceStatus{
+					ObservedGeneration: 2,
+					Conditions:         []domain.Condition{{Type: "Ready", Status: "True"}},
+				},
+				Spec: domain.ComputePoolSpec{AcceleratorBindings: []domain.AcceleratorBinding{{
+					Class: "h100-80g", ResourceName: "nvidia.com/gpu", Flavor: "h100",
+				}}},
+			}
+			_, err := NewWorkloadReconciler(fp).Reconcile(
+				context.Background(),
+				workload,
+				pool,
+				domain.ProjectBinding{ProjectID: "project-1", ClusterID: "cluster-a", Namespace: "project-1"},
+				domain.ClusterBinding{PoolID: "pool-1", ClusterID: "cluster-a", Provider: tt.provider},
+			)
+			if tt.allowed {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if fp.calls != 1 || fp.last.Provider != tt.provider {
+					t.Fatalf("provider dispatch identity lost: calls=%d projection=%#v", fp.calls, fp.last)
+				}
+			} else if err == nil || fp.calls != 0 {
+				t.Fatalf("missing provider must fail before side effect: err=%v calls=%d", err, fp.calls)
+			}
+		})
 	}
 }

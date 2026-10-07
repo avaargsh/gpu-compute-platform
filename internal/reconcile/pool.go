@@ -34,8 +34,12 @@ func (r *PoolReconciler) Reconcile(
 	if projectBinding.ClusterID != clusterBinding.ClusterID {
 		return domain.ResourceStatus{}, nil, fmt.Errorf("project and pool must target the same cluster")
 	}
+	if clusterBinding.Provider == "" {
+		return domain.ResourceStatus{}, nil, fmt.Errorf("cluster binding provider identity is required")
+	}
 
 	observed, err := r.provider.ReconcilePool(ctx, provider.PoolProjection{
+		Provider:            clusterBinding.Provider,
 		PoolID:              pool.Metadata.ID,
 		ProjectID:           pool.ProjectID,
 		ClusterID:           clusterBinding.ClusterID,
