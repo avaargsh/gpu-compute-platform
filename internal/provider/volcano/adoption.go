@@ -29,13 +29,20 @@ func classifyExistingObject(expected, existing *unstructured.Unstructured) (exis
 	if expected == nil {
 		return "", fmt.Errorf("expected provider object is required")
 	}
+	if expected.GetKind() != "Queue" && expected.GetKind() != "Job" {
+		return "", fmt.Errorf("unsupported Volcano provider object kind %q", expected.GetKind())
+	}
+	requiredAnnotations := providerOwnedAnnotationKeys(expected.GetKind())
+	expectedAnnotations := expected.GetAnnotations()
+	for _, key := range requiredAnnotations {
+		if expectedAnnotations[key] == "" {
+			return "", fmt.Errorf("expected provider object is missing required annotation %q", key)
+		}
+	}
 	if existing == nil {
 		return existingObjectCreate, nil
 	}
 
-	if expected.GetKind() != "Queue" && expected.GetKind() != "Job" {
-		return "", fmt.Errorf("unsupported Volcano provider object kind %q", expected.GetKind())
-	}
 	if expected.GetAPIVersion() != existing.GetAPIVersion() ||
 		expected.GetKind() != existing.GetKind() {
 		return "", providerObjectConflict(
@@ -53,13 +60,9 @@ func classifyExistingObject(expected, existing *unstructured.Unstructured) (exis
 		)
 	}
 
-	expectedAnnotations := expected.GetAnnotations()
 	existingAnnotations := existing.GetAnnotations()
-	for _, key := range providerOwnedAnnotationKeys(expected.GetKind()) {
+	for _, key := range requiredAnnotations {
 		want := expectedAnnotations[key]
-		if want == "" {
-			return "", fmt.Errorf("expected provider object is missing required annotation %q", key)
-		}
 		if got := existingAnnotations[key]; got != want {
 			return "", providerObjectConflict(
 				"annotation %s mismatch: expected %q, got %q",
