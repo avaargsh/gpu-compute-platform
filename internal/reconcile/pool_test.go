@@ -67,7 +67,6 @@ func TestPoolReconcilerRejectsCrossClusterBindings(t *testing.T) {
 	}
 }
 
-
 func TestPoolReconcilerFencesMissingProviderAndPreservesNonDefaultIdentity(t *testing.T) {
 	for _, tt := range []struct {
 		name     string
