@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
 )
 
@@ -492,7 +493,6 @@ func (c *replaceOnDeleteClient) Delete(
 	c.object = c.replacement.DeepCopy()
 	return nil
 }
-
 
 func TestVolcanoProviderUpdatesOlderQueueGenerationWithCASIdentity(t *testing.T) {
 	provider, client := fixedProvider(t)
