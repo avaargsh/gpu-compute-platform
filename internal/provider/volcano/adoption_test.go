@@ -66,7 +66,6 @@ func TestClassifyExistingObjectCreatesWhenDeterministicIdentityIsAbsent(t *testi
 	}
 }
 
-
 func TestClassifyExistingObjectRejectsMalformedExpectedIdentityBeforeCreate(t *testing.T) {
 	expected, err := ProjectWorkload(adoptionWorkloadProjection())
 	if err != nil {
