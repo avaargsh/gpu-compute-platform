@@ -63,6 +63,17 @@ func (c *dynamicProjectedObjectClient) Delete(
 	return resource.Delete(ctx, expected.GetName(), metav1.DeleteOptions{})
 }
 
+func (c *dynamicProjectedObjectClient) Update(
+	ctx context.Context,
+	expected *unstructured.Unstructured,
+) (*unstructured.Unstructured, error) {
+	resource, err := c.resource(expected)
+	if err != nil {
+		return nil, err
+	}
+	return resource.Update(ctx, expected.DeepCopy(), metav1.UpdateOptions{})
+}
+
 func (c *dynamicProjectedObjectClient) resource(
 	expected *unstructured.Unstructured,
 ) (dynamic.ResourceInterface, error) {
