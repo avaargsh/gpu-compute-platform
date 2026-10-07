@@ -32,12 +32,22 @@ func classifyExistingObject(expected, existing *unstructured.Unstructured) (exis
 	if expected.GetKind() != "Queue" && expected.GetKind() != "Job" {
 		return "", fmt.Errorf("unsupported Volcano provider object kind %q", expected.GetKind())
 	}
+	if expected.GetAPIVersion() == "" || expected.GetName() == "" {
+		return "", fmt.Errorf("expected provider object GVK/name identity is required")
+	}
+	if expected.GetKind() == "Job" && expected.GetNamespace() == "" {
+		return "", fmt.Errorf("expected Volcano Job namespace is required")
+	}
 	requiredAnnotations := providerOwnedAnnotationKeys(expected.GetKind())
 	expectedAnnotations := expected.GetAnnotations()
 	for _, key := range requiredAnnotations {
 		if expectedAnnotations[key] == "" {
 			return "", fmt.Errorf("expected provider object is missing required annotation %q", key)
 		}
+	}
+	expectedSpec, expectedFound, err := unstructured.NestedFieldNoCopy(expected.Object, "spec")
+	if err != nil || !expectedFound {
+		return "", fmt.Errorf("expected provider object spec is required: found=%t err=%v", expectedFound, err)
 	}
 	if existing == nil {
 		return existingObjectCreate, nil
@@ -85,10 +95,6 @@ func classifyExistingObject(expected, existing *unstructured.Unstructured) (exis
 		}
 	}
 
-	expectedSpec, expectedFound, err := unstructured.NestedFieldNoCopy(expected.Object, "spec")
-	if err != nil || !expectedFound {
-		return "", fmt.Errorf("expected provider object spec is required: found=%t err=%v", expectedFound, err)
-	}
 	existingSpec, existingFound, err := unstructured.NestedFieldNoCopy(existing.Object, "spec")
 	if err != nil || !existingFound {
 		return "", providerObjectConflict("existing provider object spec is missing")
