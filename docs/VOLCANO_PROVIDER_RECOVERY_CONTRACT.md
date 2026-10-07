@@ -330,8 +330,8 @@ Before any production registration:
 2. same-generation create/adopt tests;
 3. conflicting-generation rejection;
 4. deletion replay tests;
-5. fake/dynamic-client crash and takeover tests;
-6. kind + Volcano Golden Path using whole-GPU-style extended-resource intent.
+5. portable observation/status translation tests;\n6. fake/dynamic-client crash and takeover tests;
+7. kind + Volcano Golden Path using whole-GPU-style extended-resource intent.
 
 Passing this phase proves only the provider contract.
 
