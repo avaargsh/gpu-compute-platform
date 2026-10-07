@@ -7,22 +7,6 @@ concurrency:
 on:
   pull_request:
     branches: [master]
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-      - "Dockerfile"
-      - "Dockerfile.control-plane"
-      - "Makefile"
-      - "scripts/go-format.sh"
-      - "scripts/e2e/go-kind-kueue-golden.sh"
-      - "scripts/e2e/install-fake-gpu.sh"
-      - "scripts/verify-production-images.sh"
-      - "deploy/production/**"
-      - "manifests/production/**"
-      - "config/production/**"
-      - "internal/**/*.sql"
-      - ".github/workflows/go-control-plane.yml"
   workflow_dispatch:
 
 permissions:
