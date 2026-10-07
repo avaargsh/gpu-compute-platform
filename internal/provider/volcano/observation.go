@@ -9,15 +9,15 @@ import (
 )
 
 type WorkloadState struct {
-	Phase        string
-	Admitted     bool
-	PodsReady    bool
-	Succeeded    bool
-	Failed       bool
-	Message      string
-	JobRef       string
-	PodGroupRef  string
-	PodRefs      []string
+	Phase       string
+	Admitted    bool
+	PodsReady   bool
+	Succeeded   bool
+	Failed      bool
+	Message     string
+	JobRef      string
+	PodGroupRef string
+	PodRefs     []string
 }
 
 func TranslateWorkloadObservation(generation int64, state WorkloadState) (baseprovider.WorkloadObservation, error) {
@@ -41,19 +41,36 @@ func TranslateWorkloadObservation(generation int64, state WorkloadState) (basepr
 		conditions = append(conditions, domain.Condition{Type: "Failed", Status: "True", Reason: "VolcanoJobFailed", Message: state.Message, LastTransitionTime: now})
 	}
 	evidence := []string{state.JobRef}
-	if state.PodGroupRef != "" { evidence = append(evidence, state.PodGroupRef) }
+	if state.PodGroupRef != "" {
+		evidence = append(evidence, state.PodGroupRef)
+	}
 	evidence = append(evidence, state.PodRefs...)
 	return baseprovider.WorkloadObservation{ObservedGeneration: generation, Phase: state.Phase, Conditions: conditions, EvidenceRefs: evidence}, nil
 }
 
-func boolStatus(v bool) string { if v { return "True" }; return "False" }
-func conditionReason(v bool, yes, no string) string { if v { return yes }; return no }
+func boolStatus(v bool) string {
+	if v {
+		return "True"
+	}
+	return "False"
+}
+func conditionReason(v bool, yes, no string) string {
+	if v {
+		return yes
+	}
+	return no
+}
 func volcanoReadyReason(s WorkloadState) string {
 	switch {
-	case s.Failed: return "VolcanoJobFailed"
-	case s.Succeeded: return "VolcanoJobSucceeded"
-	case s.PodsReady: return "PodsReady"
-	case s.Admitted: return "AwaitingPods"
-	default: return "Pending"
+	case s.Failed:
+		return "VolcanoJobFailed"
+	case s.Succeeded:
+		return "VolcanoJobSucceeded"
+	case s.PodsReady:
+		return "PodsReady"
+	case s.Admitted:
+		return "AwaitingPods"
+	default:
+		return "Pending"
 	}
 }
