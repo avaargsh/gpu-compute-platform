@@ -1,6 +1,7 @@
 package volcano
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strconv"
 	"strings"
@@ -47,8 +48,14 @@ func ProjectPool(in baseprovider.PoolProjection) (*unstructured.Unstructured, er
 }
 
 func ProjectWorkload(in baseprovider.WorkloadProjection) (*unstructured.Unstructured, error) {
-	if in.WorkloadID == "" || in.PoolID == "" || in.Namespace == "" {
-		return nil, fmt.Errorf("workload, pool and namespace are required")
+	if in.Provider != ProviderName {
+		return nil, fmt.Errorf("Volcano workload projection requires provider %q, got %q", ProviderName, in.Provider)
+	}
+	if in.Generation <= 0 {
+		return nil, fmt.Errorf("Volcano workload generation must be positive")
+	}
+	if in.WorkloadID == "" || in.PoolID == "" || in.ClusterID == "" || in.Namespace == "" {
+		return nil, fmt.Errorf("workload, pool, cluster and namespace are required")
 	}
 	if in.Image == "" {
 		return nil, fmt.Errorf("workload image is required")
@@ -117,6 +124,12 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (*unstructured.Unstruct
 }
 
 func validatePoolProjection(in baseprovider.PoolProjection) (domain.AcceleratorRequest, domain.AcceleratorBinding, error) {
+	if in.Provider != ProviderName {
+		return domain.AcceleratorRequest{}, domain.AcceleratorBinding{}, fmt.Errorf("Volcano pool projection requires provider %q, got %q", ProviderName, in.Provider)
+	}
+	if in.Generation <= 0 {
+		return domain.AcceleratorRequest{}, domain.AcceleratorBinding{}, fmt.Errorf("Volcano pool generation must be positive")
+	}
 	if in.PoolID == "" || in.ClusterID == "" || in.Namespace == "" {
 		return domain.AcceleratorRequest{}, domain.AcceleratorBinding{}, fmt.Errorf("pool, cluster and namespace are required")
 	}
@@ -187,11 +200,43 @@ func queueName(poolID domain.ID) string {
 	return resourceName("vq", string(poolID))
 }
 
+// resourceName binds the original platform ID to the provider object name.
+// Normalizing only case/punctuation is unsafe: distinct IDs (e.g. a_b and
+// a.b) would otherwise collide and could be mistaken for lost-ACK replay.
+// The full original ID remains in the ownership annotation for adoption checks.
 func resourceName(prefix, value string) string {
-	value = strings.ToLower(value)
-	value = strings.ReplaceAll(value, "_", "-")
-	value = strings.ReplaceAll(value, ".", "-")
-	return prefix + "-" + value
+	var slug strings.Builder
+	pendingSeparator := false
+	for _, r := range strings.ToLower(value) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			if pendingSeparator && slug.Len() > 0 {
+				slug.WriteByte('-')
+			}
+			slug.WriteRune(r)
+			pendingSeparator = false
+		} else {
+			pendingSeparator = true
+		}
+	}
+	clean := slug.String()
+	if clean == "" {
+		clean = "id"
+	}
+	// 16 hex characters (64 bits) keep normalized/truncated names distinct
+	// without storing the attempt or lease identity in a Kubernetes object name.
+	sum := sha256.Sum256([]byte(value))
+	const suffixLength = 16
+	maxSlug := 63 - len(prefix) - 2 - suffixLength
+	if maxSlug < 1 {
+		panic("Volcano resource prefix exceeds Kubernetes DNS-label limit")
+	}
+	if len(clean) > maxSlug {
+		clean = strings.Trim(clean[:maxSlug], "-")
+		if clean == "" {
+			clean = "id"
+		}
+	}
+	return fmt.Sprintf("%s-%s-%x", prefix, clean, sum[:8])
 }
 
 func stringSliceAny(in []string) []any {
