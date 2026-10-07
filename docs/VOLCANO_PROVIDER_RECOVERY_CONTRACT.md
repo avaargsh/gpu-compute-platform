@@ -141,6 +141,37 @@ This classifier validates the decision boundary only. It does not yet prove a
 lost-ACK remote create, AlreadyExists race, process takeover, deletion replay,
 or stale lease-owner fencing.
 
+## Executable ensure-object recovery loop
+
+On top of the pure adoption classifier, Stage B now has an unregistered
+`ensureProjectedObject` state machine with an injected client interface:
+
+```text
+GET deterministic identity
+  |
+  +-- exists -> strict classify -> adopt | conflict
+  |
+  +-- NotFound -> CREATE
+                   |
+                   +-- success -> create
+                   +-- transport/lost ACK -> return error; next reconcile GETs
+                   +-- AlreadyExists -> fresh GET -> strict classify
+```
+
+The tests prove:
+
+- first create followed by replay performs exactly one logical create;
+- create commits remotely but returns a timeout, then the next reconcile adopts
+  the existing object without issuing a second create;
+- GET -> CREATE `AlreadyExists` races re-read the object and adopt only an
+  exact provider/generation/spec match;
+- conflicting generation or immutable spec fails closed;
+- an ambiguous GET error never falls through to blind CREATE.
+
+This is still a contract harness. The client is fake/injected and there is no
+Volcano dynamic client, queue/job observation implementation, deletion path, or
+production provider registration yet.
+
 ## Create-or-adopt
 
 Every reconcile follows the existing provider recovery contract.
