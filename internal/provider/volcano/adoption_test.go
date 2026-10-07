@@ -1,0 +1,262 @@
+package volcano
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
+)
+
+func adoptionPoolProjection() baseprovider.PoolProjection {
+	return baseprovider.PoolProjection{
+		Provider:   ProviderName,
+		PoolID:     "pool-h100",
+		ProjectID:  "project-a",
+		ClusterID:  "cluster-a",
+		Namespace:  "project-a",
+		Generation: 4,
+		Accelerators: []domain.AcceleratorRequest{
+			{Class: "h100-80g", Quota: 8},
+		},
+		AcceleratorBindings: []domain.AcceleratorBinding{{
+			Class:          "h100-80g",
+			AllocationMode: domain.AcceleratorAllocationExtendedResource,
+			ResourceName:   "nvidia.com/gpu",
+		}},
+	}
+}
+
+func adoptionWorkloadProjection() baseprovider.WorkloadProjection {
+	return baseprovider.WorkloadProjection{
+		Provider:   ProviderName,
+		WorkloadID: "train-one",
+		ProjectID:  "project-a",
+		PoolID:     "pool-h100",
+		ClusterID:  "cluster-a",
+		Namespace:  "project-a",
+		Generation: 7,
+		Image:      "example/train:stable",
+		Command:    []string{"python", "train.py"},
+		Accelerator: domain.AcceleratorRequest{
+			Class: "h100-80g",
+			Quota: 2,
+		},
+		AcceleratorBinding: domain.AcceleratorBinding{
+			Class:          "h100-80g",
+			AllocationMode: domain.AcceleratorAllocationExtendedResource,
+			ResourceName:   "nvidia.com/gpu",
+		},
+	}
+}
+
+func TestClassifyExistingObjectCreatesWhenDeterministicIdentityIsAbsent(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	action, err := classifyExistingObject(expected, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != existingObjectCreate {
+		t.Fatalf("action=%q, want %q", action, existingObjectCreate)
+	}
+}
+
+func TestClassifyExistingObjectRejectsMalformedExpectedIdentityBeforeCreate(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unsupported := expected.DeepCopy()
+	unsupported.SetKind("ConfigMap")
+	if _, err := classifyExistingObject(unsupported, nil); err == nil {
+		t.Fatal("unsupported provider object kind must fail before create")
+	}
+
+	missingGeneration := expected.DeepCopy()
+	annotations := missingGeneration.GetAnnotations()
+	delete(annotations, generationAnnotation)
+	missingGeneration.SetAnnotations(annotations)
+	if _, err := classifyExistingObject(missingGeneration, nil); err == nil {
+		t.Fatal("missing expected generation marker must fail before create")
+	}
+
+	missingSpec := expected.DeepCopy()
+	delete(missingSpec.Object, "spec")
+	if _, err := classifyExistingObject(missingSpec, nil); err == nil {
+		t.Fatal("missing expected immutable spec must fail before create")
+	}
+}
+
+func TestClassifyExistingObjectAdoptsExactProjectionDespiteRuntimeMetadata(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing := expected.DeepCopy()
+	existing.SetUID(types.UID("uid-from-api-server"))
+	existing.SetResourceVersion("12345")
+	annotations := existing.GetAnnotations()
+	annotations["volcano.sh/controller-note"] = "runtime-owned"
+	existing.SetAnnotations(annotations)
+	labels := existing.GetLabels()
+	labels["volcano.sh/runtime"] = "observed"
+	existing.SetLabels(labels)
+	existing.Object["status"] = map[string]any{"state": map[string]any{"phase": "Running"}}
+
+	action, err := classifyExistingObject(expected, existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != existingObjectAdopt {
+		t.Fatalf("action=%q, want %q", action, existingObjectAdopt)
+	}
+}
+
+func TestClassifyExistingObjectRejectsOwnershipAndGenerationConflicts(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*unstructured.Unstructured)
+	}{
+		{
+			name: "provider",
+			mutate: func(obj *unstructured.Unstructured) {
+				annotations := obj.GetAnnotations()
+				annotations[providerAnnotation] = "kueue"
+				obj.SetAnnotations(annotations)
+			},
+		},
+		{
+			name: "generation",
+			mutate: func(obj *unstructured.Unstructured) {
+				annotations := obj.GetAnnotations()
+				annotations[generationAnnotation] = "6"
+				obj.SetAnnotations(annotations)
+			},
+		},
+		{
+			name: "workload owner",
+			mutate: func(obj *unstructured.Unstructured) {
+				annotations := obj.GetAnnotations()
+				annotations[workloadIDAnnotation] = "another-workload"
+				obj.SetAnnotations(annotations)
+			},
+		},
+		{
+			name: "pool owner",
+			mutate: func(obj *unstructured.Unstructured) {
+				annotations := obj.GetAnnotations()
+				annotations[poolIDAnnotation] = "another-pool"
+				obj.SetAnnotations(annotations)
+			},
+		},
+		{
+			name: "provider label",
+			mutate: func(obj *unstructured.Unstructured) {
+				labels := obj.GetLabels()
+				labels["ai.compute/workload"] = "job-another"
+				obj.SetLabels(labels)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			existing := expected.DeepCopy()
+			tt.mutate(existing)
+			if _, err := classifyExistingObject(expected, existing); err == nil ||
+				!strings.Contains(err.Error(), "provider object conflict") {
+				t.Fatalf("conflict was not rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestClassifyExistingObjectRejectsSameGenerationImmutableSpecDrift(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*unstructured.Unstructured)
+	}{
+		{
+			name: "image",
+			mutate: func(obj *unstructured.Unstructured) {
+				tasks, _, _ := unstructured.NestedSlice(obj.Object, "spec", "tasks")
+				task := tasks[0].(map[string]any)
+				template := task["template"].(map[string]any)
+				spec := template["spec"].(map[string]any)
+				containers := spec["containers"].([]any)
+				container := containers[0].(map[string]any)
+				container["image"] = "example/other:stable"
+				_ = unstructured.SetNestedSlice(obj.Object, tasks, "spec", "tasks")
+			},
+		},
+		{
+			name: "queue",
+			mutate: func(obj *unstructured.Unstructured) {
+				_ = unstructured.SetNestedField(obj.Object, "vq-other", "spec", "queue")
+			},
+		},
+		{
+			name: "gpu quantity",
+			mutate: func(obj *unstructured.Unstructured) {
+				tasks, _, _ := unstructured.NestedSlice(obj.Object, "spec", "tasks")
+				task := tasks[0].(map[string]any)
+				template := task["template"].(map[string]any)
+				spec := template["spec"].(map[string]any)
+				containers := spec["containers"].([]any)
+				container := containers[0].(map[string]any)
+				resources := container["resources"].(map[string]any)
+				requests := resources["requests"].(map[string]any)
+				requests["nvidia.com/gpu"] = "3"
+				_ = unstructured.SetNestedSlice(obj.Object, tasks, "spec", "tasks")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			existing := expected.DeepCopy()
+			tt.mutate(existing)
+			if _, err := classifyExistingObject(expected, existing); err == nil ||
+				!strings.Contains(err.Error(), "immutable provider projection differs") {
+				t.Fatalf("same-generation immutable drift was not rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestClassifyExistingQueueUsesSameCreateOrAdoptBoundary(t *testing.T) {
+	expected, err := ProjectPool(adoptionPoolProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing := expected.DeepCopy()
+	action, err := classifyExistingObject(expected, existing)
+	if err != nil || action != existingObjectAdopt {
+		t.Fatalf("queue adoption failed: action=%q err=%v", action, err)
+	}
+
+	capability, _, _ := unstructured.NestedStringMap(existing.Object, "spec", "capability")
+	capability["nvidia.com/gpu"] = "4"
+	if err := unstructured.SetNestedStringMap(existing.Object, capability, "spec", "capability"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := classifyExistingObject(expected, existing); err == nil {
+		t.Fatal("queue capacity drift must not be adopted at the same generation")
+	}
+}
