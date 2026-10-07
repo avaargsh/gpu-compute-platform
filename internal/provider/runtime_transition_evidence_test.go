@@ -6,7 +6,7 @@ func validRuntimeTransitionEvidence() RuntimeTransitionEvidence {
 	return RuntimeTransitionEvidence{
 		Provider: "sglang", RuntimeVersion: "test-build",
 		ImageDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		WorkloadID: "workload-a", Generation: 7, AttemptID: "attempt-1",
+		WorkloadID:  "workload-a", Generation: 7, AttemptID: "attempt-1",
 		RequestedRole: "decode", ObservedRole: "decode",
 		TransportSucceeded: true, RuntimeTerminalSuccess: true,
 		SemanticVerified: true, SemanticReference: "aifactory://evidence/pd-1",
