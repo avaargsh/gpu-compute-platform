@@ -35,6 +35,9 @@ func (r *WorkloadReconciler) Reconcile(
 	if clusterBinding.PoolID != pool.Metadata.ID || clusterBinding.ClusterID != projectBinding.ClusterID {
 		return provider.WorkloadObservation{}, fmt.Errorf("invalid cluster placement")
 	}
+	if clusterBinding.Provider == "" {
+		return provider.WorkloadObservation{}, fmt.Errorf("cluster binding provider identity is required")
+	}
 	if !resourceReady(pool.Status, pool.Metadata.Generation) {
 		return provider.WorkloadObservation{}, fmt.Errorf("compute pool not ready: %s", pool.Metadata.ID)
 	}
@@ -45,6 +48,7 @@ func (r *WorkloadReconciler) Reconcile(
 	}
 
 	return r.provider.ReconcileWorkload(ctx, provider.WorkloadProjection{
+		Provider:           clusterBinding.Provider,
 		WorkloadID:         workload.Metadata.ID,
 		ProjectID:          workload.ProjectID,
 		PoolID:             workload.PoolID,
