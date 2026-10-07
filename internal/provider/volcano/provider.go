@@ -3,10 +3,12 @@ package volcano
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
 
@@ -18,8 +20,11 @@ var _ baseprovider.Adapter = (*Provider)(nil)
 
 type volcanoObjectClient interface {
 	projectedObjectClient
+	Update(context.Context, *unstructured.Unstructured) (*unstructured.Unstructured, error)
 	Delete(context.Context, *unstructured.Unstructured) error
 }
+
+const existingObjectUpdate existingObjectAction = "update"
 
 type Provider struct {
 	client volcanoObjectClient
@@ -54,7 +59,7 @@ func (p *Provider) ReconcilePool(
 	if err != nil {
 		return baseprovider.PoolObservation{}, err
 	}
-	action, err := ensureProjectedObject(ctx, p.client, expected)
+	action, err := p.ensurePoolQueue(ctx, expected)
 	if err != nil {
 		return baseprovider.PoolObservation{}, fmt.Errorf("ensure Volcano Queue: %w", classifyProviderError(err))
 	}
@@ -76,6 +81,129 @@ func (p *Provider) ReconcilePool(
 			fmt.Sprintf("volcano://%s/queues/%s", projection.ClusterID, expected.GetName()),
 		},
 	}, nil
+}
+
+func (p *Provider) ensurePoolQueue(
+	ctx context.Context,
+	expected *unstructured.Unstructured,
+) (existingObjectAction, error) {
+	if _, err := classifyExistingObject(expected, nil); err != nil {
+		return "", err
+	}
+
+	current, err := p.client.Get(ctx, expected)
+	if apierrors.IsNotFound(err) {
+		return ensureProjectedObject(ctx, p.client, expected)
+	}
+	if err != nil {
+		return "", err
+	}
+
+	wantGeneration, haveGeneration, err := validateQueueUpdateIdentity(expected, current)
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case haveGeneration == wantGeneration:
+		action, err := classifyExistingObject(expected, current)
+		if err != nil {
+			return "", err
+		}
+		return action, nil
+	case haveGeneration > wantGeneration:
+		return "", providerObjectConflict(
+			"Queue generation is newer than desired: have %d want %d",
+			haveGeneration,
+			wantGeneration,
+		)
+	}
+
+	candidate := queueUpdateCandidate(expected, current)
+	updated, err := p.client.Update(ctx, candidate)
+	if err != nil {
+		return "", err
+	}
+	if _, err := classifyExistingObject(expected, updated); err != nil {
+		return "", fmt.Errorf("updated Volcano Queue violates desired projection: %w", err)
+	}
+	return existingObjectUpdate, nil
+}
+
+func validateQueueUpdateIdentity(
+	expected *unstructured.Unstructured,
+	current *unstructured.Unstructured,
+) (int64, int64, error) {
+	if current == nil {
+		return 0, 0, providerObjectConflict("existing Queue is required for update")
+	}
+	if expected.GetAPIVersion() != current.GetAPIVersion() ||
+		expected.GetKind() != "Queue" ||
+		current.GetKind() != "Queue" ||
+		expected.GetName() != current.GetName() ||
+		expected.GetNamespace() != current.GetNamespace() {
+		return 0, 0, providerObjectConflict("Queue GVK/name identity mismatch")
+	}
+
+	wantAnnotations := expected.GetAnnotations()
+	haveAnnotations := current.GetAnnotations()
+	for _, key := range []string{
+		providerAnnotation,
+		poolIDAnnotation,
+		acceleratorClassAnnotation,
+	} {
+		if wantAnnotations[key] == "" || haveAnnotations[key] != wantAnnotations[key] {
+			return 0, 0, providerObjectConflict(
+				"Queue annotation %s mismatch: have %q want %q",
+				key,
+				haveAnnotations[key],
+				wantAnnotations[key],
+			)
+		}
+	}
+
+	wantGeneration, err := strconv.ParseInt(wantAnnotations[generationAnnotation], 10, 64)
+	if err != nil || wantGeneration <= 0 {
+		return 0, 0, fmt.Errorf("invalid desired Queue generation %q", wantAnnotations[generationAnnotation])
+	}
+	haveGeneration, err := strconv.ParseInt(haveAnnotations[generationAnnotation], 10, 64)
+	if err != nil || haveGeneration <= 0 {
+		return 0, 0, providerObjectConflict(
+			"invalid existing Queue generation %q",
+			haveAnnotations[generationAnnotation],
+		)
+	}
+	return wantGeneration, haveGeneration, nil
+}
+
+func queueUpdateCandidate(
+	expected *unstructured.Unstructured,
+	current *unstructured.Unstructured,
+) *unstructured.Unstructured {
+	candidate := expected.DeepCopy()
+	candidate.SetResourceVersion(current.GetResourceVersion())
+	candidate.SetUID(current.GetUID())
+	candidate.SetFinalizers(append([]string(nil), current.GetFinalizers()...))
+	candidate.SetOwnerReferences(append([]metav1.OwnerReference(nil), current.GetOwnerReferences()...))
+
+	annotations := cloneProviderMetadata(current.GetAnnotations(), expected.GetAnnotations())
+	candidate.SetAnnotations(annotations)
+	labels := cloneProviderMetadata(current.GetLabels(), expected.GetLabels())
+	candidate.SetLabels(labels)
+	return candidate
+}
+
+func cloneProviderMetadata(existing, desired map[string]string) map[string]string {
+	out := make(map[string]string, len(existing)+len(desired))
+	for key, value := range existing {
+		if strings.HasPrefix(key, "ai.compute/") {
+			continue
+		}
+		out[key] = value
+	}
+	for key, value := range desired {
+		out[key] = value
+	}
+	return out
 }
 
 func (p *Provider) ReconcileWorkload(
