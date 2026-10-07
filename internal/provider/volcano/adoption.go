@@ -2,6 +2,7 @@ package volcano
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -135,7 +136,7 @@ func projectionSubsetMatches(expected, existing any) bool {
 		}
 		return true
 	default:
-		return fmt.Sprint(want) == fmt.Sprint(existing)
+		return reflect.DeepEqual(want, existing)
 	}
 }
 
