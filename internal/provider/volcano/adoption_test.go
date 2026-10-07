@@ -66,6 +66,28 @@ func TestClassifyExistingObjectCreatesWhenDeterministicIdentityIsAbsent(t *testi
 	}
 }
 
+
+func TestClassifyExistingObjectRejectsMalformedExpectedIdentityBeforeCreate(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unsupported := expected.DeepCopy()
+	unsupported.SetKind("ConfigMap")
+	if _, err := classifyExistingObject(unsupported, nil); err == nil {
+		t.Fatal("unsupported provider object kind must fail before create")
+	}
+
+	missingGeneration := expected.DeepCopy()
+	annotations := missingGeneration.GetAnnotations()
+	delete(annotations, generationAnnotation)
+	missingGeneration.SetAnnotations(annotations)
+	if _, err := classifyExistingObject(missingGeneration, nil); err == nil {
+		t.Fatal("missing expected generation marker must fail before create")
+	}
+}
+
 func TestClassifyExistingObjectAdoptsExactProjectionDespiteRuntimeMetadata(t *testing.T) {
 	expected, err := ProjectWorkload(adoptionWorkloadProjection())
 	if err != nil {
