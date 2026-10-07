@@ -53,11 +53,35 @@ func TestRuntimeTransitionEvidenceRequiresProviderEvidence(t *testing.T) {
 	}
 }
 
+func TestRuntimeTransitionEvidenceRejectsEmptyProviderEvidenceRef(t *testing.T) {
+	in := validRuntimeTransitionEvidence()
+	in.EvidenceRefs = []string{"provider://sglang/attempt/attempt-1", " "}
+	if err := in.ValidateForAcceptance(); err == nil {
+		t.Fatal("expected empty provider evidence ref to fail")
+	}
+}
+
 func TestRuntimeTransitionEvidenceRejectsLocalSemanticReference(t *testing.T) {
 	in := validRuntimeTransitionEvidence()
 	in.SemanticReference = "reference://fixture/pd-1"
 	if err := in.ValidateForAcceptance(); err == nil {
 		t.Fatal("expected non-AI-Factory semantic reference to fail")
+	}
+}
+
+func TestRuntimeTransitionEvidenceRejectsEmptySemanticBundleIdentity(t *testing.T) {
+	in := validRuntimeTransitionEvidence()
+	in.SemanticReference = "aifactory://evidence/ "
+	if err := in.ValidateForAcceptance(); err == nil {
+		t.Fatal("expected empty semantic bundle identity to fail")
+	}
+}
+
+func TestRuntimeTransitionEvidenceRejectsUnknownChaosCase(t *testing.T) {
+	in := validRuntimeTransitionEvidence()
+	in.ChaosCase = "PD-C9"
+	if err := in.ValidateForAcceptance(); err == nil {
+		t.Fatal("expected unknown chaos case to fail")
 	}
 }
 
