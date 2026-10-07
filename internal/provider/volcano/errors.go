@@ -14,7 +14,8 @@ func classifyProviderError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if apierrors.IsTimeout(err) ||
+	if apierrors.IsConflict(err) ||
+		apierrors.IsTimeout(err) ||
 		apierrors.IsServerTimeout(err) ||
 		apierrors.IsTooManyRequests(err) ||
 		apierrors.IsServiceUnavailable(err) ||
