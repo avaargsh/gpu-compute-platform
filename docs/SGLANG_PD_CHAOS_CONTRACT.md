@@ -35,7 +35,7 @@ HTTP success, Pod readiness, or transport success alone is not proof that a P/D 
 
 ## Acceptance evidence
 
-A P/D experiment is accepted only when the artifact records provider/runtime version and immutable image digest; workload/generation/attempt identity; requested and observed role; provider terminal outcome; semantic verification result and reference identifier; relevant provider evidence refs; lease owner/epoch used for the platform commit; and chaos case identifier.
+A P/D experiment is accepted only when the artifact records provider/runtime version and immutable image digest; workload/generation/attempt identity; requested and observed role; provider terminal outcome; semantic verification result and `aifactory://evidence/<bundleId>` reference; relevant provider evidence refs; lease owner/epoch used for the platform commit; and chaos case identifier.
 
 Acceptance requires all of: transport success, runtime terminal success, semantic verification success, and current lease ownership. No individual term may substitute for another.
 
@@ -46,3 +46,7 @@ This contract does not promote SGLang into Stage B or Stage C. It is an executab
 Do not add a public TransferPlan, KV-page model, NIXL component model, or SGLang-specific role state to the management-plane API. If such data is needed for diagnosis, retain it as opaque provider evidence.
 
 Adjust this experiment when upstream changes P/D transfer-completion semantics, role-switch transaction boundaries, provider-visible terminal failure semantics, or image/signing guarantees needed to pin the tested runtime. Otherwise upstream runtime implementation changes remain watch-only.
+
+## Executable harness
+
+`internal/provider/runtime_transition_evidence.go` provides the provider-neutral acceptance predicate. `runtime_transition_evidence_test.go` maps PD-C1 through PD-C8 to fail-closed falsification cases. The harness deliberately validates only evidence completeness and authority boundaries; AI Factory remains responsible for producing the semantic result, measurements, thresholds, and replayable acceptance artifact.
