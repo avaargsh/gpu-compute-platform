@@ -260,3 +260,62 @@ func TestClassifyExistingQueueUsesSameCreateOrAdoptBoundary(t *testing.T) {
 		t.Fatal("queue capacity drift must not be adopted at the same generation")
 	}
 }
+
+
+func TestClassifyExistingObjectAllowsVolcanoAndAPIServerDefaultMapFields(t *testing.T) {
+	queue, err := ProjectPool(adoptionPoolProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingQueue := queue.DeepCopy()
+	queueSpec, _, _ := unstructured.NestedMap(existingQueue.Object, "spec")
+	queueSpec["parent"] = "root"
+	queueSpec["reclaimable"] = false
+	queueSpec["weight"] = int64(1)
+	if err := unstructured.SetNestedMap(existingQueue.Object, queueSpec, "spec"); err != nil {
+		t.Fatal(err)
+	}
+	existingQueue.Object["status"] = map[string]any{"state": "Open"}
+	if action, err := classifyExistingObject(queue, existingQueue); err != nil || action != existingObjectAdopt {
+		t.Fatalf("defaulted Queue should be adoptable: action=%q err=%v", action, err)
+	}
+
+	job, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingJob := job.DeepCopy()
+	jobSpec, _, _ := unstructured.NestedMap(existingJob.Object, "spec")
+	jobSpec["maxRetry"] = int64(3)
+	if err := unstructured.SetNestedMap(existingJob.Object, jobSpec, "spec"); err != nil {
+		t.Fatal(err)
+	}
+	tasks, _, _ := unstructured.NestedSlice(existingJob.Object, "spec", "tasks")
+	task := tasks[0].(map[string]any)
+	template := task["template"].(map[string]any)
+	podSpec := template["spec"].(map[string]any)
+	podSpec["dnsPolicy"] = "ClusterFirst"
+	podSpec["terminationGracePeriodSeconds"] = int64(30)
+	if err := unstructured.SetNestedSlice(existingJob.Object, tasks, "spec", "tasks"); err != nil {
+		t.Fatal(err)
+	}
+	if action, err := classifyExistingObject(job, existingJob); err != nil || action != existingObjectAdopt {
+		t.Fatalf("defaulted VolcanoJob should be adoptable: action=%q err=%v", action, err)
+	}
+}
+
+func TestProjectionSubsetMatchKeepsScalarTypesStrict(t *testing.T) {
+	queue, err := ProjectPool(adoptionPoolProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing := queue.DeepCopy()
+	capability, _, _ := unstructured.NestedMap(existing.Object, "spec", "capability")
+	capability["nvidia.com/gpu"] = int64(8)
+	if err := unstructured.SetNestedMap(existing.Object, capability, "spec", "capability"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := classifyExistingObject(queue, existing); err == nil {
+		t.Fatal("string quantity and integer quantity must not compare equal")
+	}
+}
