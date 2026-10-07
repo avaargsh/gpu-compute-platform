@@ -136,15 +136,25 @@ func TestDynamicProjectedObjectClientRejectsUnsupportedOrMisScopedObjects(t *tes
 
 func TestDynamicProjectedObjectClientDeleteThenGone(t *testing.T) {
 	expected, err := ProjectWorkload(adoptionWorkloadProjection())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	client := fakeVolcanoDynamicClient()
 	transport, err := newDynamicProjectedObjectClient(client)
-	if err != nil { t.Fatal(err) }
-	if _, err := ensureProjectedObject(context.Background(), transport, expected); err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ensureProjectedObject(context.Background(), transport, expected); err != nil {
+		t.Fatal(err)
+	}
 
 	gone, err := deleteProjectedObject(context.Background(), transport, expected)
-	if err != nil { t.Fatal(err) }
-	if !gone { t.Fatal("expected VolcanoJob to be observed gone after delete") }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gone {
+		t.Fatal("expected VolcanoJob to be observed gone after delete")
+	}
 
 	gone, err = deleteProjectedObject(context.Background(), transport, expected)
 	if err != nil || !gone {
