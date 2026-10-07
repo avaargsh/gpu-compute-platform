@@ -172,6 +172,22 @@ This is still a contract harness. The client is fake/injected and there is no
 Volcano dynamic client, queue/job observation implementation, deletion path, or
 production provider registration yet.
 
+## Kubernetes dynamic transport proof
+
+The next Stage B slice wires the unregistered ensure loop to a narrow
+`dynamic.Interface` transport for exactly two GVRs:
+
+- `scheduling.volcano.sh/v1beta1/queues` (cluster-scoped);
+- `batch.volcano.sh/v1alpha1/jobs` (namespaced).
+
+The transport supports only `GET` and `CREATE`. Tests use the Kubernetes
+dynamic fake client to prove native NotFound behavior, Queue/VolcanoJob
+create-then-adopt replay, and fail-closed GVK/scope validation.
+
+This still is **not** a registered `provider.Adapter`. Observation, deletion,
+status translation, evidence, real Volcano CRDs, kind+Volcano acceptance and
+real-GPU execution remain separate gates.
+
 ## Create-or-adopt
 
 Every reconcile follows the existing provider recovery contract.
