@@ -303,6 +303,53 @@ remains the only production execution path. Other overlapping old Stage B
 draft PRs must be consolidated without reintroducing a weaker DELETE path.
 
 
+## Disposable kind/API-server Queue CAS falsification
+
+A live, CPU-only **Kubernetes API-server** test is now available as
+`scripts/e2e/volcano-queue-apiserver-contract.sh`. It is deliberately not
+part of v0.1 acceptance or the normal local unit-test gate: it mutates a
+uniquely named, cluster-scoped Queue on a specifically authorized disposable
+kind cluster.
+
+Prerequisites: `kubectl`, `jq`, a disposable kind context whose name starts
+with `kind-`, and an installed, version-pinned Volcano Queue CRD. The script
+does **not** install/upgrade Volcano or require a GPU. Do not point this
+experiment at any production cluster.
+
+```bash
+# Verify you are on the exact PR #56 revision and a clean checkout.
+git fetch origin feat/stage-b-volcano-queue-cas-v2
+git switch feat/stage-b-volcano-queue-cas-v2
+git pull --ff-only
+
+STAGE_B_EXPECTED_SHA="$(git rev-parse HEAD)" \
+STAGE_B_KIND_CONTEXT="kind-stageb-volcano" \
+STAGE_B_KIND_MUTATION_ACK=1 \
+bash scripts/e2e/volcano-queue-apiserver-contract.sh
+```
+
+This emits **versioned, reviewable** evidence under a unique directory
+outside the repository:
+- original CREATE request, fresh readback and exact server default values;
+- installed Queue CRD JSON and Kubernetes version JSON;
+- a real stale-resourceVersion UPDATE rejected as `409 Conflict`;
+- a new-GET-based quota CAS from 8 to 16 with the same resource UID;
+- final independent GET and cleanup NotFound evidence;
+- per-file SHA256 of JSON receipts and per-gate status.
+
+The test fails closed if live server defaults disagree with the current
+reviewed comparator (notably `reclaimable` and `dequeueStrategy`), if any
+CAS/identity step is ambiguous, or if it cannot independently prove cleanup.
+On ambiguous CREATE, a unique test-ownership annotation is checked before
+attempting cleanup; another owner's same-name Queue is never intentionally
+deleted.
+
+**This tests Kubernetes object CAS and defaulting, not the actual Volcano
+scheduler applying quota, lease takeover, multi-agent fencing or GPU runtime
+behavior.** `QuotaApplied` remains `Unknown`. The script has not been
+executed against a live cluster at the time of this change; the gate stays
+unchecked until independent evidence is attached to the PR.
+
 ## External Volcano Queue API findings (2026-10-08)
 
 The official Volcano Queue documentation at
