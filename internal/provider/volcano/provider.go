@@ -54,13 +54,22 @@ func (p *Provider) ReconcilePool(
 	if err != nil {
 		return baseprovider.PoolObservation{}, err
 	}
-	action, err := p.ensurePoolQueue(ctx, expected)
+	action, updateUID, err := p.ensurePoolQueue(ctx, expected)
 	if err != nil {
 		return baseprovider.PoolObservation{}, fmt.Errorf("ensure Volcano Queue: %w", classifyProviderError(err))
 	}
 	current, err := p.observeOwnedObject(ctx, expected, "Volcano Queue")
 	if err != nil {
 		return baseprovider.PoolObservation{}, err
+	}
+	// A matching projection alone is not a proof of the UPDATE we just
+	// performed. A deleted/recreated Queue with a new UID must fail closed
+	// even when its generation, owner annotations and quota are identical.
+	if updateUID != "" && string(current.GetUID()) != updateUID {
+		return baseprovider.PoolObservation{}, providerObjectConflict(
+			"Queue UID changed after successful quota UPDATE: updated %s observed %s",
+			updateUID, current.GetUID(),
+		)
 	}
 	state, err := volcanoQueueState(current)
 	if err != nil {
