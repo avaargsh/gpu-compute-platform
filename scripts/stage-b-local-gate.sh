@@ -55,6 +55,14 @@ expected_sha="${STAGE_B_EXPECTED_SHA:-}"
 if ! is_local_test_dsn "$TEST_POSTGRES_DSN"; then
   die "TEST_POSTGRES_DSN must use a localhost/127.0.0.1 *_test database with no query overrides (except sslmode); never point Stage B contracts at shared/production databases"
 fi
+# pgx/libpq can also consume PG* settings (notably PGSERVICE/PGSERVICEFILE)
+# from the shell. Do not accept a service file or search_path override that
+# could redirect/descope destructive schema setup and TRUNCATE.
+for override in PGHOST PGHOSTADDR PGPORT PGDATABASE PGSERVICE PGSERVICEFILE PGOPTIONS; do
+  if [[ -n "${!override:-}" ]]; then
+    die "unset $override before running Stage B Postgres contract tests"
+  fi
+done
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 evidence_root="${STAGE_B_EVIDENCE_DIR:-${TMPDIR:-/tmp}/stage-b-local-${head_sha:0:12}-$stamp}"
