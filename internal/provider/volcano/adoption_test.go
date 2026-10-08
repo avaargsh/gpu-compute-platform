@@ -319,7 +319,6 @@ func TestProjectionSubsetMatchKeepsScalarTypesStrict(t *testing.T) {
 	}
 }
 
-
 func TestClassifyExistingObjectRejectsUnreviewedSpecDefaultsAndInjectedBehavior(t *testing.T) {
 	queue, err := ProjectPool(adoptionPoolProjection())
 	if err != nil {
