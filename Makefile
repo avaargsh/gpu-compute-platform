@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: fmt fmt-check test vet build supply-chain-check acceptance-contract kind-up install-kueue install-fake-gpu e2e-golden
+.PHONY: fmt fmt-check test vet build supply-chain-check acceptance-contract stage-b-volcano-contract kind-up install-kueue install-fake-gpu e2e-golden
 
 fmt:
 	bash scripts/go-format.sh
@@ -26,6 +26,9 @@ acceptance-contract:
 	go test ./internal/provider/kueue -run 'TestApplyJob(ReplaysAfterLostCreateAckWithoutDuplicate|AdoptsSameGenerationAfterCreateRace|CreateRaceRejectsDifferentGeneration)$$'
 	go test ./internal/store/postgres -run 'TestPostgres(AgentRegistrationPersistsCapabilitiesAndHeartbeat|ReconcileLeaseOwnershipAndExpiry|LeaseTakeoverFencesStaleReportAndFinalize|FinalizeDesiredAtomicallyCleansRuntimeState|TombstoneFencesOldGenerationAndAllowsNewerRecreate|StateSurvivesStoreReconstruction|RestartPreservesDeletionIntentAndTombstoneFence|CreateWorkloadDesiredRejectsConcurrentPoolDelete|CreateWorkloadDesiredPreservesLostAckReplay|FinalizeDesiredOwnedIsIdempotentAfterLostAck|UpsertCannotCancelDeletionLifecycle|RecreateWaitsForFinalizationReceiptAndConsumesTombstone|OwnedFinalizePrefersCurrentDesiredOverOlderTombstone|LifecycleRaceStressPreservesDeletionFence|LeaseClaimStressHasSingleLiveOwner)$$'
 	go test ./internal/platform/httpapi -run 'Test(ClusterStatusReturnsRegisteredCapabilities|ResourceAPI(RequiresDeleteRecreateForWorkloadChanges|RejectsStaleWorkloadGenerationWithoutRollback))$$'
+
+stage-b-volcano-contract:
+	go test ./internal/provider/volcano -run 'Test(Project|Volcano|Classify|Ensure|Dynamic|Observe|Delete)'
 
 kind-up:
 	kind get clusters | grep -qx kind-golden || kind create cluster --name kind-golden --wait 120s
