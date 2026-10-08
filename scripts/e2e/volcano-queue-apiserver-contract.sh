@@ -132,6 +132,34 @@ kubectl --context "$context" annotate queues.scheduling.volcano.sh "$name" \
   >"$evidence/concurrent-update.log" 2>&1 ||
   die "cannot inject a concurrent resourceVersion update"
 
+# The same concurrent write must also fence a stale conditional DELETE.
+# This intentionally uses the PRE-annotation UID/RV and must return 409;
+# deleting the object would be a hard safety failure, not a passing probe.
+jq '{
+  apiVersion: "meta.k8s.io/v1",
+  kind: "DeleteOptions",
+  preconditions: {
+    uid: .metadata.uid,
+    resourceVersion: .metadata.resourceVersion
+  }
+}' "$evidence/initial-get.json" >"$evidence/stale-delete-options.json"
+if kubectl --context "$context" delete \
+  --raw "/apis/scheduling.volcano.sh/v1beta1/queues/$name" \
+  -f "$evidence/stale-delete-options.json" \
+  >"$evidence/stale-delete.stdout" 2>"$evidence/stale-delete.stderr"; then
+  die "stale UID/RV DELETE unexpectedly succeeded; API-server fencing is unsafe"
+fi
+if ! grep -Eq 'Conflict|the object has been modified|ResourceVersion' "$evidence/stale-delete.stderr"; then
+  die "stale conditional DELETE failed for a reason other than Kubernetes Conflict"
+fi
+kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
+  >"$evidence/after-stale-delete-get.json" ||
+  die "cannot prove Queue survived stale conditional DELETE"
+jq -e --arg uid "$(jq -r '.metadata.uid' "$evidence/initial-get.json")" \
+  '.metadata.uid == $uid and .metadata.annotations["stageb.volcano.probe/rv-bump"] == "concurrent"' \
+  "$evidence/after-stale-delete-get.json" >/dev/null ||
+  die "stale conditional DELETE modified or replaced the Queue"
+
 if kubectl --context "$context" replace -f "$evidence/initial-get.json" \
   >"$evidence/stale-update.stdout" 2>"$evidence/stale-update.stderr"; then
   die "stale resourceVersion UPDATE unexpectedly succeeded"
@@ -175,7 +203,7 @@ else
 fi
 jq -S '.spec' "$evidence/initial-get.json" >"$evidence/observed-defaults.json"
 sha256sum "$evidence/"*.json >"$evidence/artifact-sha256.txt"
-printf 'kubernetes_stale_cas\tPASS\ndefault_comparator\t%s\nquota_applied\tUNPROVEN\n' \
+printf 'kubernetes_stale_update_cas\tPASS\nkubernetes_stale_delete_precondition\tPASS\ndefault_comparator\t%s\nquota_applied\tUNPROVEN\n' \
   "$default_gate" >"$evidence/gates.tsv"
 printf 'Evidence: %s\n' "$evidence"
 if [[ "$default_gate" != "PASS" ]]; then
