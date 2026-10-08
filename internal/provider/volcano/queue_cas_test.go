@@ -15,12 +15,12 @@ import (
 )
 
 type queueCASTestClient struct {
-	object        *unstructured.Unstructured
-	lastUpdate    *unstructured.Unstructured
-	getCalls      int
-	updateCalls   int
-	failConflict  bool
-	lostAck       bool
+	object       *unstructured.Unstructured
+	lastUpdate   *unstructured.Unstructured
+	getCalls     int
+	updateCalls  int
+	failConflict bool
+	lostAck      bool
 }
 
 func (c *queueCASTestClient) Get(
