@@ -446,17 +446,23 @@ exact 40-character PR HEAD and execute the test suite in a **detached local
 worktree** without mutating the developer's current checkout:
 
 ```bash
+# Take the SHA from an independent PR review; do NOT derive the expected
+# value from whatever HEAD happens to be in your current checkout.
+export STAGE_B_EXPECTED_SHA="<reviewed 40-character PR #56 commit SHA>"
 git fetch origin feat/stage-b-volcano-queue-cas-v2
 git switch feat/stage-b-volcano-queue-cas-v2
-STAGE_B_EXPECTED_SHA="$(git rev-parse HEAD)" \
+bash scripts/stage-b-local-gate.sh --self-test
 TEST_POSTGRES_DSN="postgres://<user>:<password>@localhost:5432/gpu_platform_test?sslmode=disable" \
 bash scripts/stage-b-local-gate.sh
 ```
 
 Replace the credentials with those for a dedicated local PostgreSQL `*_test` database.
 The contract tests execute schema setup and `TRUNCATE`; the script now **rejects**
-non-loopback PostgreSQL hosts, databases without the `_test` suffix, absent DSNs,
-dirty checkouts and SHA mismatches. A loopback host can still be a tunnel:
+non-loopback PostgreSQL hosts, databases without the `_test` suffix, arbitrary
+query options (including `?host=`, `?dbname=` and `?port=`), absent DSNs,
+dirty checkouts and SHA mismatches. Only a reviewed `sslmode` parameter may be passed.
+A `--self-test` runs nine DSN guard fixtures without Go/Postgres and is
+also a mandatory logged gate in the full local acceptance run. A loopback host can still be a tunnel:
 verify the actual database target before running. Never point this at production.
 It uses a detached worktree, runs fmt, vet, focused Volcano tests, Volcano
 race tests, full Go tests, acceptance contract, supply-chain checks and build,
