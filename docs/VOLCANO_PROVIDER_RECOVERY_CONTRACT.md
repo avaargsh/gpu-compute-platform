@@ -132,10 +132,22 @@ Given an expected projection and an observed object:
 - Kubernetes/runtime metadata such as UID, resourceVersion, status, and
   non-platform annotations/labels may differ without changing ownership.
 
-The current comparison is intentionally strict. If a real Volcano API server
-adds defaults to the desired `spec`, the future dynamic-client adapter must
-introduce an explicit normalization rule proven by kind/Volcano tests; it must
-not weaken adoption to "same name + same generation".
+Stage B now permits a **narrow, exact-valued defaulting allowlist** while
+comparing every platform-projected field, including list shape and GPU resource
+maps. All other extra spec fields are conflicts, even with the same generation.
+The provisional fixtures permit only:
+
+- Queue `spec.parent=root`, `spec.reclaimable=false`, `spec.weight=1`;
+- VolcanoJob `spec.maxRetry=3`;
+- Job Pod template `dnsPolicy=ClusterFirst` and
+  `terminationGracePeriodSeconds=30`.
+
+Additional `spec` fields such as Pod `hostNetwork`, `nodeSelector`, or
+container resource requests are **not** adoptable. The allowlist captures
+Stage B test-fixture assumptions, not verified universal Volcano defaults.
+A real kind+Volcano server-defaulting test must confirm each value before
+this can become a production adapter. Version changes fail closed pending
+review, not silently widened via generic map-subset comparison.
 
 This classifier validates the decision boundary only. It does not yet prove a
 lost-ACK remote create, AlreadyExists race, process takeover, deletion replay,
