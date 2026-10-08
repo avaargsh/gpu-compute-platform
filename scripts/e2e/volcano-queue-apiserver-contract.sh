@@ -46,6 +46,7 @@ printf 'head_sha\t%s\ncontext\t%s\nresource\t%s\nstarted_utc\t%s\n' \
 printf 'queue_crd_spec_sha256\t%s\n' "$actual_crd_spec_sha" >>"$evidence/run.tsv"
 
 created=0
+created_uid=""
 cleanup() {
   if [[ "$created" != "1" ]]; then
     return 0
@@ -63,10 +64,15 @@ cleanup() {
     return 1
   fi
 
-  # The nonce prevents intentional deletion of unrelated test resources.
-  if ! jq -e --arg token "$name" '
+  # A lost CREATE ACK provides no authoritative UID. Refuse cleanup in
+  # that case: token/name alone cannot disprove a foreign replacement.
+  if [[ -z "$created_uid" ]]; then
+    printf 'BLOCKED: missing CREATE receipt UID; manual cleanup review required\n' >"$evidence/cleanup.log"
+    return 1
+  fi
+  if ! jq -e --arg token "$name" --arg expected_uid "$created_uid" '
     .metadata.annotations["stageb.volcano.probe/token"] == $token and
-    .metadata.uid != null and .metadata.uid != "" and
+    .metadata.uid == $expected_uid and
     .metadata.resourceVersion != null and .metadata.resourceVersion != ""
   ' "$evidence/pre-cleanup-get.json" >/dev/null; then
     printf 'BLOCKED: cleanup ownership/UID/resourceVersion is unproven\n' >"$evidence/cleanup.log"
@@ -125,7 +131,9 @@ EOF
 created=1
 kubectl --context "$context" create -f "$evidence/request.json" -o json \
   >"$evidence/create-response.json" 2>"$evidence/create.stderr" ||
-  die "Queue CREATE failed or ACK was ambiguous; inspect evidence and cleanup.log"
+  die "Queue CREATE failed or ACK was ambiguous; refuse automatic cleanup without CREATE UID"
+created_uid="$(jq -r '.metadata.uid // empty' "$evidence/create-response.json")"
+[[ -n "$created_uid" ]] || die "CREATE acknowledgement lacks server UID; refuse destructive cleanup"
 kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
   >"$evidence/initial-get.json" || die "fresh Queue GET failed"
 
