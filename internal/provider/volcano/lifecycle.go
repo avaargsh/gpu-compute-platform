@@ -102,13 +102,18 @@ func deleteProjectedObject(
 		return false, err
 	}
 
-	if err := client.Delete(ctx, expected); err != nil {
-		if apierrors.IsNotFound(err) {
-			return true, nil
-		}
+	// A verified GET does not authorize a later name-only DELETE: another
+	// controller may replace or update the object between those API calls.
+	// Kubernetes enforces both preconditions atomically at DELETE time.
+	if current.GetUID() == "" || current.GetResourceVersion() == "" {
+		return false, fmt.Errorf("Volcano object UID and resourceVersion are required before delete")
+	}
+	if err := client.Delete(ctx, current); err != nil && !apierrors.IsNotFound(err) {
 		return false, fmt.Errorf("delete deterministic Volcano object: %w", err)
 	}
 
+	// Even DELETE NotFound needs an independent observation: the old object
+	// may be gone while a new object already occupies the deterministic name.
 	current, err = client.Get(ctx, expected)
 	if apierrors.IsNotFound(err) {
 		return true, nil
