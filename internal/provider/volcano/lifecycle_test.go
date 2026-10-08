@@ -12,11 +12,15 @@ import (
 )
 
 type fakeLifecycleClient struct {
-	object           *unstructured.Unstructured
-	getErr           error
-	deleteErr        error
-	deleteSideEffect bool
-	deleteCalls      int
+	object                *unstructured.Unstructured
+	getErr                error
+	deleteErr             error
+	deleteSideEffect      bool
+	deleteCalls           int
+	omitServerIdentity    bool
+	replacementOnDelete   *unstructured.Unstructured
+	deletedUID            types.UID
+	deletedResourceVersion string
 }
 
 func (f *fakeLifecycleClient) Get(
@@ -35,7 +39,18 @@ func (f *fakeLifecycleClient) Get(
 			expected.GetName(),
 		)
 	}
-	return f.object.DeepCopy(), nil
+	current := f.object.DeepCopy()
+	// Kubernetes assigns these fields on persisted objects; the in-memory
+	// projector/fake Create doesn't, so the test client supplies them on GET.
+	if !f.omitServerIdentity {
+		if current.GetUID() == "" {
+			current.SetUID("test-volcano-uid")
+		}
+		if current.GetResourceVersion() == "" {
+			current.SetResourceVersion("1")
+		}
+	}
+	return current, nil
 }
 
 func (f *fakeLifecycleClient) Create(
@@ -48,10 +63,14 @@ func (f *fakeLifecycleClient) Create(
 
 func (f *fakeLifecycleClient) Delete(
 	_ context.Context,
-	_ *unstructured.Unstructured,
+	observed *unstructured.Unstructured,
 ) error {
 	f.deleteCalls++
-	if f.deleteSideEffect {
+	f.deletedUID = observed.GetUID()
+	f.deletedResourceVersion = observed.GetResourceVersion()
+	if f.replacementOnDelete != nil {
+		f.object = f.replacementOnDelete.DeepCopy()
+	} else if f.deleteSideEffect {
 		f.object = nil
 	}
 	return f.deleteErr
@@ -273,5 +292,67 @@ func TestDeleteProjectedObjectAmbiguousReadDoesNotDeleteBlindly(t *testing.T) {
 			"ambiguous GET triggered DELETE: deletes=%d",
 			client.deleteCalls,
 		)
+	}
+}
+
+
+func TestDeleteProjectedObjectUsesVerifiedServerIdentity(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeLifecycleClient{object: expected.DeepCopy()}
+	_, err = deleteProjectedObject(context.Background(), client, expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.deletedUID != types.UID("test-volcano-uid") ||
+		client.deletedResourceVersion != "1" {
+		t.Fatalf("DELETE lost verified identity: UID=%q RV=%q", client.deletedUID, client.deletedResourceVersion)
+	}
+}
+
+func TestDeleteProjectedObjectRefusesObjectsWithoutServerIdentity(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakeLifecycleClient{
+		object:             expected.DeepCopy(),
+		omitServerIdentity: true,
+	}
+	gone, err := deleteProjectedObject(context.Background(), client, expected)
+	if err == nil || gone || client.deleteCalls != 0 {
+		t.Fatalf("missing UID/RV must fail before DELETE: gone=%t err=%v deletes=%d", gone, err, client.deleteCalls)
+	}
+}
+
+func TestDeleteProjectedObjectNotFoundDoesNotHideReplacement(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := expected.DeepCopy()
+	annotations := replacement.GetAnnotations()
+	annotations[workloadIDAnnotation] = "foreign-workload"
+	replacement.SetAnnotations(annotations)
+
+	// The old object disappears between the authorized GET and DELETE,
+	// while a foreign object takes the same deterministic name. NotFound
+	// from DELETE cannot be treated as a convergence receipt.
+	client := &fakeLifecycleClient{
+		object: expected.DeepCopy(),
+		replacementOnDelete: replacement,
+		deleteErr: apierrors.NewNotFound(
+			schema.GroupResource{Group: volcanoJobGVR.Group, Resource: volcanoJobGVR.Resource},
+			expected.GetName(),
+		),
+	}
+	gone, err := deleteProjectedObject(context.Background(), client, expected)
+	if gone || err == nil {
+		t.Fatalf("name replacement must not report Gone: gone=%t err=%v", gone, err)
+	}
+	if client.deleteCalls != 1 {
+		t.Fatalf("delete calls=%d, want 1", client.deleteCalls)
 	}
 }
