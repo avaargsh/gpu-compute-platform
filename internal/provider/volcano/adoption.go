@@ -20,8 +20,8 @@ const (
 // A missing deterministic provider object may be created. An existing object is
 // adoptable only when the provider-owned identity markers match and every
 // immutable field emitted by our projection is still present with the same
-// value. API server / Volcano defaulted map fields may be additional. Runtime
-// metadata and status are ignored; provider-owned ai.compute/* labels are not.
+// value. Only explicitly reviewed API server / Volcano defaults may be
+// additional. Runtime metadata and status are ignored; platform labels are not.
 //
 // This helper does not perform remote side effects. A future Volcano client must
 // call it after GET and again after an AlreadyExists race before reporting an
@@ -100,18 +100,22 @@ func classifyExistingObject(expected, existing *unstructured.Unstructured) (exis
 	if err != nil || !existingFound {
 		return "", providerObjectConflict("existing provider object spec is missing")
 	}
-	if !projectionSubsetMatches(expectedSpec, existingSpec) {
+	if !projectionSubsetMatches(expected.GetKind(), expectedSpec, existingSpec) {
 		return "", providerObjectConflict("immutable provider projection differs")
 	}
 
 	return existingObjectAdopt, nil
 }
 
-// projectionSubsetMatches requires the live object to preserve every field
-// emitted by our deterministic provider projection while allowing the API
-// server or Volcano admission/defaulting to add extra map fields. Slice shape
-// stays exact so extra tasks/containers cannot be silently adopted.
-func projectionSubsetMatches(expected, existing any) bool {
+// projectionSubsetMatches preserves every projected field and allows only
+// explicitly reviewed server defaults. A generic map-subset check is unsafe:
+// injected hostNetwork, nodeSelector or GPU requests could otherwise be
+// adopted as our own immutable workload at the same desired generation.
+func projectionSubsetMatches(kind string, expected, existing any) bool {
+	return matchProjectedSpec(kind, "spec", expected, existing)
+}
+
+func matchProjectedSpec(kind, path string, expected, existing any) bool {
 	switch want := expected.(type) {
 	case map[string]any:
 		got, ok := existing.(map[string]any)
@@ -120,7 +124,13 @@ func projectionSubsetMatches(expected, existing any) bool {
 		}
 		for key, value := range want {
 			actual, exists := got[key]
-			if !exists || !projectionSubsetMatches(value, actual) {
+			if !exists || !matchProjectedSpec(kind, path+"."+key, value, actual) {
+				return false
+			}
+		}
+		for key, actual := range got {
+			if _, projected := want[key]; !projected &&
+				!allowedVolcanoDefault(kind, path, key, actual) {
 				return false
 			}
 		}
@@ -131,7 +141,7 @@ func projectionSubsetMatches(expected, existing any) bool {
 			return false
 		}
 		for i := range want {
-			if !projectionSubsetMatches(want[i], got[i]) {
+			if !matchProjectedSpec(kind, path+"[]", want[i], got[i]) {
 				return false
 			}
 		}
@@ -139,6 +149,33 @@ func projectionSubsetMatches(expected, existing any) bool {
 	default:
 		return reflect.DeepEqual(want, existing)
 	}
+}
+
+// Default values are intentionally pinned to the narrow Stage B experiment.
+// A Volcano/Kubernetes upgrade that adds or changes a default must fail
+// closed until a real API-server observation and a review update this list.
+func allowedVolcanoDefault(kind, path, key string, value any) bool {
+	switch {
+	case kind == "Queue" && path == "spec":
+		switch key {
+		case "parent":
+			return value == "root"
+		case "reclaimable":
+			return value == false
+		case "weight":
+			return reflect.DeepEqual(value, int64(1))
+		}
+	case kind == "Job" && path == "spec" && key == "maxRetry":
+		return reflect.DeepEqual(value, int64(3))
+	case kind == "Job" && path == "spec.tasks[].template.spec":
+		switch key {
+		case "dnsPolicy":
+			return value == "ClusterFirst"
+		case "terminationGracePeriodSeconds":
+			return reflect.DeepEqual(value, int64(30))
+		}
+	}
+	return false
 }
 
 func providerOwnedAnnotationKeys(kind string) []string {
