@@ -216,6 +216,32 @@ func TestVolcanoQueueCASSuccessACKForeignReadbackFailsClosed(t *testing.T) {
 	}
 }
 
+func TestVolcanoQueueCASSuccessACKRecreatedSameProjectionFailsClosed(t *testing.T) {
+	old := oldQueueWithServerIdentity(t)
+	// The replacement is observationally indistinguishable by name, generation,
+	// quota and platform owner annotations. Only Kubernetes UID identifies the
+	// object that actually acknowledged our UPDATE.
+	replacement, err := ProjectPool(nextQueueProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement.SetUID("recreated-queue-uid")
+	replacement.SetResourceVersion("12")
+	replacement.Object["status"] = map[string]any{"state": "Open"}
+	client := &queueCASTestClient{
+		object:        old,
+		postACKObject: replacement,
+	}
+	p := newProvider(client)
+	observation, err := p.ReconcilePool(context.Background(), nextQueueProjection())
+	if err == nil || baseprovider.IsRetryable(err) ||
+		observation.ObservedGeneration != 0 ||
+		client.updateCalls != 1 || client.getCalls < 2 {
+		t.Fatalf("same-projection replacement UID must reject ownership: observation=%#v err=%v updates=%d gets=%d",
+			observation, err, client.updateCalls, client.getCalls)
+	}
+}
+
 func TestVolcanoQueueCASConflictRetriesFromFreshGET(t *testing.T) {
 	client := &queueCASTestClient{object: oldQueueWithServerIdentity(t), failConflict: true}
 	p := newProvider(client)
