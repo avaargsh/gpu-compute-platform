@@ -152,6 +152,11 @@ func TestVolcanoQueueCASAdvancePreservesControllerMetadata(t *testing.T) {
 	if err != nil || replayed.ObservedGeneration != 5 || client.updateCalls != 1 {
 		t.Fatalf("same-generation replay performed duplicate UPDATE: %#v err=%v updates=%d", replayed, err, client.updateCalls)
 	}
+	if len(replayed.Conditions) != 2 ||
+		replayed.Conditions[1].Type != "QuotaApplied" ||
+		replayed.Conditions[1].Status != "Unknown" {
+		t.Fatalf("replayed readback must not invent scheduler-applied quota: %#v", replayed.Conditions)
+	}
 }
 
 func TestVolcanoQueueCASLostAckAdoptsCommittedGeneration(t *testing.T) {
