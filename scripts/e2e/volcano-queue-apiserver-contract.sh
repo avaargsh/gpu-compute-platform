@@ -15,6 +15,9 @@ expected_sha="${STAGE_B_EXPECTED_SHA:-}"
 [[ "$expected_sha" =~ ^[0-9a-f]{40}$ ]] || die "pin the exact PR SHA in STAGE_B_EXPECTED_SHA"
 actual_sha="$(git rev-parse HEAD 2>/dev/null)" || die "run from the reviewed git checkout"
 [[ "$expected_sha" == "$actual_sha" ]] || die "HEAD differs from frozen PR SHA"
+expected_crd_spec_sha="${STAGE_B_EXPECTED_QUEUE_CRD_SPEC_SHA256:-}"
+[[ "$expected_crd_spec_sha" =~ ^[0-9a-f]{64}$ ]] ||
+  die "pin SHA256 of independently reviewed Queue CRD .spec in STAGE_B_EXPECTED_QUEUE_CRD_SPEC_SHA256"
 [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || die "working tree must be clean"
 
 kubectl --context "$context" get crd queues.scheduling.volcano.sh >/dev/null ||
@@ -29,11 +32,18 @@ evidence="$(cd "$evidence" && pwd)"
 # The observed CRD/defaults must be traceable to a concrete API-server build.
 kubectl --context "$context" get crd queues.scheduling.volcano.sh -o json \
   >"$evidence/queue-crd.json" || die "cannot snapshot Queue CRD"
+jq -Se '.spec' "$evidence/queue-crd.json" >"$evidence/queue-crd-spec.json" ||
+  die "cannot canonicalize installed Queue CRD spec"
+actual_crd_spec_sha="$(sha256sum "$evidence/queue-crd-spec.json")"
+actual_crd_spec_sha="${actual_crd_spec_sha%% *}"
+[[ "$actual_crd_spec_sha" == "$expected_crd_spec_sha" ]] ||
+  die "installed Queue CRD schema differs from the independently pinned digest"
 kubectl --context "$context" version -o json \
   >"$evidence/kubernetes-version.json" || die "cannot snapshot Kubernetes version"
 name="vq-stageb-probe-$(date -u +%s)-$$"
 printf 'head_sha\t%s\ncontext\t%s\nresource\t%s\nstarted_utc\t%s\n' \
   "$actual_sha" "$context" "$name" "$timestamp" >"$evidence/run.tsv"
+printf 'queue_crd_spec_sha256\t%s\n' "$actual_crd_spec_sha" >>"$evidence/run.tsv"
 
 created=0
 cleanup() {
