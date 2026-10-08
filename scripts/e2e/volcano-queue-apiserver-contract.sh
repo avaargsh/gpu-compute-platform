@@ -26,6 +26,11 @@ timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 evidence="${STAGE_B_VOLCANO_API_EVIDENCE_DIR:-${TMPDIR:-/tmp}/volcano-api-${actual_sha:0:12}-$timestamp}"
 mkdir -p "$evidence"
 evidence="$(cd "$evidence" && pwd)"
+# The observed CRD/defaults must be traceable to a concrete API-server build.
+kubectl --context "$context" get crd queues.scheduling.volcano.sh -o json \
+  >"$evidence/queue-crd.json" || die "cannot snapshot Queue CRD"
+kubectl --context "$context" version -o json \
+  >"$evidence/kubernetes-version.json" || die "cannot snapshot Kubernetes version"
 name="vq-stageb-probe-$(date -u +%s)-$$"
 printf 'head_sha\t%s\ncontext\t%s\nresource\t%s\nstarted_utc\t%s\n' \
   "$actual_sha" "$context" "$name" "$timestamp" >"$evidence/run.tsv"
@@ -79,6 +84,7 @@ kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
 
 jq -e '.metadata.uid != null and .metadata.uid != "" and
        .metadata.resourceVersion != null and
+       (.spec.capability | keys | length) == 1 and
        .spec.capability["nvidia.com/gpu"] == "8"' "$evidence/initial-get.json" >/dev/null ||
   die "stored Queue UID/RV/capability does not match expected projection"
 
@@ -114,6 +120,7 @@ kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
   >"$evidence/final-get.json" || die "fresh independent readback failed"
 jq -e --arg uid "$(jq -r '.metadata.uid' "$evidence/initial-get.json")" \
   '.metadata.uid == $uid and .metadata.annotations["ai.compute/generation"] == "5" and
+   (.spec.capability | keys | length) == 1 and
    .spec.capability["nvidia.com/gpu"] == "16"' "$evidence/final-get.json" >/dev/null ||
   die "fresh CAS reply did not survive independent GET"
 
@@ -137,4 +144,15 @@ printf 'Evidence: %s\n' "$evidence"
 if [[ "$default_gate" != "PASS" ]]; then
   die "server-defaulted Queue differs from the fail-closed comparator; see observed-defaults.json"
 fi
+# Passing the real API gate also requires independent cleanup convergence.
+cleanup
+created=0
+if kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
+  >"$evidence/post-cleanup-get.json" 2>"$evidence/post-cleanup-get.stderr"; then
+  die "cleanup is incomplete: test Queue still exists"
+fi
+if ! grep -Eqi 'NotFound|not found' "$evidence/post-cleanup-get.stderr"; then
+  die "cannot independently prove cleanup NotFound"
+fi
+printf 'cleanup_observed_not_found\\tPASS\\n' >>"$evidence/gates.tsv"
 printf 'VOLCANO API CONTRACT: API SERVER PASS (scheduler application NOT PROVEN)\n'
