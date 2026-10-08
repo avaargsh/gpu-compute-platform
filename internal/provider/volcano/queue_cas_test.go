@@ -19,8 +19,9 @@ type queueCASTestClient struct {
 	lastUpdate   *unstructured.Unstructured
 	getCalls     int
 	updateCalls  int
-	failConflict bool
-	lostAck      bool
+	failConflict     bool
+	lostAck          bool
+	postACKObject    *unstructured.Unstructured
 }
 
 func (c *queueCASTestClient) Get(
@@ -81,7 +82,14 @@ func (c *queueCASTestClient) Update(
 		c.lostAck = false
 		return nil, context.DeadlineExceeded
 	}
-	return c.object.DeepCopy(), nil
+	// Simulate a successful API response followed by an independent GET that
+	// observes a stale or foreign object. The provider must reject this drift
+	// instead of promoting the UPDATE response to an observed generation.
+	ack := c.object.DeepCopy()
+	if c.postACKObject != nil {
+		c.object = c.postACKObject.DeepCopy()
+	}
+	return ack, nil
 }
 
 func oldQueueWithServerIdentity(t *testing.T) *unstructured.Unstructured {
@@ -169,6 +177,42 @@ func TestVolcanoQueueCASLostAckAdoptsCommittedGeneration(t *testing.T) {
 	observed, err := p.ReconcilePool(context.Background(), nextQueueProjection())
 	if err != nil || observed.ObservedGeneration != 5 || client.updateCalls != 1 {
 		t.Fatalf("lost ACK replay must adopt, not update again: %#v err=%v calls=%d", observed, err, client.updateCalls)
+	}
+}
+
+func TestVolcanoQueueCASSuccessACKStaleReadbackFailsClosed(t *testing.T) {
+	old := oldQueueWithServerIdentity(t)
+	client := &queueCASTestClient{
+		object:        old.DeepCopy(),
+		postACKObject: old.DeepCopy(),
+	}
+	p := newProvider(client)
+	observation, err := p.ReconcilePool(context.Background(), nextQueueProjection())
+	if err == nil || observation.ObservedGeneration != 0 ||
+		client.updateCalls != 1 || client.getCalls < 2 {
+		t.Fatalf("stale independent GET must not be reported as CAS success: observation=%#v err=%v updates=%d gets=%d",
+			observation, err, client.updateCalls, client.getCalls)
+	}
+}
+
+func TestVolcanoQueueCASSuccessACKForeignReadbackFailsClosed(t *testing.T) {
+	old := oldQueueWithServerIdentity(t)
+	foreign := old.DeepCopy()
+	annotations := foreign.GetAnnotations()
+	annotations[poolIDAnnotation] = "foreign-pool"
+	foreign.SetAnnotations(annotations)
+	foreign.SetUID("foreign-queue-uid")
+	foreign.SetResourceVersion("12")
+	client := &queueCASTestClient{
+		object:        old,
+		postACKObject: foreign,
+	}
+	p := newProvider(client)
+	observation, err := p.ReconcilePool(context.Background(), nextQueueProjection())
+	if err == nil || baseprovider.IsRetryable(err) ||
+		observation.ObservedGeneration != 0 || client.updateCalls != 1 {
+		t.Fatalf("foreign identity after successful ACK must fail closed: observation=%#v err=%v updates=%d",
+			observation, err, client.updateCalls)
 	}
 }
 
