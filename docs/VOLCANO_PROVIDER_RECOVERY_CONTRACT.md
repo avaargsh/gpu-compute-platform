@@ -375,9 +375,29 @@ Actual kind+Volcano acceptance, a deliberate conflict/replacement experiment,
 and independent local tests remain outstanding before this stacked draft can
 be promoted. No real-GPU/Volcano-production claim is attached to these tests.
 
-Run the CPU-only focused suite with `make stage-b-volcano-contract` and verify
-`go test ./...`, `go vet ./...`, `make fmt-check`,
-`make acceptance-contract`, and `make supply-chain-check` on the same SHA.
+For local CPU-only gates when GitHub Actions minutes are exhausted, pin the
+exact 40-character PR HEAD and execute the test suite in a **detached local
+worktree** without mutating the developer's current checkout:
+
+```bash
+git fetch origin feat/stage-b-volcano-queue-cas-v2
+git switch feat/stage-b-volcano-queue-cas-v2
+STAGE_B_EXPECTED_SHA="$(git rev-parse HEAD)" \\
+TEST_POSTGRES_DSN="postgres://<user>:<password>@localhost:5432/<db>?sslmode=disable" \\
+bash scripts/stage-b-local-gate.sh
+```
+
+Replace the DSN placeholders with a real, reachable PostgreSQL test database.
+The script **blocks** on an absent DSN, dirty checkout or SHA mismatch.
+It uses a detached worktree, runs fmt, vet, focused Volcano tests, Volcano
+race tests, full Go tests, acceptance contract, supply-chain checks and build,
+and emits per-gate logs, SHA256s and a gate table in an external evidence
+directory. A failed or skipped gate must not be labeled PASS. This is not an
+independent-review receipt: a separate reviewer must inspect changed code,
+test coverage and logs. It is not a real Volcano API-server or GPU acceptance.
+
+The low-level focused suite remains `make stage-b-volcano-contract`; the local
+gate incorporates this and additional checks on the same frozen SHA.
 Do not merge until evidence is recorded. The authoritative production registry
 still contains only `kueue`.
 
