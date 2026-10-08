@@ -318,3 +318,103 @@ func TestProjectionSubsetMatchKeepsScalarTypesStrict(t *testing.T) {
 		t.Fatal("string quantity and integer quantity must not compare equal")
 	}
 }
+
+
+func TestClassifyExistingObjectRejectsUnreviewedSpecDefaultsAndInjectedBehavior(t *testing.T) {
+	queue, err := ProjectPool(adoptionPoolProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		base   *unstructured.Unstructured
+		mutate func(*unstructured.Unstructured)
+	}{
+		{
+			name: "queue extra capability",
+			base: queue,
+			mutate: func(obj *unstructured.Unstructured) {
+				spec := obj.Object["spec"].(map[string]any)
+				spec["capability"].(map[string]any)["example.com/other-gpu"] = "99"
+			},
+		},
+		{
+			name: "queue unreviewed scheduling field",
+			base: queue,
+			mutate: func(obj *unstructured.Unstructured) {
+				obj.Object["spec"].(map[string]any)["affinity"] = map[string]any{"unexpected": true}
+			},
+		},
+		{
+			name: "queue changed default weight",
+			base: queue,
+			mutate: func(obj *unstructured.Unstructured) {
+				obj.Object["spec"].(map[string]any)["weight"] = int64(999)
+			},
+		},
+		{
+			name: "queue non-scalar weight must not panic",
+			base: queue,
+			mutate: func(obj *unstructured.Unstructured) {
+				obj.Object["spec"].(map[string]any)["weight"] = map[string]any{"value": 1}
+			},
+		},
+		{
+			name: "job injected hostNetwork",
+			base: job,
+			mutate: func(obj *unstructured.Unstructured) {
+				tasks := obj.Object["spec"].(map[string]any)["tasks"].([]any)
+				podSpec := tasks[0].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+				podSpec["hostNetwork"] = true
+			},
+		},
+		{
+			name: "job injected node selector",
+			base: job,
+			mutate: func(obj *unstructured.Unstructured) {
+				tasks := obj.Object["spec"].(map[string]any)["tasks"].([]any)
+				podSpec := tasks[0].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+				podSpec["nodeSelector"] = map[string]any{"node": "stolen"}
+			},
+		},
+		{
+			name: "job added container resource request",
+			base: job,
+			mutate: func(obj *unstructured.Unstructured) {
+				tasks := obj.Object["spec"].(map[string]any)["tasks"].([]any)
+				podSpec := tasks[0].(map[string]any)["template"].(map[string]any)["spec"].(map[string]any)
+				container := podSpec["containers"].([]any)[0].(map[string]any)
+				container["resources"].(map[string]any)["requests"].(map[string]any)["example.com/gpu"] = "2"
+			},
+		},
+		{
+			name: "job changed retry default",
+			base: job,
+			mutate: func(obj *unstructured.Unstructured) {
+				obj.Object["spec"].(map[string]any)["maxRetry"] = int64(30)
+			},
+		},
+		{
+			name: "job unreviewed extra retry policy",
+			base: job,
+			mutate: func(obj *unstructured.Unstructured) {
+				obj.Object["spec"].(map[string]any)["ttlSecondsAfterFinished"] = int64(0)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			existing := tt.base.DeepCopy()
+			tt.mutate(existing)
+			if action, err := classifyExistingObject(tt.base, existing); err == nil {
+				t.Fatalf("unreviewed spec drift was adopted: action=%q", action)
+			}
+		})
+	}
+}
