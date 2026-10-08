@@ -4,7 +4,7 @@
 set -euo pipefail
 
 die() { printf 'VOLCANO API CONTRACT: BLOCKED: %s\n' "$*" >&2; exit 2; }
-for tool in git kubectl jq mktemp sha256sum; do
+for tool in git kubectl jq sha256sum; do
   command -v "$tool" >/dev/null || die "missing $tool"
 done
 
@@ -20,7 +20,7 @@ actual_sha="$(git rev-parse HEAD 2>/dev/null)" || die "run from the reviewed git
 kubectl --context "$context" get crd queues.scheduling.volcano.sh >/dev/null ||
   die "Volcano Queue CRD is absent"
 kubectl --context "$context" api-resources --api-group=scheduling.volcano.sh -o name |
-  grep -qx 'queues' || die "Queue GVR is not served"
+  grep -Eqx 'queues(\\.scheduling\\.volcano\\.sh)?' || die "Queue GVR is not served"
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 evidence="${STAGE_B_VOLCANO_API_EVIDENCE_DIR:-${TMPDIR:-/tmp}/volcano-api-${actual_sha:0:12}-$timestamp}"
@@ -33,8 +33,19 @@ printf 'head_sha\t%s\ncontext\t%s\nresource\t%s\nstarted_utc\t%s\n' \
 created=0
 cleanup() {
   if [[ "$created" == "1" ]]; then
-    kubectl --context "$context" delete queues.scheduling.volcano.sh "$name" \
-      --ignore-not-found=true --wait=true --timeout=45s >"$evidence/cleanup.log" 2>&1 || true
+    # A failed/ambiguous create may have hit an existing Queue name. Never
+    # delete by name unless the isolated request's nonce still owns it.
+    if kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
+      >"$evidence/pre-cleanup-get.json" 2>"$evidence/cleanup-get.stderr"; then
+      if jq -e --arg token "$name" \
+        '.metadata.annotations["stageb.volcano.probe/token"] == $token' \
+        "$evidence/pre-cleanup-get.json" >/dev/null; then
+        kubectl --context "$context" delete queues.scheduling.volcano.sh "$name" \
+          --ignore-not-found=true --wait=true --timeout=45s >"$evidence/cleanup.log" 2>&1 || true
+      else
+        printf 'REFUSED: cleanup sees another owner\\n' >"$evidence/cleanup.log"
+      fi
+    fi
   fi
 }
 trap cleanup EXIT
@@ -49,15 +60,16 @@ cat >"$evidence/request.json" <<EOF
       "ai.compute/provider": "volcano",
       "ai.compute/pool-id": "stageb-api-probe",
       "ai.compute/accelerator-class": "whole-gpu",
-      "ai.compute/generation": "4"
+      "ai.compute/generation": "4",
+      "stageb.volcano.probe/token": "$name"
     }
   },
   "spec": {"capability": {"nvidia.com/gpu": "8"}}
 }
 EOF
 
-# If the create request times out, record the ambiguous result, and still
-# attempt cleanup by the unique name rather than assuming no side effect.
+# If CREATE times out, the side effect is ambiguous. Cleanup must verify
+# the nonce on an independently observed object before a name-based delete.
 created=1
 kubectl --context "$context" create -f "$evidence/request.json" -o json \
   >"$evidence/create-response.json" 2>"$evidence/create.stderr" ||
