@@ -349,13 +349,19 @@ outside the repository:
 The test fails closed if live server defaults disagree with the current
 reviewed comparator (notably `reclaimable` and `dequeueStrategy`), if any
 CAS/identity step is ambiguous, or if it cannot independently prove cleanup.
-On ambiguous CREATE, a unique test-ownership annotation is checked before
-attempting cleanup; cleanup then uses raw Kubernetes `DeleteOptions` with the
-independently observed **UID and resourceVersion preconditions**. Unlike
-`kubectl delete queues/<name>`, this is an API-side atomic identity fence:
-a replaced/updated resource must return `409` and remain untouched. A final
-GET must observe NotFound before declaring the probe PASS. Another owner's
-same-name Queue is never intentionally deleted.
+On successful CREATE, the test records the API-server-issued **UID from
+the CREATE response**. Before cleanup, a fresh GET must match that original
+UID, the unique test nonce, and a nonempty live resourceVersion. Cleanup then
+uses raw Kubernetes `DeleteOptions` with those observed UID and RV
+preconditions. Unlike `kubectl delete queues/<name>`, this enforces atomic
+identity at the API server; replaced/updated resources return `409` and are
+not silently deleted. A final GET must observe NotFound before PASS.
+
+If CREATE returns an ambiguous/lost ACK or no server UID, **automatic
+cleanup is blocked**: the test may leave an isolated Queue requiring manual
+investigation. A matching name or token alone never authorizes deletion of
+an unknown UID. Inspect the persisted probe evidence and perform deliberate
+operator cleanup only after independently proving ownership.
 
 **This tests Kubernetes object CAS and defaulting, not the actual Volcano
 scheduler applying quota, lease takeover, multi-agent fencing or GPU runtime
