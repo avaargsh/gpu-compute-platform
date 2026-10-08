@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func fakeVolcanoDynamicClient() *dynamicfake.FakeDynamicClient {
@@ -153,6 +154,20 @@ func TestDynamicProjectedObjectClientDeleteConfirmsGoneForVolcanoJob(t *testing.
 		t.Fatal(err)
 	}
 
+	// Unlike a real API server, the dynamic fake does not allocate metadata
+	// on CREATE. Seed it explicitly; production DELETE must never fall back
+	// to an unguarded name-only operation.
+	resource := client.Resource(volcanoJobGVR).Namespace(expected.GetNamespace())
+	stored, err := resource.Get(context.Background(), expected.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.SetUID("volcano-job-uid")
+	stored.SetResourceVersion("17")
+	if _, err := resource.Update(context.Background(), stored, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
 	gone, err := deleteProjectedObject(
 		context.Background(),
 		transport,
@@ -170,6 +185,27 @@ func TestDynamicProjectedObjectClientDeleteConfirmsGoneForVolcanoJob(t *testing.
 		Get(context.Background(), expected.GetName(), metav1.GetOptions{})
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("deleted VolcanoJob error=%v, want NotFound", err)
+	}
+
+	var deleteCalls int
+	for _, action := range client.Actions() {
+		if !action.Matches("delete", "jobs") {
+			continue
+		}
+		deleteCalls++
+		deletion, ok := action.(k8stesting.DeleteAction)
+		if !ok {
+			t.Fatalf("unexpected DELETE action type: %T", action)
+		}
+		preconditions := deletion.GetDeleteOptions().Preconditions
+		if preconditions == nil || preconditions.UID == nil ||
+			*preconditions.UID != "volcano-job-uid" ||
+			preconditions.ResourceVersion == nil || *preconditions.ResourceVersion != "17" {
+			t.Fatalf("Volcano DELETE missing UID/RV preconditions: %#v", preconditions)
+		}
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("delete calls=%d, want 1", deleteCalls)
 	}
 }
 
