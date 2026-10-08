@@ -66,6 +66,7 @@ run_gate() {
   printf '%s: %s (exit %d)\n' "$gate" "$result" "$rc"
 }
 
+run_gate shell-syntax bash -n scripts/stage-b-local-gate.sh scripts/e2e/volcano-queue-apiserver-contract.sh
 run_gate format make fmt-check
 run_gate vet go vet ./...
 run_gate volcano-contract make stage-b-volcano-contract
