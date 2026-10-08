@@ -9,6 +9,37 @@ die() {
   exit 2
 }
 
+# The Postgres contract tests execute schema setup and TRUNCATE.
+# Only direct loopback connections to explicitly named *_test databases are
+# allowed. Extra query params (host/port/dbname/service) may redirect pgx.
+is_local_test_dsn() {
+  local dsn="$1"
+  [[ "$dsn" =~ ^postgres(ql)?://([^/@]+@)?(localhost|127\.0\.0\.1)(:[0-9]+)?/([a-zA-Z0-9_]*_test)(\?sslmode=(disable|require|verify-full))?$ ]]
+}
+
+# Run this independently, without Go, Git, PostgreSQL or an existing clone.
+# The main gate also records it as a mandatory self-test before Go checks.
+if [[ "${1:-}" == "--self-test" ]]; then
+  for dsn in \
+    "postgres://gpu:gpu@localhost:5432/gpu_platform_test?sslmode=disable" \
+    "postgresql://gpu@127.0.0.1/another_test?sslmode=require" \
+    "postgres://gpu@localhost/cas_test"; do
+    is_local_test_dsn "$dsn" || die "safe test DSN was rejected: $dsn"
+  done
+  for dsn in \
+    "postgres://gpu@10.0.0.5/gpu_platform_test" \
+    "postgres://gpu@localhost/production" \
+    "postgres://gpu@localhost/gpu_platform_test?host=10.0.0.5" \
+    "postgres://gpu@localhost/gpu_platform_test?dbname=production" \
+    "postgres://gpu@localhost/gpu_platform_test?port=5433" \
+    "postgres://gpu@localhost/gpu_platform_test?sslmode=disable&host=10.0.0.5"; do
+    if is_local_test_dsn "$dsn"; then
+      die "unsafe test DSN was accepted: $dsn"
+    fi
+  done
+  printf "LOCAL STAGE B GATE: DSN guard self-test PASS (3 allowed, 6 denied)\n"
+  exit 0
+fi
 command -v git >/dev/null || die "git is required"
 command -v go >/dev/null || die "go is required"
 command -v sha256sum >/dev/null || die "sha256sum is required"
@@ -21,9 +52,7 @@ expected_sha="${STAGE_B_EXPECTED_SHA:-}"
 [[ "$head_sha" == "$expected_sha" ]] || die "HEAD $head_sha differs from frozen $expected_sha"
 [[ -z "$(git -C "$repo_root" status --porcelain --untracked-files=normal)" ]] || die "working tree is not clean"
 [[ -n "${TEST_POSTGRES_DSN:-}" ]] || die "TEST_POSTGRES_DSN is required; skipping PostgreSQL is not full acceptance"
-# PostgreSQL contract tests execute schema.sql and TRUNCATE tables.
-# Require a loopback instance and an explicit *_test database.
-if [[ ! "$TEST_POSTGRES_DSN" =~ ^postgres(ql)?://([^/@]+@)?(localhost|127\.0\.0\.1)(:[0-9]+)?/([a-zA-Z0-9_]*_test)(\?sslmode=(disable|require|verify-full))?$ ]]; then
+if ! is_local_test_dsn "$TEST_POSTGRES_DSN"; then
   die "TEST_POSTGRES_DSN must use a localhost/127.0.0.1 *_test database with no query overrides (except sslmode); never point Stage B contracts at shared/production databases"
 fi
 
@@ -67,6 +96,7 @@ run_gate() {
 }
 
 run_gate shell-syntax bash -n scripts/stage-b-local-gate.sh scripts/e2e/volcano-queue-apiserver-contract.sh
+run_gate dsn-guard bash scripts/stage-b-local-gate.sh --self-test
 run_gate format make fmt-check
 run_gate vet go vet ./...
 run_gate volcano-contract make stage-b-volcano-contract
