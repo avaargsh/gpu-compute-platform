@@ -20,7 +20,7 @@ actual_sha="$(git rev-parse HEAD 2>/dev/null)" || die "run from the reviewed git
 kubectl --context "$context" get crd queues.scheduling.volcano.sh >/dev/null ||
   die "Volcano Queue CRD is absent"
 kubectl --context "$context" api-resources --api-group=scheduling.volcano.sh -o name |
-  grep -Eqx 'queues(\\.scheduling\\.volcano\\.sh)?' || die "Queue GVR is not served"
+  grep -Eqx 'queues(\.scheduling\.volcano\.sh)?' || die "Queue GVR is not served"
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 evidence="${STAGE_B_VOLCANO_API_EVIDENCE_DIR:-${TMPDIR:-/tmp}/volcano-api-${actual_sha:0:12}-$timestamp}"
@@ -43,7 +43,7 @@ cleanup() {
         kubectl --context "$context" delete queues.scheduling.volcano.sh "$name" \
           --ignore-not-found=true --wait=true --timeout=45s >"$evidence/cleanup.log" 2>&1 || true
       else
-        printf 'REFUSED: cleanup sees another owner\\n' >"$evidence/cleanup.log"
+        printf 'REFUSED: cleanup sees another owner\n' >"$evidence/cleanup.log"
       fi
     fi
   fi
