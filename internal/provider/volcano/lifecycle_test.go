@@ -12,14 +12,14 @@ import (
 )
 
 type fakeLifecycleClient struct {
-	object                *unstructured.Unstructured
-	getErr                error
-	deleteErr             error
-	deleteSideEffect      bool
-	deleteCalls           int
-	omitServerIdentity    bool
-	replacementOnDelete   *unstructured.Unstructured
-	deletedUID            types.UID
+	object                 *unstructured.Unstructured
+	getErr                 error
+	deleteErr              error
+	deleteSideEffect       bool
+	deleteCalls            int
+	omitServerIdentity     bool
+	replacementOnDelete    *unstructured.Unstructured
+	deletedUID             types.UID
 	deletedResourceVersion string
 }
 
@@ -294,7 +294,6 @@ func TestDeleteProjectedObjectAmbiguousReadDoesNotDeleteBlindly(t *testing.T) {
 		)
 	}
 }
-
 
 func TestDeleteProjectedObjectUsesVerifiedServerIdentity(t *testing.T) {
 	expected, err := ProjectWorkload(adoptionWorkloadProjection())
