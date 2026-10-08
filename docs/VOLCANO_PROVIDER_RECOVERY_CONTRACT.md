@@ -168,9 +168,10 @@ The tests prove:
 - conflicting generation or immutable spec fails closed;
 - an ambiguous GET error never falls through to blind CREATE.
 
-This is still a contract harness. The client is fake/injected and there is no
-Volcano dynamic client, queue/job observation implementation, deletion path, or
-production provider registration yet.
+This is still a contract harness. The client is fake/injected at this layer.
+A later slice adds a narrow Kubernetes dynamic transport plus independent
+observation/deletion primitives, but there is still no registered production
+Volcano provider.
 
 ## Kubernetes dynamic transport proof
 
@@ -184,9 +185,70 @@ The transport supports only `GET` and `CREATE`. Tests use the Kubernetes
 dynamic fake client to prove native NotFound behavior, Queue/VolcanoJob
 create-then-adopt replay, and fail-closed GVK/scope validation.
 
-This still is **not** a registered `provider.Adapter`. Observation, deletion,
-status translation, evidence, real Volcano CRDs, kind+Volcano acceptance and
-real-GPU execution remain separate gates.
+This still is **not** a registered `provider.Adapter`.
+
+## Independent observation and observe-until-gone deletion
+
+The next Stage B slice extends the narrow dynamic transport with `DELETE` and
+adds unregistered lifecycle primitives.
+
+Observation is an independent provider read after mutation:
+
+- GET the deterministic Queue/VolcanoJob identity;
+- NotFound is reported as non-existence without creating anything;
+- an existing object must pass the same strict
+  provider/resource/generation/immutable-spec classifier used for adoption;
+- VolcanoJob `status.state.phase` and Kubernetes UID are read as provider
+  reality only after ownership is proven.
+
+Deletion deliberately does **not** treat a successful DELETE response as final
+convergence:
+
+```text
+GET deterministic identity
+  |
+  +-- NotFound -> Gone=true
+  |
+  +-- exists -> strict ownership/spec classify
+                  |
+                  +-- conflict -> fail closed; never DELETE
+                  |
+                  +-- owned -> DELETE
+                                |
+                                +-- NotFound -> Gone=true
+                                +-- transport error -> return error
+                                |                    next reconcile re-observes
+                                |
+                                +-- success -> fresh GET
+                                               |
+                                               +-- NotFound -> Gone=true
+                                               +-- still exists -> Gone=false
+```
+
+The tests prove:
+
+- independent observation does not mutate provider state;
+- observation rejects conflicting generations;
+- deletion refuses a deterministic-name collision/foreign object before any
+  DELETE call;
+- DELETE acknowledgement alone is insufficient for `Gone=true`;
+- successful delete converges only after observed NotFound;
+- delete-committed/lost-ACK replay converges from NotFound without a duplicate
+  destructive call;
+- an ambiguous pre-delete GET never falls through to blind DELETE;
+- the Kubernetes dynamic fake transport performs real GET/CREATE/DELETE
+  semantics for the projected Volcano GVRs.
+
+Run the isolated Stage B proof with:
+
+```bash
+make stage-b-volcano-contract
+```
+
+This gate is intentionally separate from `make acceptance-contract`: Volcano
+remains an unregistered falsification target. Full provider status translation,
+evidence projection into the platform API, real Volcano CRDs, kind+Volcano
+acceptance, process-takeover proof, and real-GPU execution remain separate gates.
 
 ## Create-or-adopt
 
