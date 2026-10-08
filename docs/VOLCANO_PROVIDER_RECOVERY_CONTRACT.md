@@ -201,8 +201,18 @@ Observation is an independent provider read after mutation:
 - VolcanoJob `status.state.phase` and Kubernetes UID are read as provider
   reality only after ownership is proven.
 
+Deletion also closes the GET -> DELETE time-of-check/time-of-use window:
+the pre-delete GET must return a non-empty Kubernetes UID and resourceVersion;
+the transport issues DELETE with *both* values in
+`metav1.DeleteOptions.Preconditions`. Missing metadata fails closed and a
+replaced or updated object causes an API conflict instead of a name-only
+destructive action. The fake dynamic-client test asserts these options, since
+its object tracker does not enforce real API-server preconditions.
+
 Deletion deliberately does **not** treat a successful DELETE response as final
-convergence:
+convergence. A DELETE NotFound response is **also** re-observed before Gone,
+because the original object may have disappeared and the deterministic name
+may already belong to another object:
 
 ```text
 GET deterministic identity
@@ -236,8 +246,12 @@ The tests prove:
 - delete-committed/lost-ACK replay converges from NotFound without a duplicate
   destructive call;
 - an ambiguous pre-delete GET never falls through to blind DELETE;
-- the Kubernetes dynamic fake transport performs real GET/CREATE/DELETE
-  semantics for the projected Volcano GVRs.
+- an object without server-issued UID/resourceVersion cannot be deleted;
+- DELETE carries observed UID and resourceVersion as API-side preconditions;
+- DELETE NotFound followed by same-name foreign replacement fails closed;
+- the Kubernetes dynamic fake transport exercises GET/CREATE/DELETE
+  request shape for the projected Volcano GVRs (without simulating the
+  API server's atomic precondition enforcement).
 
 Run the isolated Stage B proof with:
 
