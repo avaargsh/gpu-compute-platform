@@ -133,3 +133,82 @@ func TestDynamicProjectedObjectClientRejectsUnsupportedOrMisScopedObjects(t *tes
 		t.Fatal("cluster-scoped Volcano Queue with namespace must fail closed")
 	}
 }
+
+
+func TestDynamicProjectedObjectClientDeleteConfirmsGoneForVolcanoJob(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := fakeVolcanoDynamicClient()
+	transport, err := newDynamicProjectedObjectClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ensureProjectedObject(
+		context.Background(),
+		transport,
+		expected,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	gone, err := deleteProjectedObject(
+		context.Background(),
+		transport,
+		expected,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gone {
+		t.Fatal("dynamic fake delete should be observed as gone")
+	}
+
+	_, err = client.Resource(volcanoJobGVR).
+		Namespace(expected.GetNamespace()).
+		Get(context.Background(), expected.GetName(), metav1.GetOptions{})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("deleted VolcanoJob error=%v, want NotFound", err)
+	}
+}
+
+func TestDynamicProjectedObjectClientObserveReadsVolcanoJobPhase(t *testing.T) {
+	expected, err := ProjectWorkload(adoptionWorkloadProjection())
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing := expected.DeepCopy()
+	existing.SetUID("job-uid")
+	existing.Object["status"] = map[string]any{
+		"state": map[string]any{
+			"phase": "Running",
+		},
+	}
+
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{
+			volcanoQueueGVR: "QueueList",
+			volcanoJobGVR:   "JobList",
+		},
+		existing,
+	)
+	transport, err := newDynamicProjectedObjectClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	observation, err := observeProjectedObject(
+		context.Background(),
+		transport,
+		expected,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !observation.Exists || observation.Phase != "Running" || observation.UID != "job-uid" {
+		t.Fatalf("unexpected dynamic observation: %#v", observation)
+	}
+}
