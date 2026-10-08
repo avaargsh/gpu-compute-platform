@@ -372,7 +372,8 @@ Fail closed when deterministic name collision or ownership metadata indicates:
 
 - another platform resource;
 - another provider;
-- another generation;
+- a differing generation for an immutable VolcanoJob, or a Queue generation
+  outside the strictly verified monotonic Queue CAS path described above;
 - a different immutable Workload projection.
 
 Do not delete-and-recreate a conflicting object to make reconciliation appear
