@@ -21,36 +21,40 @@ type queueObjectUpdater interface {
 // ensurePoolQueue admits only a monotonic generation change for the same Queue
 // identity. UPDATE is a single resourceVersion-CAS attempt. Any uncertainty is
 // returned to the Agent, which restarts reconciliation from GET.
+// A successful UPDATE also returns its server UID; the next independent GET
+// must prove the same object survived, not merely the same name/projection.
 func (p *Provider) ensurePoolQueue(
 	ctx context.Context,
 	expected *unstructured.Unstructured,
-) (existingObjectAction, error) {
+) (existingObjectAction, string, error) {
 	if _, err := classifyExistingObject(expected, nil); err != nil {
-		return "", err
+		return "", "", err
 	}
 	current, err := p.client.Get(ctx, expected)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return ensureProjectedObject(ctx, p.client, expected)
+			action, err := ensureProjectedObject(ctx, p.client, expected)
+			return action, "", err
 		}
-		return "", err
+		return "", "", err
 	}
 	want, have, err := validateQueueCASIdentity(expected, current)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if have == want {
-		return classifyExistingObject(expected, current)
+		action, err := classifyExistingObject(expected, current)
+		return action, "", err
 	}
 	if have > want {
-		return "", providerObjectConflict("Queue generation rollback: have %d want %d", have, want)
+		return "", "", providerObjectConflict("Queue generation rollback: have %d want %d", have, want)
 	}
 	updater, ok := p.client.(queueObjectUpdater)
 	if !ok {
-		return "", fmt.Errorf("Volcano Queue CAS transport is unavailable")
+		return "", "", fmt.Errorf("Volcano Queue CAS transport is unavailable")
 	}
 	if current.GetUID() == "" || current.GetResourceVersion() == "" {
-		return "", providerObjectConflict("Queue UPDATE requires observed UID and resourceVersion")
+		return "", "", providerObjectConflict("Queue UPDATE requires observed UID and resourceVersion")
 	}
 
 	candidate := current.DeepCopy()
@@ -58,10 +62,10 @@ func (p *Provider) ensurePoolQueue(
 	// change the one projected mutable field, accelerator capability.
 	capability, _, err := unstructured.NestedStringMap(expected.Object, "spec", "capability")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if err := unstructured.SetNestedStringMap(candidate.Object, capability, "spec", "capability"); err != nil {
-		return "", err
+		return "", "", err
 	}
 	annotations := candidate.GetAnnotations()
 	annotations[generationAnnotation] = expected.GetAnnotations()[generationAnnotation]
@@ -71,15 +75,15 @@ func (p *Provider) ensurePoolQueue(
 
 	updated, err := updater.Update(ctx, candidate)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if updated == nil || updated.GetUID() != current.GetUID() {
-		return "", providerObjectConflict("Queue UPDATE returned missing or changed UID")
+		return "", "", providerObjectConflict("Queue UPDATE returned missing or changed UID")
 	}
 	if _, err := classifyExistingObject(expected, updated); err != nil {
-		return "", fmt.Errorf("Queue UPDATE response is not the desired generation: %w", err)
+		return "", "", fmt.Errorf("Queue UPDATE response is not the desired generation: %w", err)
 	}
-	return existingObjectUpdate, nil
+	return existingObjectUpdate, string(updated.GetUID()), nil
 }
 
 // A prior generation is not free-form mutable state. Only its projected
