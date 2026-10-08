@@ -340,7 +340,7 @@ func TestDeleteProjectedObjectNotFoundDoesNotHideReplacement(t *testing.T) {
 	// while a foreign object takes the same deterministic name. NotFound
 	// from DELETE cannot be treated as a convergence receipt.
 	client := &fakeLifecycleClient{
-		object: expected.DeepCopy(),
+		object:              expected.DeepCopy(),
 		replacementOnDelete: replacement,
 		deleteErr: apierrors.NewNotFound(
 			schema.GroupResource{Group: volcanoJobGVR.Group, Resource: volcanoJobGVR.Resource},
