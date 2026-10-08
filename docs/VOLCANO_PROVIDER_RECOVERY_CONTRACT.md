@@ -325,13 +325,21 @@ git pull --ff-only
 STAGE_B_EXPECTED_SHA="$(git rev-parse HEAD)" \
 STAGE_B_KIND_CONTEXT="kind-stageb-volcano" \
 STAGE_B_KIND_MUTATION_ACK=1 \
+STAGE_B_EXPECTED_QUEUE_CRD_SPEC_SHA256="<64-hex-pinned-schema-digest>" \
 bash scripts/e2e/volcano-queue-apiserver-contract.sh
 ```
+
+The 64-hex schema digest is a **reviewed release baseline**: compute it
+from a trusted copy of the Queue CRD **as persisted after Kubernetes CRD
+defaulting** (not from the same live cluster run being tested), using
+`jq -S '.spec' pinned-queue-crd.json | sha256sum`. Record the Volcano
+release/chart and baseline provenance alongside the pinned hash. The test
+blocks before creating any resource if the installed Queue CRD schema differs.
 
 This emits **versioned, reviewable** evidence under a unique directory
 outside the repository:
 - original CREATE request, fresh readback and exact server default values;
-- installed Queue CRD JSON and Kubernetes version JSON;
+- installed Queue CRD JSON, canonical CRD spec SHA256 and Kubernetes version JSON;
 - a real stale-resourceVersion UPDATE rejected as `409 Conflict`;
 - an intentionally stale UID/RV **conditional DELETE** rejected as `409 Conflict`, followed by a fresh GET proving the Queue survived;
 - a new-GET-based quota CAS from 8 to 16 with the same resource UID;
