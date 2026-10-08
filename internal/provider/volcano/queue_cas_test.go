@@ -110,7 +110,8 @@ func TestVolcanoQueueCASAdvancePreservesControllerMetadata(t *testing.T) {
 	old.SetAnnotations(annotations)
 	old.SetLabels(map[string]string{"team": "data"})
 	old.SetFinalizers([]string{"volcano.sh/protect"})
-	old.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "v1", Kind: "ConfigMap", Name: "external", UID: "parent-uid"}})
+	// Queue is cluster-scoped; use a cluster-scoped owner kind in the fixture.
+	old.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "v1", Kind: "Namespace", Name: "external", UID: "parent-uid"}})
 	old.Object["spec"].(map[string]any)["parent"] = "root"
 	client := &queueCASTestClient{object: old}
 	p := newProvider(client)
@@ -120,7 +121,10 @@ func TestVolcanoQueueCASAdvancePreservesControllerMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	if observed.ObservedGeneration != 5 || client.updateCalls != 1 ||
-		len(observed.Conditions) != 1 || observed.Conditions[0].Status != "True" {
+		len(observed.Conditions) != 2 ||
+		observed.Conditions[0].Status != "True" ||
+		observed.Conditions[1].Type != "QuotaApplied" ||
+		observed.Conditions[1].Status != "Unknown" {
 		t.Fatalf("Queue CAS did not converge: %#v updateCalls=%d", observed, client.updateCalls)
 	}
 	if client.lastUpdate.Object["spec"].(map[string]any)["parent"] != "root" {
