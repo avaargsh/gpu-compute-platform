@@ -382,8 +382,8 @@ worktree** without mutating the developer's current checkout:
 ```bash
 git fetch origin feat/stage-b-volcano-queue-cas-v2
 git switch feat/stage-b-volcano-queue-cas-v2
-STAGE_B_EXPECTED_SHA="$(git rev-parse HEAD)" \\
-TEST_POSTGRES_DSN="postgres://<user>:<password>@localhost:5432/<db>?sslmode=disable" \\
+STAGE_B_EXPECTED_SHA="$(git rev-parse HEAD)" \
+TEST_POSTGRES_DSN="postgres://<user>:<password>@localhost:5432/<db>?sslmode=disable" \
 bash scripts/stage-b-local-gate.sh
 ```
 
