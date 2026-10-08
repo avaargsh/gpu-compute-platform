@@ -52,7 +52,6 @@ func (c *dynamicProjectedObjectClient) Create(
 	return resource.Create(ctx, expected.DeepCopy(), metav1.CreateOptions{})
 }
 
-
 func (c *dynamicProjectedObjectClient) Update(
 	ctx context.Context,
 	observed *unstructured.Unstructured,
