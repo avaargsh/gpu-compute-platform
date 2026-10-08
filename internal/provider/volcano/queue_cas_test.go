@@ -198,6 +198,17 @@ func TestVolcanoQueueCASRejectsForeignTakeoverAfterConflict(t *testing.T) {
 	}
 }
 
+
+func TestVolcanoQueueCASSameGenerationSpecDriftFailsClosed(t *testing.T) {
+	client := &queueCASTestClient{object: oldQueueWithServerIdentity(t)}
+	desired := adoptionPoolProjection()
+	desired.Accelerators = []domain.AcceleratorRequest{{Class: "h100-80g", Quota: 16}}
+	_, err := newProvider(client).ReconcilePool(context.Background(), desired)
+	if err == nil || baseprovider.IsRetryable(err) || client.updateCalls != 0 {
+		t.Fatalf("same-generation spec change must fail closed: err=%v updates=%d", err, client.updateCalls)
+	}
+}
+
 func TestVolcanoQueueCASRejectsUnreviewedOrMalformedExistingQueue(t *testing.T) {
 	tests := []struct {
 		name   string
