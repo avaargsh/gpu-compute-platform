@@ -193,7 +193,8 @@ The next Stage B slice wires the unregistered ensure loop to a narrow
 - `scheduling.volcano.sh/v1beta1/queues` (cluster-scoped);
 - `batch.volcano.sh/v1alpha1/jobs` (namespaced).
 
-The transport supports only `GET` and `CREATE`. Tests use the Kubernetes
+That early transport slice supported only `GET` and `CREATE`; the later
+unregistered slices add conditional DELETE and Queue-only CAS UPDATE. Tests use the Kubernetes
 dynamic fake client to prove native NotFound behavior, Queue/VolcanoJob
 create-then-adopt replay, and fail-closed GVK/scope validation.
 
@@ -300,6 +301,51 @@ production Cluster Runtime or advertised as an executable cluster capability.
 This is an executable contract/falsification target only. The Kueue path
 remains the only production execution path. Other overlapping old Stage B
 draft PRs must be consolidated without reintroducing a weaker DELETE path.
+
+
+## Monotonic Queue-generation CAS (stacked Stage B experiment)
+
+PR #56 is stacked on the safe, **unregistered** adapter of PR #55.
+It replaces the older PR #52 approach rather than copying its name-only DELETE
+or claiming that `Running` proves Workload readiness. Kueue is still the only
+production provider.
+
+When `ReconcilePool` observes a Queue at a **lower** generation:
+
+1. Re-read by deterministic Queue identity. Require exact GVK, name, scope,
+   provider, pool, accelerator class and a positive stored generation.
+2. Prove that the old spec differs from the projected Queue only by the
+   accelerator **quota** for the **same** extended-resource key. Reject extra
+   resources, unreviewed spec/default values, unexpected `ai.compute/*`
+   metadata and objects already terminating.
+3. Require Kubernetes-issued nonempty `UID` and `resourceVersion`. Carry
+   these on UPDATE, preserving third-party labels/annotations, ownerReferences,
+   finalizers and reviewed Volcano defaults. Only change the quota and the
+   `ai.compute/generation` value; never submit controller-owned `status`.
+4. Treat a `409 Conflict` or ambiguous/lost UPDATE acknowledgement as a
+   **retryable reconciliation error**, *not* an instruction to retry the same
+   mutation. Agent backoff must start from a fresh GET and revalidate identity.
+5. On successful UPDATE response, require the same UID and exact new projection.
+   Reconcile then independently GETs and validates the observed Queue.
+   If an UPDATE committed but ACK was lost, replay adopts the already-updated
+   generation without issuing a duplicate UPDATE.
+
+A same-generation immutable-spec change and a rollback to an older generation
+are always rejected. VolcanoJob remains immutable; its lifecycle uses the
+previous create/adopt and conditional-DELETE code paths.
+
+**Safety boundary:** resourceVersion provides a server-side optimistic
+concurrency compare for UPDATE; fake clients are not proof of API-server atomic
+behavior, real defaulting, lease takeover or post-update controller reality.
+Actual kind+Volcano acceptance, a deliberate conflict/replacement experiment,
+and independent local tests remain outstanding before this stacked draft can
+be promoted. No real-GPU/Volcano-production claim is attached to these tests.
+
+Run the CPU-only focused suite with `make stage-b-volcano-contract` and verify
+`go test ./...`, `go vet ./...`, `make fmt-check`,
+`make acceptance-contract`, and `make supply-chain-check` on the same SHA.
+Do not merge until evidence is recorded. The authoritative production registry
+still contains only `kueue`.
 
 ## Create-or-adopt
 
