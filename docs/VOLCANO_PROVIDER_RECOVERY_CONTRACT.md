@@ -333,6 +333,7 @@ outside the repository:
 - original CREATE request, fresh readback and exact server default values;
 - installed Queue CRD JSON and Kubernetes version JSON;
 - a real stale-resourceVersion UPDATE rejected as `409 Conflict`;
+- an intentionally stale UID/RV **conditional DELETE** rejected as `409 Conflict`, followed by a fresh GET proving the Queue survived;
 - a new-GET-based quota CAS from 8 to 16 with the same resource UID;
 - final independent GET and cleanup NotFound evidence;
 - per-file SHA256 of JSON receipts and per-gate status.
@@ -341,8 +342,12 @@ The test fails closed if live server defaults disagree with the current
 reviewed comparator (notably `reclaimable` and `dequeueStrategy`), if any
 CAS/identity step is ambiguous, or if it cannot independently prove cleanup.
 On ambiguous CREATE, a unique test-ownership annotation is checked before
-attempting cleanup; another owner's same-name Queue is never intentionally
-deleted.
+attempting cleanup; cleanup then uses raw Kubernetes `DeleteOptions` with the
+independently observed **UID and resourceVersion preconditions**. Unlike
+`kubectl delete queues/<name>`, this is an API-side atomic identity fence:
+a replaced/updated resource must return `409` and remain untouched. A final
+GET must observe NotFound before declaring the probe PASS. Another owner's
+same-name Queue is never intentionally deleted.
 
 **This tests Kubernetes object CAS and defaulting, not the actual Volcano
 scheduler applying quota, lease takeover, multi-agent fencing or GPU runtime
@@ -430,12 +435,15 @@ worktree** without mutating the developer's current checkout:
 git fetch origin feat/stage-b-volcano-queue-cas-v2
 git switch feat/stage-b-volcano-queue-cas-v2
 STAGE_B_EXPECTED_SHA="$(git rev-parse HEAD)" \
-TEST_POSTGRES_DSN="postgres://<user>:<password>@localhost:5432/<db>?sslmode=disable" \
+TEST_POSTGRES_DSN="postgres://<user>:<password>@localhost:5432/gpu_platform_test?sslmode=disable" \
 bash scripts/stage-b-local-gate.sh
 ```
 
-Replace the DSN placeholders with a real, reachable PostgreSQL test database.
-The script **blocks** on an absent DSN, dirty checkout or SHA mismatch.
+Replace the credentials with those for a dedicated local PostgreSQL `*_test` database.
+The contract tests execute schema setup and `TRUNCATE`; the script now **rejects**
+non-loopback PostgreSQL hosts, databases without the `_test` suffix, absent DSNs,
+dirty checkouts and SHA mismatches. A loopback host can still be a tunnel:
+verify the actual database target before running. Never point this at production.
 It uses a detached worktree, runs fmt, vet, focused Volcano tests, Volcano
 race tests, full Go tests, acceptance contract, supply-chain checks and build,
 and emits per-gate logs, SHA256s and a gate table in an external evidence
