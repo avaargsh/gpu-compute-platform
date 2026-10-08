@@ -21,6 +21,11 @@ expected_sha="${STAGE_B_EXPECTED_SHA:-}"
 [[ "$head_sha" == "$expected_sha" ]] || die "HEAD $head_sha differs from frozen $expected_sha"
 [[ -z "$(git -C "$repo_root" status --porcelain --untracked-files=normal)" ]] || die "working tree is not clean"
 [[ -n "${TEST_POSTGRES_DSN:-}" ]] || die "TEST_POSTGRES_DSN is required; skipping PostgreSQL is not full acceptance"
+# PostgreSQL contract tests execute schema.sql and TRUNCATE tables.
+# Require a loopback instance and an explicit *_test database.
+if [[ ! "$TEST_POSTGRES_DSN" =~ ^postgres(ql)?://([^/@]+@)?(localhost|127\.0\.0\.1)(:[0-9]+)?/([a-zA-Z0-9_]*_test)(\?.*)?$ ]]; then
+  die "TEST_POSTGRES_DSN must address a localhost/127.0.0.1 database named *_test; never point Stage B contracts at shared or production databases"
+fi
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 evidence_root="${STAGE_B_EVIDENCE_DIR:-${TMPDIR:-/tmp}/stage-b-local-${head_sha:0:12}-$stamp}"
