@@ -46,10 +46,10 @@ cleanup() {
   if ! kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
     >"$evidence/pre-cleanup-get.json" 2>"$evidence/cleanup-get.stderr"; then
     if grep -Eqi 'NotFound|not found' "$evidence/cleanup-get.stderr"; then
-      printf 'ALREADY_GONE\\n' >"$evidence/cleanup.log"
+      printf 'ALREADY_GONE\n' >"$evidence/cleanup.log"
       return 0
     fi
-    printf 'BLOCKED: cleanup GET was ambiguous\\n' >"$evidence/cleanup.log"
+    printf 'BLOCKED: cleanup GET was ambiguous\n' >"$evidence/cleanup.log"
     return 1
   fi
 
@@ -59,7 +59,7 @@ cleanup() {
     .metadata.uid != null and .metadata.uid != "" and
     .metadata.resourceVersion != null and .metadata.resourceVersion != ""
   ' "$evidence/pre-cleanup-get.json" >/dev/null; then
-    printf 'BLOCKED: cleanup ownership/UID/resourceVersion is unproven\\n' >"$evidence/cleanup.log"
+    printf 'BLOCKED: cleanup ownership/UID/resourceVersion is unproven\n' >"$evidence/cleanup.log"
     return 1
   fi
 
@@ -79,7 +79,7 @@ cleanup() {
     --raw "/apis/scheduling.volcano.sh/v1beta1/queues/$name" \
     -f "$evidence/delete-options.json" \
     >"$evidence/cleanup.log" 2>"$evidence/cleanup.stderr"; then
-    printf 'BLOCKED: UID/RV conditional DELETE failed or raced\\n' >>"$evidence/cleanup.log"
+    printf 'BLOCKED: UID/RV conditional DELETE failed or raced\n' >>"$evidence/cleanup.log"
     return 1
   fi
   # Waiting observes deletion; it performs no second destructive request.
@@ -192,4 +192,6 @@ if ! grep -Eqi 'NotFound|not found' "$evidence/post-cleanup-get.stderr"; then
   die "cannot independently prove cleanup NotFound"
 fi
 printf 'cleanup_observed_not_found\tPASS\n' >>"$evidence/gates.tsv"
+# Recompute after the conditional DELETE, including identity and cleanup receipts.
+sha256sum "$evidence/"*.json >"$evidence/artifact-sha256.txt"
 printf 'VOLCANO API CONTRACT: API SERVER PASS (scheduler application NOT PROVEN)\n'
