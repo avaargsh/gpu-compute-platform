@@ -54,7 +54,13 @@ func (p *Provider) ensurePoolQueue(
 	}
 
 	candidate := current.DeepCopy()
-	if err := unstructured.SetNestedField(candidate.Object, expected.Object["spec"], "spec"); err != nil {
+	// Preserve only already-reviewed controller defaults in the existing spec;
+	// change the one projected mutable field, accelerator capability.
+	capability, _, err := unstructured.NestedStringMap(expected.Object, "spec", "capability")
+	if err != nil {
+		return "", err
+	}
+	if err := unstructured.SetNestedStringMap(candidate.Object, capability, "spec", "capability"); err != nil {
 		return "", err
 	}
 	annotations := candidate.GetAnnotations()
@@ -102,7 +108,11 @@ func validateQueueCASIdentity(expected, current *unstructured.Unstructured) (int
 		}
 	}
 	for key, value := range current.GetLabels() {
-		if strings.HasPrefix(key, "ai.compute/") && expected.GetLabels()[key] != value {
+		if !strings.HasPrefix(key, "ai.compute/") {
+			continue
+		}
+		want, known := expected.GetLabels()[key]
+		if !known || want != value {
 			return 0, 0, providerObjectConflict("unexpected provider-owned Queue label %s", key)
 		}
 	}
