@@ -303,6 +303,40 @@ remains the only production execution path. Other overlapping old Stage B
 draft PRs must be consolidated without reintroducing a weaker DELETE path.
 
 
+## External Volcano Queue API findings (2026-10-08)
+
+The official Volcano Queue documentation at
+https://volcano.sh/docs/concepts/queue/ describes `status.state=Open` as
+**available to receive PodGroups**, not evidence that an updated GPU
+`spec.capability` quota has been applied by the scheduler. The upstream
+`QueueStatus` API type at
+https://github.com/volcano-sh/apis/blob/master/pkg/apis/scheduling/v1beta1/types.go
+does not expose `observedGeneration` for this purpose.
+
+Consequently, the Stage B unregistered adapter reports:
+- `ObservedGeneration`: only the generation annotation verified on a **fresh
+  Kubernetes GET**, not scheduler applied/reconciled generation.
+- `Ready=True` for `status.state=Open`: Queue admission availability only.
+- `QuotaApplied=Unknown`: no scheduler/controller application receipt yet,
+  including after an UPDATE reply and a same-generation retry/adopt.
+
+Neither an UPDATE ACK, a fresh GET, nor an Open status may be promoted into
+`QuotaApplied=True` without **independent scheduler/admission evidence**.
+The additional condition is intentionally visible to Stage B consumers. It
+is not a reason to register Volcano as a production adapter.
+
+A second **unresolved upstream-default mismatch** needs a real API-server
+probe: the current test-fixture allowlist admits `spec.reclaimable=false`
+while Volcano's Queue documentation says its default is `true`; the
+current API also lists the `dequeueStrategy=traverse` default. Do not
+silently widen the allowlist on the strength of these docs alone: pin the
+specific Volcano release/CRD, create a Queue in a real kind API-server,
+capture the stored resource, and update comparator fixtures based on the
+observed JSON. Until then, adoption must fail closed on unreviewed fields.
+
+The conflict/replacement unit tests remain fake-client contract tests, not
+Kubernetes atomic precondition or Volcano controller proof.
+
 ## Monotonic Queue-generation CAS (stacked Stage B experiment)
 
 PR #56 is stacked on the safe, **unregistered** adapter of PR #55.
