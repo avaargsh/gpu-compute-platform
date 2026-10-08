@@ -90,8 +90,8 @@ func TestVolcanoDeleteConflictNeverWaivesOwnershipOnReplay(t *testing.T) {
 
 func TestVolcanoConflictClassificationDoesNotRetryPermanentFailures(t *testing.T) {
 	tests := []struct {
-		name string
-		err error
+		name      string
+		err       error
 		wantRetry bool
 	}{
 		{"conflict", apierrors.NewConflict(
