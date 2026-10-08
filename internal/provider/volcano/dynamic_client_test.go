@@ -247,3 +247,59 @@ func TestDynamicProjectedObjectClientObserveReadsVolcanoJobPhase(t *testing.T) {
 		t.Fatalf("unexpected dynamic observation: %#v", observation)
 	}
 }
+
+func TestDynamicVolcanoQueueCASSubmitsUIDAndResourceVersion(t *testing.T) {
+	provider, client := fixedProvider(t)
+	original := adoptionPoolProjection()
+	if _, err := provider.ReconcilePool(context.Background(), original); err != nil {
+		t.Fatal(err)
+	}
+	expectedOld, err := ProjectPool(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The dynamic fake does not create server-issued identity. Populate it
+	// explicitly; this test inspects the submitted action, not atomic server CAS.
+	setVolcanoServerIdentity(t, client, expectedOld)
+	actionStart := len(client.Actions())
+
+	next := nextQueueProjection()
+	observed, err := provider.ReconcilePool(context.Background(), next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.ObservedGeneration != next.Generation ||
+		len(observed.Conditions) != 2 ||
+		observed.Conditions[1].Type != "QuotaApplied" ||
+		observed.Conditions[1].Status != "Unknown" {
+		t.Fatalf("dynamic Queue CAS overclaimed scheduler application: %#v", observed)
+	}
+
+	updates := 0
+	for _, action := range client.Actions()[actionStart:] {
+		if !action.Matches("update", "queues") {
+			continue
+		}
+		updates++
+		updateAction, ok := action.(k8stesting.UpdateAction)
+		if !ok {
+			t.Fatalf("unexpected Queue update action: %T", action)
+		}
+		object, ok := updateAction.GetObject().(*unstructured.Unstructured)
+		if !ok {
+			t.Fatalf("unexpected Queue update payload: %T", updateAction.GetObject())
+		}
+		if object.GetUID() != "volcano-api-uid" || object.GetResourceVersion() != "17" {
+			t.Fatalf("Queue update lost GET identity: uid=%q rv=%q", object.GetUID(), object.GetResourceVersion())
+		}
+		if object.GetAnnotations()[generationAnnotation] != "5" {
+			t.Fatalf("Queue update generation mismatch: %#v", object.GetAnnotations())
+		}
+		if _, found := object.Object["status"]; found {
+			t.Fatal("spec UPDATE must not submit stale Queue controller status")
+		}
+	}
+	if updates != 1 {
+		t.Fatalf("Queue CAS submitted %d Kubernetes updates, want 1", updates)
+	}
+}
