@@ -159,9 +159,9 @@ func allowedVolcanoDefault(kind, path, key string, value any) bool {
 	case kind == "Queue" && path == "spec":
 		switch key {
 		case "parent":
-			return value == "root"
+			return reflect.DeepEqual(value, "root")
 		case "reclaimable":
-			return value == false
+			return reflect.DeepEqual(value, false)
 		case "weight":
 			return reflect.DeepEqual(value, int64(1))
 		}
@@ -170,7 +170,7 @@ func allowedVolcanoDefault(kind, path, key string, value any) bool {
 	case kind == "Job" && path == "spec.tasks[].template.spec":
 		switch key {
 		case "dnsPolicy":
-			return value == "ClusterFirst"
+			return reflect.DeepEqual(value, "ClusterFirst")
 		case "terminationGracePeriodSeconds":
 			return reflect.DeepEqual(value, int64(30))
 		}
