@@ -154,5 +154,5 @@ fi
 if ! grep -Eqi 'NotFound|not found' "$evidence/post-cleanup-get.stderr"; then
   die "cannot independently prove cleanup NotFound"
 fi
-printf 'cleanup_observed_not_found\\tPASS\\n' >>"$evidence/gates.tsv"
+printf 'cleanup_observed_not_found\tPASS\n' >>"$evidence/gates.tsv"
 printf 'VOLCANO API CONTRACT: API SERVER PASS (scheduler application NOT PROVEN)\n'
