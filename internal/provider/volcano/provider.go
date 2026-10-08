@@ -54,7 +54,7 @@ func (p *Provider) ReconcilePool(
 	if err != nil {
 		return baseprovider.PoolObservation{}, err
 	}
-	action, err := ensureProjectedObject(ctx, p.client, expected)
+	action, err := p.ensurePoolQueue(ctx, expected)
 	if err != nil {
 		return baseprovider.PoolObservation{}, fmt.Errorf("ensure Volcano Queue: %w", classifyProviderError(err))
 	}
