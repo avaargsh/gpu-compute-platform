@@ -71,6 +71,13 @@ func (p *Provider) ReconcilePool(
 		ObservedGeneration: projection.Generation,
 		Conditions: []domain.Condition{
 			volcanoQueueReadyCondition(state, action, p.now().UTC()),
+			{
+				Type:               "QuotaApplied",
+				Status:             "Unknown",
+				Reason:             "VolcanoQueueLacksAppliedGenerationEvidence",
+				Message:            "Fresh Queue GET confirms stored quota, not scheduler adoption; require independent workload/admission evidence",
+				LastTransitionTime: p.now().UTC(),
+			},
 		},
 		EvidenceRefs: []string{
 			fmt.Sprintf("volcano://%s/queues/%s", projection.ClusterID, expected.GetName()),
@@ -242,7 +249,7 @@ func volcanoQueueReadyCondition(
 	if state == "Open" {
 		condition.Status = "True"
 		condition.Reason = "VolcanoQueueOpen"
-		condition.Message = "Volcano Queue is open and matches the frozen provider projection"
+		condition.Message = "Volcano Queue is open for admission; this does not establish that the scheduler applied the current quota"
 		return condition
 	}
 	if state == "Pending" {
