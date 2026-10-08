@@ -123,6 +123,9 @@ func TestVolcanoQueueCASAdvancePreservesControllerMetadata(t *testing.T) {
 		len(observed.Conditions) != 1 || observed.Conditions[0].Status != "True" {
 		t.Fatalf("Queue CAS did not converge: %#v updateCalls=%d", observed, client.updateCalls)
 	}
+	if client.lastUpdate.Object["spec"].(map[string]any)["parent"] != "root" {
+		t.Fatal("reviewed Volcano Queue default should survive quota update")
+	}
 	if client.lastUpdate.GetResourceVersion() != "10" ||
 		client.lastUpdate.GetUID() != "queue-test-uid" {
 		t.Fatalf("Queue CAS lost identity fence: %#v", client.lastUpdate)
@@ -217,6 +220,9 @@ func TestVolcanoQueueCASRejectsUnreviewedOrMalformedExistingQueue(t *testing.T) 
 		}},
 		{"foreign platform label", func(o *unstructured.Unstructured) {
 			o.SetLabels(map[string]string{"ai.compute/scheduler": "foreign"})
+		}},
+		{"empty foreign platform label", func(o *unstructured.Unstructured) {
+			o.SetLabels(map[string]string{"ai.compute/scheduler": ""})
 		}},
 		{"queue spec injection", func(o *unstructured.Unstructured) {
 			o.Object["spec"].(map[string]any)["affinity"] = map[string]any{"unsafe": true}
