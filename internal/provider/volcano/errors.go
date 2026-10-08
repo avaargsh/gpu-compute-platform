@@ -14,7 +14,11 @@ func classifyProviderError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if apierrors.IsTimeout(err) ||
+	// A DELETE/UPDATE resourceVersion conflict is retryable only by re-entering
+	// reconciliation from a fresh GET. Never retry the stale mutation directly:
+	// the next attempt must re-check ownership, generation and immutable spec.
+	if apierrors.IsConflict(err) ||
+		apierrors.IsTimeout(err) ||
 		apierrors.IsServerTimeout(err) ||
 		apierrors.IsTooManyRequests(err) ||
 		apierrors.IsServiceUnavailable(err) ||
