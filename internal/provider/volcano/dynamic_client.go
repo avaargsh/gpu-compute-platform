@@ -52,6 +52,24 @@ func (c *dynamicProjectedObjectClient) Create(
 	return resource.Create(ctx, expected.DeepCopy(), metav1.CreateOptions{})
 }
 
+
+func (c *dynamicProjectedObjectClient) Update(
+	ctx context.Context,
+	observed *unstructured.Unstructured,
+) (*unstructured.Unstructured, error) {
+	resource, err := c.resource(observed)
+	if err != nil {
+		return nil, err
+	}
+	if observed.GetKind() != "Queue" {
+		return nil, fmt.Errorf("Volcano UPDATE supports Queue only; Jobs are immutable")
+	}
+	if observed.GetUID() == "" || observed.GetResourceVersion() == "" {
+		return nil, fmt.Errorf("Volcano Queue UPDATE requires observed UID and resourceVersion")
+	}
+	return resource.Update(ctx, observed.DeepCopy(), metav1.UpdateOptions{})
+}
+
 func (c *dynamicProjectedObjectClient) Delete(
 	ctx context.Context,
 	observed *unstructured.Unstructured,
