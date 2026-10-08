@@ -462,7 +462,14 @@ non-loopback PostgreSQL hosts, databases without the `_test` suffix, arbitrary
 query options (including `?host=`, `?dbname=` and `?port=`), absent DSNs,
 dirty checkouts and SHA mismatches. Only a reviewed `sslmode` parameter may be passed.
 A `--self-test` runs nine DSN guard fixtures without Go/Postgres and is
-also a mandatory logged gate in the full local acceptance run. A loopback host can still be a tunnel:
+also a mandatory logged gate in the full local acceptance run.
+The full gate also refuses inherited `PGHOST`, `PGHOSTADDR`, `PGPORT`,
+`PGDATABASE`, `PGSERVICE`, `PGSERVICEFILE` or `PGOPTIONS` settings.
+Such environment-based overrides may redirect the connection, load external
+service definitions or alter the SQL search path despite an apparently safe
+DSN. Clear them explicitly before running tests. This defense is not a
+substitute for validating that the local TCP port is not a tunnel or proxy
+into a production database. A loopback host can still be a tunnel:
 verify the actual database target before running. Never point this at production.
 It uses a detached worktree, runs fmt, vet, focused Volcano tests, Volcano
 race tests, full Go tests, acceptance contract, supply-chain checks and build,
