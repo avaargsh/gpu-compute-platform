@@ -426,9 +426,14 @@ When `ReconcilePool` observes a Queue at a **lower** generation:
    **retryable reconciliation error**, *not* an instruction to retry the same
    mutation. Agent backoff must start from a fresh GET and revalidate identity.
 5. On successful UPDATE response, require the same UID and exact new projection.
-   Reconcile then independently GETs and validates the observed Queue.
-   If an UPDATE committed but ACK was lost, replay adopts the already-updated
-   generation without issuing a duplicate UPDATE.
+   Reconcile then independently GETs and validates the observed Queue **and
+   matches its UID to the successful UPDATE response**. Equal names, generation,
+   ownership annotations and quotas do not prove identity if a Queue was
+   deleted and recreated between UPDATE and observation. A changed UID is an
+   ownership conflict, not a successful reconciliation. If an UPDATE committed
+   but ACK was lost, replay adopts an already-updated generation without issuing
+   a duplicate UPDATE; that recovery confirms converged desired state, **not
+   retroactive proof of the original lost-ACK operation's UID**.
 
 A same-generation immutable-spec change and a rollback to an older generation
 are always rejected. VolcanoJob remains immutable; its lifecycle uses the
