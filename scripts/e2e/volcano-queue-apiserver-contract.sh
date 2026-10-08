@@ -37,21 +37,58 @@ printf 'head_sha\t%s\ncontext\t%s\nresource\t%s\nstarted_utc\t%s\n' \
 
 created=0
 cleanup() {
-  if [[ "$created" == "1" ]]; then
-    # A failed/ambiguous create may have hit an existing Queue name. Never
-    # delete by name unless the isolated request's nonce still owns it.
-    if kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
-      >"$evidence/pre-cleanup-get.json" 2>"$evidence/cleanup-get.stderr"; then
-      if jq -e --arg token "$name" \
-        '.metadata.annotations["stageb.volcano.probe/token"] == $token' \
-        "$evidence/pre-cleanup-get.json" >/dev/null; then
-        kubectl --context "$context" delete queues.scheduling.volcano.sh "$name" \
-          --ignore-not-found=true --wait=true --timeout=45s >"$evidence/cleanup.log" 2>&1 || true
-      else
-        printf 'REFUSED: cleanup sees another owner\n' >"$evidence/cleanup.log"
-      fi
-    fi
+  if [[ "$created" != "1" ]]; then
+    return 0
   fi
+
+  # The test Queue is cluster-scoped. Do not trust the name after a separate
+  # GET: it might have been deleted/recreated between the two operations.
+  if ! kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
+    >"$evidence/pre-cleanup-get.json" 2>"$evidence/cleanup-get.stderr"; then
+    if grep -Eqi 'NotFound|not found' "$evidence/cleanup-get.stderr"; then
+      printf 'ALREADY_GONE\\n' >"$evidence/cleanup.log"
+      return 0
+    fi
+    printf 'BLOCKED: cleanup GET was ambiguous\\n' >"$evidence/cleanup.log"
+    return 1
+  fi
+
+  # The nonce prevents intentional deletion of unrelated test resources.
+  if ! jq -e --arg token "$name" '
+    .metadata.annotations["stageb.volcano.probe/token"] == $token and
+    .metadata.uid != null and .metadata.uid != "" and
+    .metadata.resourceVersion != null and .metadata.resourceVersion != ""
+  ' "$evidence/pre-cleanup-get.json" >/dev/null; then
+    printf 'BLOCKED: cleanup ownership/UID/resourceVersion is unproven\\n' >"$evidence/cleanup.log"
+    return 1
+  fi
+
+  # kubectl delete NAME does NOT enforce UID/RV preconditions. Use the raw
+  # Kubernetes DeleteOptions request, which the API server evaluates
+  # atomically. A stale UID/RV must return 409, never delete a replacement.
+  jq '{
+    apiVersion: "meta.k8s.io/v1",
+    kind: "DeleteOptions",
+    preconditions: {
+      uid: .metadata.uid,
+      resourceVersion: .metadata.resourceVersion
+    }
+  }' "$evidence/pre-cleanup-get.json" >"$evidence/delete-options.json" || return 1
+
+  if ! kubectl --context "$context" delete \
+    --raw "/apis/scheduling.volcano.sh/v1beta1/queues/$name" \
+    -f "$evidence/delete-options.json" \
+    >"$evidence/cleanup.log" 2>"$evidence/cleanup.stderr"; then
+    printf 'BLOCKED: UID/RV conditional DELETE failed or raced\\n' >>"$evidence/cleanup.log"
+    return 1
+  fi
+  # Waiting observes deletion; it performs no second destructive request.
+  if ! kubectl --context "$context" wait \
+    --for=delete "queues.scheduling.volcano.sh/$name" --timeout=45s \
+    >"$evidence/cleanup-wait.log" 2>&1; then
+    return 1
+  fi
+  return 0
 }
 trap cleanup EXIT
 
