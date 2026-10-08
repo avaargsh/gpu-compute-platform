@@ -134,7 +134,6 @@ func TestDynamicProjectedObjectClientRejectsUnsupportedOrMisScopedObjects(t *tes
 	}
 }
 
-
 func TestDynamicProjectedObjectClientDeleteConfirmsGoneForVolcanoJob(t *testing.T) {
 	expected, err := ProjectWorkload(adoptionWorkloadProjection())
 	if err != nil {
