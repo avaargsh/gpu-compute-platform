@@ -261,6 +261,17 @@ func TestDynamicVolcanoQueueCASSubmitsUIDAndResourceVersion(t *testing.T) {
 	// The dynamic fake does not create server-issued identity. Populate it
 	// explicitly; this test inspects the submitted action, not atomic server CAS.
 	setVolcanoServerIdentity(t, client, expectedOld)
+	// client-go's dynamic fake does not advance resourceVersion. Model the
+	// real API-server UPDATE ACK explicitly so the contract rejects a fake
+	// "successful" write that simply echoes the old CAS version.
+	client.PrependReactor("update", "queues", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		updated := action.(k8stesting.UpdateAction).GetObject().(*unstructured.Unstructured).DeepCopy()
+		updated.SetResourceVersion("18")
+		if err := client.Tracker().Update(volcanoQueueGVR, updated, ""); err != nil {
+			return true, nil, err
+		}
+		return true, updated, nil
+	})
 	actionStart := len(client.Actions())
 
 	next := nextQueueProjection()
