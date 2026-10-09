@@ -122,6 +122,17 @@ func (p *Provider) ReconcileWorkload(
 	}
 	now := p.now().UTC()
 	conditions := []domain.Condition{volcanoReadyCondition(phase, now)}
+	if phase == "Running" {
+		// A live Pod list is additional evidence, not a substitute for the
+		// scheduler/PodGroup contract. Preserve Ready=False until promoted.
+		podCondition, err := p.observeOwnedPodReadiness(ctx, current, now)
+		if err != nil {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf(
+				"observe Volcano owned Pods: %w", err,
+			)
+		}
+		conditions = append(conditions, podCondition)
+	}
 	switch phase {
 	case "Completed":
 		conditions = append(conditions, domain.Condition{
