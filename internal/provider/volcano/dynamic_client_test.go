@@ -286,6 +286,15 @@ func TestDynamicVolcanoQueueCASSubmitsUIDAndResourceVersion(t *testing.T) {
 		t.Fatalf("dynamic Queue CAS overclaimed scheduler application: %#v", observed)
 	}
 
+	stored, err := client.Resource(volcanoQueueGVR).
+		Get(context.Background(), expectedOld.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.GetResourceVersion() != "18" || stored.GetUID() != "volcano-api-uid" {
+		t.Fatalf("fake API ACK must model a new RV on the same Queue UID: uid=%q rv=%q",
+			stored.GetUID(), stored.GetResourceVersion())
+	}
 	updates := 0
 	for _, action := range client.Actions()[actionStart:] {
 		if !action.Matches("update", "queues") {
