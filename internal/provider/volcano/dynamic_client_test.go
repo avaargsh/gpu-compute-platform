@@ -262,6 +262,17 @@ func TestDynamicVolcanoQueueCASSubmitsUIDAndResourceVersion(t *testing.T) {
 	// The dynamic fake does not create server-issued identity. Populate it
 	// explicitly; this test inspects the submitted action, not atomic server CAS.
 	setVolcanoServerIdentity(t, client, expectedOld)
+	// client-go's dynamic fake does not advance resourceVersion. Model the
+	// real API-server UPDATE ACK explicitly so the contract rejects a fake
+	// "successful" write that simply echoes the old CAS version.
+	client.PrependReactor("update", "queues", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		updated := action.(k8stesting.UpdateAction).GetObject().(*unstructured.Unstructured).DeepCopy()
+		updated.SetResourceVersion("18")
+		if err := client.Tracker().Update(volcanoQueueGVR, updated, ""); err != nil {
+			return true, nil, err
+		}
+		return true, updated, nil
+	})
 	actionStart := len(client.Actions())
 
 	next := nextQueueProjection()
@@ -276,6 +287,15 @@ func TestDynamicVolcanoQueueCASSubmitsUIDAndResourceVersion(t *testing.T) {
 		t.Fatalf("dynamic Queue CAS overclaimed scheduler application: %#v", observed)
 	}
 
+	stored, err := client.Resource(volcanoQueueGVR).
+		Get(context.Background(), expectedOld.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.GetResourceVersion() != "18" || stored.GetUID() != "volcano-api-uid" {
+		t.Fatalf("fake API ACK must model a new RV on the same Queue UID: uid=%q rv=%q",
+			stored.GetUID(), stored.GetResourceVersion())
+	}
 	updates := 0
 	for _, action := range client.Actions()[actionStart:] {
 		if !action.Matches("update", "queues") {

@@ -22,6 +22,7 @@ type queueCASTestClient struct {
 	failConflict  bool
 	lostAck       bool
 	postACKObject *unstructured.Unstructured
+	ackRVOverride *string
 }
 
 func (c *queueCASTestClient) Get(
@@ -86,6 +87,9 @@ func (c *queueCASTestClient) Update(
 	// observes a stale or foreign object. The provider must reject this drift
 	// instead of promoting the UPDATE response to an observed generation.
 	ack := c.object.DeepCopy()
+	if c.ackRVOverride != nil {
+		ack.SetResourceVersion(*c.ackRVOverride)
+	}
 	if c.postACKObject != nil {
 		c.object = c.postACKObject.DeepCopy()
 	}
@@ -164,6 +168,41 @@ func TestVolcanoQueueCASAdvancePreservesControllerMetadata(t *testing.T) {
 		replayed.Conditions[1].Type != "QuotaApplied" ||
 		replayed.Conditions[1].Status != "Unknown" {
 		t.Fatalf("replayed readback must not invent scheduler-applied quota: %#v", replayed.Conditions)
+	}
+}
+
+func TestVolcanoQueueCASRejectsIncompleteUpdateACKBeforeReadback(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		ackRV string
+	}{
+		{name: "missing ACK version", ackRV: ""},
+		{name: "unchanged ACK version", ackRV: "10"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &queueCASTestClient{
+				object:        oldQueueWithServerIdentity(t),
+				ackRVOverride: &tt.ackRV,
+			}
+			p := newProvider(client)
+			observed, err := p.ReconcilePool(context.Background(), nextQueueProjection())
+			if err == nil || !baseprovider.IsRetryable(err) ||
+				observed.ObservedGeneration != 0 || client.updateCalls != 1 ||
+				client.getCalls != 1 {
+				t.Fatalf("non-advancing UPDATE ACK must not establish a completed CAS: observed=%#v err=%v writes=%d reads=%d",
+					observed, err, client.updateCalls, client.getCalls)
+			}
+			// Our fake committed the UPDATE before returning the malformed
+			// ACK. The next caller-driven reconciliation must adopt the
+			// stored generation, not blindly issue another UPDATE.
+			replayed, err := p.ReconcilePool(context.Background(), nextQueueProjection())
+			if err != nil || replayed.ObservedGeneration != 5 || client.updateCalls != 1 ||
+				replayed.Conditions[1].Type != "QuotaApplied" ||
+				replayed.Conditions[1].Status != "Unknown" {
+				t.Fatalf("fresh GET must reconcile the ambiguous ACK without double write: observed=%#v err=%v writes=%d",
+					replayed, err, client.updateCalls)
+			}
+		})
 	}
 }
 

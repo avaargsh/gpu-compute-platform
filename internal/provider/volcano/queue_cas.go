@@ -8,6 +8,8 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
 )
 
 const existingObjectUpdate existingObjectAction = "update"
@@ -79,6 +81,17 @@ func (p *Provider) ensurePoolQueue(
 	}
 	if updated == nil || updated.GetUID() != current.GetUID() {
 		return "", "", providerObjectConflict("Queue UPDATE returned missing or changed UID")
+	}
+	// Kubernetes must issue a new resourceVersion for a committed spec
+	// UPDATE. A transport ACK carrying the old/missing RV is not a receipt
+	// of this CAS even if it echoes the desired quota and the same UID.
+	if updated.GetResourceVersion() == "" ||
+		updated.GetResourceVersion() == current.GetResourceVersion() {
+		// The remote UPDATE may have committed despite the malformed receipt.
+		// Retry only by entering reconciliation again, starting from a GET.
+		return "", "", baseprovider.MarkRetryable(
+			providerObjectConflict("Queue UPDATE ACK lacks an advanced resourceVersion"),
+		)
 	}
 	if _, err := classifyExistingObject(expected, updated); err != nil {
 		return "", "", fmt.Errorf("Queue UPDATE response is not the desired generation: %w", err)
