@@ -80,6 +80,13 @@ func (p *Provider) ensurePoolQueue(
 	if updated == nil || updated.GetUID() != current.GetUID() {
 		return "", "", providerObjectConflict("Queue UPDATE returned missing or changed UID")
 	}
+	// Kubernetes must issue a new resourceVersion for a committed spec
+	// UPDATE. A transport ACK carrying the old/missing RV is not a receipt
+	// of this CAS even if it echoes the desired quota and the same UID.
+	if updated.GetResourceVersion() == "" ||
+		updated.GetResourceVersion() == current.GetResourceVersion() {
+		return "", "", providerObjectConflict("Queue UPDATE ACK lacks an advanced resourceVersion")
+	}
 	if _, err := classifyExistingObject(expected, updated); err != nil {
 		return "", "", fmt.Errorf("Queue UPDATE response is not the desired generation: %w", err)
 	}
