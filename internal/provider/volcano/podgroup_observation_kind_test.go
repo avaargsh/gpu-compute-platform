@@ -64,11 +64,18 @@ func TestVolcanoLivePodGroupLinkReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Negative control is entirely local: no resource is ever mutated.
-	replaced := group.DeepCopy()
-	replaced.SetUID("foreign-replacement")
-	if podGroupOwnedByJob(replaced, job) {
-		t.Fatal("changed UID must not be accepted as the observed PodGroup")
+	// Negative control remains entirely local: the controller Job UID
+	// must match. A new PodGroup UID alone does not disprove Job linkage;
+	// UID/RV replacement DURING the two GETs is separately rejected.
+	foreign := group.DeepCopy()
+	owners := foreign.GetOwnerReferences()
+	if len(owners) != 1 {
+		t.Fatalf("expected one real Controller OwnerReference, got %d", len(owners))
+	}
+	owners[0].UID = "foreign-job-uid"
+	foreign.SetOwnerReferences(owners)
+	if podGroupOwnedByJob(foreign, job) {
+		t.Fatal("foreign controller Job UID must not be accepted")
 	}
 	t.Logf("LIVE_READ_ONLY_PODGROUP_LINK=PASS jobUID=%s podGroupUID=%s podGroupRV=%s",
 		job.GetUID(), group.GetUID(), group.GetResourceVersion())
