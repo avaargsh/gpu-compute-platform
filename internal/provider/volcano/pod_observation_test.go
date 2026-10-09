@@ -65,8 +65,8 @@ func fakeJobPodClient(job *unstructured.Unstructured, pods ...*unstructured.Unst
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{
-			volcanoQueueGVR: "QueueList",
-			volcanoJobGVR:   "JobList",
+			volcanoQueueGVR:    "QueueList",
+			volcanoJobGVR:      "JobList",
 			volcanoPodGVR:      "PodList",
 			volcanoPodGroupGVR: "PodGroupList",
 		},
