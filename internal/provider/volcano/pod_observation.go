@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -18,6 +19,7 @@ var volcanoPodGVR = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 
 type volcanoJobPodLister interface {
 	ListJobPods(context.Context, *unstructured.Unstructured) ([]unstructured.Unstructured, error)
+	GetJobPod(context.Context, *unstructured.Unstructured, *unstructured.Unstructured) (*unstructured.Unstructured, error)
 }
 
 func (c *dynamicProjectedObjectClient) ListJobPods(
@@ -35,6 +37,22 @@ func (c *dynamicProjectedObjectClient) ListJobPods(
 		return nil, err
 	}
 	return list.Items, nil
+}
+
+// GetJobPod independently re-reads only the named Pod, never a name from
+// untrusted command input. This is a read-only evidence fence, not a lock.
+func (c *dynamicProjectedObjectClient) GetJobPod(
+	ctx context.Context, job, pod *unstructured.Unstructured,
+) (*unstructured.Unstructured, error) {
+	if c == nil || c.dynamic == nil || job == nil || pod == nil ||
+		job.GetAPIVersion() != "batch.volcano.sh/v1alpha1" ||
+		job.GetKind() != "Job" || job.GetName() == "" ||
+		job.GetNamespace() == "" || pod.GetName() == "" ||
+		pod.GetNamespace() != job.GetNamespace() {
+		return nil, fmt.Errorf("Volcano Pod readback requires same-namespace named Job and Pod")
+	}
+	return c.dynamic.Resource(volcanoPodGVR).
+		Namespace(job.GetNamespace()).Get(ctx, pod.GetName(), metav1.GetOptions{})
 }
 
 // observeOwnedPodReadiness is additional *read-only* evidence. The Job's
@@ -99,6 +117,29 @@ func (p *Provider) observeOwnedPodReadiness(
 	if !podKubernetesReady(pod) {
 		condition.Status = "False"
 		condition.Reason = "VolcanoOwnedPodNotReady"
+		return condition, nil
+	}
+	// LIST alone can report a Pod that was deleted/recreated or became
+	// unready before the reconciliation finished. Only a fresh GET with
+	// the same server UID and resourceVersion can corroborate this snapshot.
+	// This still cannot prove the future state or scheduler/gang admission.
+	if pod.GetResourceVersion() == "" {
+		condition.Reason = "VolcanoPodResourceVersionUnavailable"
+		return condition, nil
+	}
+	fresh, err := lister.GetJobPod(ctx, job, pod)
+	if apierrors.IsNotFound(err) {
+		condition.Reason = "VolcanoPodReadbackNotFound"
+		return condition, nil
+	}
+	if err != nil {
+		return condition, fmt.Errorf("read back Volcano Job Pod: %w", classifyProviderError(err))
+	}
+	if fresh == nil || fresh.GetUID() != pod.GetUID() ||
+		fresh.GetResourceVersion() != pod.GetResourceVersion() ||
+		!belongsToVolcanoJob(fresh, job) ||
+		fresh.GetDeletionTimestamp() != nil || !podKubernetesReady(fresh) {
+		condition.Reason = "VolcanoPodReadbackDrift"
 		return condition, nil
 	}
 	condition.Status = "True"
