@@ -135,9 +135,9 @@ Given an expected projection and an observed object:
 Stage B now permits a **narrow, exact-valued defaulting allowlist** while
 comparing every platform-projected field, including list shape and GPU resource
 maps. All other extra spec fields are conflicts, even with the same generation.
-The provisional fixtures permit only:
+The Stage B v1.15.3 reviewed API-server fixtures permit only:
 
-- Queue `spec.parent=root`, `spec.reclaimable=false`, `spec.weight=1`;
+- Queue `spec.parent=root`, `spec.reclaimable=true`, `spec.dequeueStrategy=traverse`, `spec.weight=1`;
 - VolcanoJob `spec.maxRetry=3`;
 - Job Pod template `dnsPolicy=ClusterFirst` and
   `terminationGracePeriodSeconds=30`.
@@ -145,8 +145,7 @@ The provisional fixtures permit only:
 Additional `spec` fields such as Pod `hostNetwork`, `nodeSelector`, or
 container resource requests are **not** adoptable. The allowlist captures
 Stage B test-fixture assumptions, not verified universal Volcano defaults.
-A real kind+Volcano server-defaulting test must confirm each value before
-this can become a production adapter. Version changes fail closed pending
+The Queue values above were confirmed by pinned Volcano v1.15.3 on disposable kind; **Job/PodGroup and runtime promotion are separate unproven gates**. Version changes fail closed pending
 review, not silently widened via generic map-subset comparison.
 
 This classifier validates the decision boundary only. It does not yet prove a
@@ -193,7 +192,8 @@ The next Stage B slice wires the unregistered ensure loop to a narrow
 - `scheduling.volcano.sh/v1beta1/queues` (cluster-scoped);
 - `batch.volcano.sh/v1alpha1/jobs` (namespaced).
 
-The transport supports only `GET` and `CREATE`. Tests use the Kubernetes
+That early transport slice supported only `GET` and `CREATE`; the later
+unregistered slices add conditional DELETE and Queue-only CAS UPDATE. Tests use the Kubernetes
 dynamic fake client to prove native NotFound behavior, Queue/VolcanoJob
 create-then-adopt replay, and fail-closed GVK/scope validation.
 
@@ -301,6 +301,213 @@ This is an executable contract/falsification target only. The Kueue path
 remains the only production execution path. Other overlapping old Stage B
 draft PRs must be consolidated without reintroducing a weaker DELETE path.
 
+
+## Disposable kind/API-server Queue CAS falsification
+
+A live, CPU-only **Kubernetes API-server** test is now available as
+`scripts/e2e/volcano-queue-apiserver-contract.sh`. It is deliberately not
+part of v0.1 acceptance or the normal local unit-test gate: it mutates a
+uniquely named, cluster-scoped Queue on a specifically authorized disposable
+kind cluster.
+
+Prerequisites: `kubectl`, `kind`, `jq`, a **local disposable kind cluster**
+with a corresponding `kind-*` context, and an installed, version-pinned
+Volcano Queue CRD. The preflight requires `kind get clusters` to enumerate
+the named cluster and compares the chosen context's API-server endpoint and
+CA against `kind get kubeconfig --name <cluster>`; a similarly named arbitrary
+context cannot authorize mutation. No kubeconfig credentials are saved to
+the evidence directory. The script
+does **not** install/upgrade Volcano or require a GPU. Do not point this
+experiment at any production cluster.
+
+```bash
+# Verify you are on the exact PR #56 revision and a clean checkout.
+git fetch origin feat/stage-b-volcano-queue-cas-v2
+git switch feat/stage-b-volcano-queue-cas-v2
+git pull --ff-only
+
+STAGE_B_EXPECTED_SHA="<40-hex-independently-reviewed-PR-head>" \
+STAGE_B_KIND_CONTEXT="kind-stageb-volcano" \
+STAGE_B_KIND_MUTATION_ACK=1 \
+STAGE_B_EXPECTED_QUEUE_CRD_SPEC_SHA256="<64-hex-pinned-schema-digest>" \
+bash scripts/e2e/volcano-queue-apiserver-contract.sh
+```
+
+The 40-hex commit SHA must come from independent review, **not** by
+reading the local `HEAD` being tested (which would make the freeze check
+vacuous). The 64-hex schema digest is a **reviewed release baseline**: compute it
+from a trusted copy of the Queue CRD **as persisted after Kubernetes CRD
+defaulting** (not from the same live cluster run being tested), using
+`jq -S '.spec' pinned-queue-crd.json | sha256sum`. Record the Volcano
+release/chart and baseline provenance alongside the pinned hash. The test
+blocks before creating any resource if the installed Queue CRD schema differs.
+
+This emits **versioned, reviewable** evidence under a unique directory
+outside the repository:
+- original CREATE request, first readback fenced to CREATE UID + probe nonce + owner/generation, and exact server default values;
+- metadata concurrent-write injection via UID-bearing, resourceVersion-fenced `kubectl replace` (never name-only `kubectl annotate`), with a checked ACK;
+- installed Queue CRD JSON, canonical CRD spec SHA256 and Kubernetes version JSON;
+- a real stale-resourceVersion UPDATE rejected as `409 Conflict`;
+- an intentionally stale UID/RV **conditional DELETE** rejected as `409 Conflict`, followed by a fresh GET proving the Queue survived;
+- a new-GET-based quota CAS from 8 to 16 with the same resource UID;
+- final independent GET and cleanup NotFound evidence;
+- per-file SHA256 of JSON receipts and per-gate status.
+
+The test fails closed if live server defaults disagree with the current
+reviewed comparator (notably `reclaimable` and `dequeueStrategy`), if any
+CAS/identity step is ambiguous, or if it cannot independently prove cleanup.
+On successful CREATE, the test records the API-server-issued **UID from
+the CREATE response**. **Before the first post-CREATE mutation**, the fresh
+GET must match that UID, probe token, owner, generation and quota. The
+resourceVersion-fenced metadata update refuses concurrent replacements; a
+new Queue sharing the old name cannot be annotated by accident. Before
+cleanup, a fresh GET must match that original
+UID, the unique test nonce, and a nonempty live resourceVersion. Cleanup then
+uses raw Kubernetes `DeleteOptions` with those observed UID and RV
+preconditions. Unlike `kubectl delete queues/<name>`, this enforces atomic
+identity at the API server; replaced/updated resources return `409` and are
+not silently deleted. A final GET must observe NotFound before PASS.
+
+If CREATE returns an ambiguous/lost ACK or no server UID, **automatic
+cleanup is blocked**: the test may leave an isolated Queue requiring manual
+investigation. A matching name or token alone never authorizes deletion of
+an unknown UID. Inspect the persisted probe evidence and perform deliberate
+operator cleanup only after independently proving ownership.
+
+**This tests Kubernetes object CAS and defaulting, not the actual Volcano
+scheduler applying quota, lease takeover, multi-agent fencing or GPU runtime
+behavior.** `QuotaApplied` remains `Unknown`. The script has not been
+executed against a live cluster at the time of this change; the gate stays
+unchecked until independent evidence is attached to the PR.
+
+## External Volcano Queue API findings (2026-10-08)
+
+The official Volcano Queue documentation at
+https://volcano.sh/docs/concepts/queue/ describes `status.state=Open` as
+**available to receive PodGroups**, not evidence that an updated GPU
+`spec.capability` quota has been applied by the scheduler. The upstream
+`QueueStatus` API type at
+https://github.com/volcano-sh/apis/blob/master/pkg/apis/scheduling/v1beta1/types.go
+does not expose `observedGeneration` for this purpose.
+
+Consequently, the Stage B unregistered adapter reports:
+- `ObservedGeneration`: only the generation annotation verified on a **fresh
+  Kubernetes GET**, not scheduler applied/reconciled generation.
+- `Ready=True` for `status.state=Open`: Queue admission availability only.
+- `QuotaApplied=Unknown`: no scheduler/controller application receipt yet,
+  including after an UPDATE reply and a same-generation retry/adopt.
+
+Neither an UPDATE ACK, a fresh GET, nor an Open status may be promoted into
+`QuotaApplied=True` without **independent scheduler/admission evidence**.
+The additional condition is intentionally visible to Stage B consumers. It
+is not a reason to register Volcano as a production adapter.
+
+**Resolved from real API-server evidence (2026-10-09):** temp-runner
+[run #37918508288](https://github.com/avaargsh/temp-runner/actions/runs/37918508288)
+deployed pinned Volcano v1.15.3 in disposable kind and created a Queue.
+Its preserved `queue-cas/observed-defaults.json` showed exactly:
+`parent=root`, `reclaimable=true`, `dequeueStrategy=traverse`,
+`weight=1`. The same run proved stale UPDATE and conditional DELETE
+conflicts, and correctly blocked the old narrower comparator. The
+classifier and the live comparator now accept **only these exact reviewed
+defaults**; unrelated or alternative scheduling fields still fail closed.
+This evidence does **not** establish PodGroup/scheduler quota application,
+GPU execution or production provider readiness. A clean rerun at the new
+exact SHA is mandatory before merging.
+
+The conflict/replacement unit tests remain fake-client contract tests, not
+Kubernetes atomic precondition or Volcano controller proof.
+
+## Monotonic Queue-generation CAS (stacked Stage B experiment)
+
+PR #56 is stacked on the safe, **unregistered** adapter of PR #55.
+It replaces the older PR #52 approach rather than copying its name-only DELETE
+or claiming that `Running` proves Workload readiness. Kueue is still the only
+production provider.
+
+When `ReconcilePool` observes a Queue at a **lower** generation:
+
+1. Re-read by deterministic Queue identity. Require exact GVK, name, scope,
+   provider, pool, accelerator class and a positive stored generation.
+2. Prove that the old spec differs from the projected Queue only by the
+   accelerator **quota** for the **same** extended-resource key. Reject extra
+   resources, unreviewed spec/default values, unexpected `ai.compute/*`
+   metadata and objects already terminating.
+3. Require Kubernetes-issued nonempty `UID` and `resourceVersion`. Carry
+   these on UPDATE, preserving third-party labels/annotations, ownerReferences,
+   finalizers and reviewed Volcano defaults. Only change the quota and the
+   `ai.compute/generation` value; never submit controller-owned `status`.
+4. Treat a `409 Conflict` or ambiguous/lost UPDATE acknowledgement as a
+   **retryable reconciliation error**, *not* an instruction to retry the same
+   mutation. Agent backoff must start from a fresh GET and revalidate identity.
+5. On successful UPDATE response, require the same UID, an **ACK
+   resourceVersion that is nonempty and differs from the submitted CAS
+   version**, and exact new projection. An empty or unchanged response RV
+   makes the operation's acknowledgement ambiguous: report a retryable
+   error and only reconcile again from a fresh GET (never blindly repeat
+   the UPDATE). This is not a cryptographic ownership proof.
+   Reconcile then independently GETs and validates the observed Queue **and
+   matches its UID to the successful UPDATE response**. Equal names, generation,
+   ownership annotations and quotas do not prove identity if a Queue was
+   deleted and recreated between UPDATE and observation. A changed UID is an
+   ownership conflict, not a successful reconciliation. If an UPDATE committed
+   but ACK was lost, replay adopts an already-updated generation without issuing
+   a duplicate UPDATE; that recovery confirms converged desired state, **not
+   retroactive proof of the original lost-ACK operation's UID**.
+
+A same-generation immutable-spec change and a rollback to an older generation
+are always rejected. VolcanoJob remains immutable; its lifecycle uses the
+previous create/adopt and conditional-DELETE code paths.
+
+**Safety boundary:** resourceVersion provides a server-side optimistic
+concurrency compare for UPDATE; fake clients are not proof of API-server atomic
+behavior, real defaulting, lease takeover or post-update controller reality.
+Actual kind+Volcano acceptance, a deliberate conflict/replacement experiment,
+and independent local tests remain outstanding before this stacked draft can
+be promoted. No real-GPU/Volcano-production claim is attached to these tests.
+
+For local CPU-only gates when GitHub Actions minutes are exhausted, pin the
+exact 40-character PR HEAD and execute the test suite in a **detached local
+worktree** without mutating the developer's current checkout:
+
+```bash
+# Take the SHA from an independent PR review; do NOT derive the expected
+# value from whatever HEAD happens to be in your current checkout.
+export STAGE_B_EXPECTED_SHA="<reviewed 40-character PR #56 commit SHA>"
+git fetch origin feat/stage-b-volcano-queue-cas-v2
+git switch feat/stage-b-volcano-queue-cas-v2
+bash scripts/stage-b-local-gate.sh --self-test
+TEST_POSTGRES_DSN="postgres://<user>:<password>@localhost:5432/gpu_platform_test?sslmode=disable" \
+bash scripts/stage-b-local-gate.sh
+```
+
+Replace the credentials with those for a dedicated local PostgreSQL `*_test` database.
+The contract tests execute schema setup and `TRUNCATE`; the script now **rejects**
+non-loopback PostgreSQL hosts, databases without the `_test` suffix, arbitrary
+query options (including `?host=`, `?dbname=` and `?port=`), absent DSNs,
+dirty checkouts and SHA mismatches. Only a reviewed `sslmode` parameter may be passed.
+A `--self-test` runs nine DSN guard fixtures without Go/Postgres and is
+also a mandatory logged gate in the full local acceptance run.
+The full gate also refuses inherited `PGHOST`, `PGHOSTADDR`, `PGPORT`,
+`PGDATABASE`, `PGSERVICE`, `PGSERVICEFILE` or `PGOPTIONS` settings.
+Such environment-based overrides may redirect the connection, load external
+service definitions or alter the SQL search path despite an apparently safe
+DSN. Clear them explicitly before running tests. This defense is not a
+substitute for validating that the local TCP port is not a tunnel or proxy
+into a production database. A loopback host can still be a tunnel:
+verify the actual database target before running. Never point this at production.
+It uses a detached worktree, runs fmt, vet, focused Volcano tests, Volcano
+race tests, full Go tests, acceptance contract, supply-chain checks and build,
+and emits per-gate logs, SHA256s and a gate table in an external evidence
+directory. A failed or skipped gate must not be labeled PASS. This is not an
+independent-review receipt: a separate reviewer must inspect changed code,
+test coverage and logs. It is not a real Volcano API-server or GPU acceptance.
+
+The low-level focused suite remains `make stage-b-volcano-contract`; the local
+gate incorporates this and additional checks on the same frozen SHA.
+Do not merge until evidence is recorded. The authoritative production registry
+still contains only `kueue`.
+
 ## Create-or-adopt
 
 Every reconcile follows the existing provider recovery contract.
@@ -326,7 +533,8 @@ Fail closed when deterministic name collision or ownership metadata indicates:
 
 - another platform resource;
 - another provider;
-- another generation;
+- a differing generation for an immutable VolcanoJob, or a Queue generation
+  outside the strictly verified monotonic Queue CAS path described above;
 - a different immutable Workload projection.
 
 Do not delete-and-recreate a conflicting object to make reconciliation appear

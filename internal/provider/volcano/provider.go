@@ -54,13 +54,22 @@ func (p *Provider) ReconcilePool(
 	if err != nil {
 		return baseprovider.PoolObservation{}, err
 	}
-	action, err := ensureProjectedObject(ctx, p.client, expected)
+	action, updateUID, err := p.ensurePoolQueue(ctx, expected)
 	if err != nil {
 		return baseprovider.PoolObservation{}, fmt.Errorf("ensure Volcano Queue: %w", classifyProviderError(err))
 	}
 	current, err := p.observeOwnedObject(ctx, expected, "Volcano Queue")
 	if err != nil {
 		return baseprovider.PoolObservation{}, err
+	}
+	// A matching projection alone is not a proof of the UPDATE we just
+	// performed. A deleted/recreated Queue with a new UID must fail closed
+	// even when its generation, owner annotations and quota are identical.
+	if updateUID != "" && string(current.GetUID()) != updateUID {
+		return baseprovider.PoolObservation{}, providerObjectConflict(
+			"Queue UID changed after successful quota UPDATE: updated %s observed %s",
+			updateUID, current.GetUID(),
+		)
 	}
 	state, err := volcanoQueueState(current)
 	if err != nil {
@@ -71,6 +80,13 @@ func (p *Provider) ReconcilePool(
 		ObservedGeneration: projection.Generation,
 		Conditions: []domain.Condition{
 			volcanoQueueReadyCondition(state, action, p.now().UTC()),
+			{
+				Type:               "QuotaApplied",
+				Status:             "Unknown",
+				Reason:             "VolcanoQueueLacksAppliedGenerationEvidence",
+				Message:            "Fresh Queue GET confirms stored quota, not scheduler adoption; require independent workload/admission evidence",
+				LastTransitionTime: p.now().UTC(),
+			},
 		},
 		EvidenceRefs: []string{
 			fmt.Sprintf("volcano://%s/queues/%s", projection.ClusterID, expected.GetName()),
@@ -242,7 +258,7 @@ func volcanoQueueReadyCondition(
 	if state == "Open" {
 		condition.Status = "True"
 		condition.Reason = "VolcanoQueueOpen"
-		condition.Message = "Volcano Queue is open and matches the frozen provider projection"
+		condition.Message = "Volcano Queue is open for admission; this does not establish that the scheduler applied the current quota"
 		return condition
 	}
 	if state == "Pending" {

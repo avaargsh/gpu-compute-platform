@@ -247,3 +247,79 @@ func TestDynamicProjectedObjectClientObserveReadsVolcanoJobPhase(t *testing.T) {
 		t.Fatalf("unexpected dynamic observation: %#v", observation)
 	}
 }
+
+func TestDynamicVolcanoQueueCASSubmitsUIDAndResourceVersion(t *testing.T) {
+	provider, client := fixedProvider(t)
+	original := adoptionPoolProjection()
+	if _, err := provider.ReconcilePool(context.Background(), original); err != nil {
+		t.Fatal(err)
+	}
+	expectedOld, err := ProjectPool(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The dynamic fake does not create server-issued identity. Populate it
+	// explicitly; this test inspects the submitted action, not atomic server CAS.
+	setVolcanoServerIdentity(t, client, expectedOld)
+	// client-go's dynamic fake does not advance resourceVersion. Model the
+	// real API-server UPDATE ACK explicitly so the contract rejects a fake
+	// "successful" write that simply echoes the old CAS version.
+	client.PrependReactor("update", "queues", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		updated := action.(k8stesting.UpdateAction).GetObject().(*unstructured.Unstructured).DeepCopy()
+		updated.SetResourceVersion("18")
+		if err := client.Tracker().Update(volcanoQueueGVR, updated, ""); err != nil {
+			return true, nil, err
+		}
+		return true, updated, nil
+	})
+	actionStart := len(client.Actions())
+
+	next := nextQueueProjection()
+	observed, err := provider.ReconcilePool(context.Background(), next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.ObservedGeneration != next.Generation ||
+		len(observed.Conditions) != 2 ||
+		observed.Conditions[1].Type != "QuotaApplied" ||
+		observed.Conditions[1].Status != "Unknown" {
+		t.Fatalf("dynamic Queue CAS overclaimed scheduler application: %#v", observed)
+	}
+
+	stored, err := client.Resource(volcanoQueueGVR).
+		Get(context.Background(), expectedOld.GetName(), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.GetResourceVersion() != "18" || stored.GetUID() != "volcano-api-uid" {
+		t.Fatalf("fake API ACK must model a new RV on the same Queue UID: uid=%q rv=%q",
+			stored.GetUID(), stored.GetResourceVersion())
+	}
+	updates := 0
+	for _, action := range client.Actions()[actionStart:] {
+		if !action.Matches("update", "queues") {
+			continue
+		}
+		updates++
+		updateAction, ok := action.(k8stesting.UpdateAction)
+		if !ok {
+			t.Fatalf("unexpected Queue update action: %T", action)
+		}
+		object, ok := updateAction.GetObject().(*unstructured.Unstructured)
+		if !ok {
+			t.Fatalf("unexpected Queue update payload: %T", updateAction.GetObject())
+		}
+		if object.GetUID() != "volcano-api-uid" || object.GetResourceVersion() != "17" {
+			t.Fatalf("Queue update lost GET identity: uid=%q rv=%q", object.GetUID(), object.GetResourceVersion())
+		}
+		if object.GetAnnotations()[generationAnnotation] != "5" {
+			t.Fatalf("Queue update generation mismatch: %#v", object.GetAnnotations())
+		}
+		if _, found := object.Object["status"]; found {
+			t.Fatal("spec UPDATE must not submit stale Queue controller status")
+		}
+	}
+	if updates != 1 {
+		t.Fatalf("Queue CAS submitted %d Kubernetes updates, want 1", updates)
+	}
+}

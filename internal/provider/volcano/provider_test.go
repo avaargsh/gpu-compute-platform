@@ -38,8 +38,10 @@ func TestVolcanoProviderReconcilePoolCreatesThenAdopts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if first.ObservedGeneration != projection.Generation ||
-		len(first.Conditions) != 1 ||
+		len(first.Conditions) != 2 ||
 		first.Conditions[0].Status != "False" ||
+		first.Conditions[1].Type != "QuotaApplied" ||
+		first.Conditions[1].Status != "Unknown" ||
 		first.Conditions[0].Reason != "AwaitingVolcanoQueueState" {
 		t.Fatalf("new Queue must wait for controller Open state: %#v", first)
 	}
@@ -64,7 +66,9 @@ func TestVolcanoProviderReconcilePoolCreatesThenAdopts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if replayed.Conditions[0].Status != "True" ||
-		replayed.Conditions[0].Reason != "VolcanoQueueOpen" {
+		replayed.Conditions[0].Reason != "VolcanoQueueOpen" ||
+		replayed.Conditions[1].Type != "QuotaApplied" ||
+		replayed.Conditions[1].Status != "Unknown" {
 		t.Fatalf("Open Queue did not become Ready: %#v", replayed.Conditions)
 	}
 }
@@ -361,7 +365,10 @@ func TestVolcanoProviderFreshObservationNotFoundIsRetryable(t *testing.T) {
 	if err == nil || !baseprovider.IsRetryable(err) {
 		t.Fatalf("post-ensure disappearance must be retryable: %v", err)
 	}
-	if client.createCalls != 1 || client.getCalls != 2 {
+	// Queue creation rechecks absence inside ensureProjectedObject: the
+	// initial Queue GET, create/adopt GET and independent observation GET
+	// are separate calls; none may be mistaken for an ownership receipt.
+	if client.createCalls != 1 || client.getCalls != 3 {
 		t.Fatalf("unexpected calls: gets=%d creates=%d", client.getCalls, client.createCalls)
 	}
 }
