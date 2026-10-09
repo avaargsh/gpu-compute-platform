@@ -137,18 +137,35 @@ created_uid="$(jq -r '.metadata.uid // empty' "$evidence/create-response.json")"
 kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
   >"$evidence/initial-get.json" || die "fresh Queue GET failed"
 
-jq -e '.metadata.uid != null and .metadata.uid != "" and
-       .metadata.resourceVersion != null and
-       (.spec.capability | keys | length) == 1 and
-       .spec.capability["nvidia.com/gpu"] == "8"' "$evidence/initial-get.json" >/dev/null ||
-  die "stored Queue UID/RV/capability does not match expected projection"
+# CREATE's server-issued UID is the identity boundary. Matching name and
+# quota alone could be an unrelated replacement Queue.
+jq -e --arg uid "$created_uid" --arg token "$name" '
+  .metadata.uid == $uid and
+  .metadata.annotations["stageb.volcano.probe/token"] == $token and
+  .metadata.annotations["ai.compute/pool-id"] == "stageb-api-probe" and
+  .metadata.annotations["ai.compute/generation"] == "4" and
+  .metadata.resourceVersion != null and .metadata.resourceVersion != "" and
+  (.spec.capability | keys | length) == 1 and
+  .spec.capability["nvidia.com/gpu"] == "8"
+' "$evidence/initial-get.json" >/dev/null ||
+  die "CREATE/readback UID, nonce, owner, generation or quota differs; refuse mutation"
 
-# A metadata-only concurrent actor advances resourceVersion. Replay of the
-# frozen old GET must return a real Kubernetes 409; any other failure is blocked.
-kubectl --context "$context" annotate queues.scheduling.volcano.sh "$name" \
-  stageb.volcano.probe/rv-bump=concurrent --overwrite \
-  >"$evidence/concurrent-update.log" 2>&1 ||
-  die "cannot inject a concurrent resourceVersion update"
+# Inject concurrency through resourceVersion-fenced UPDATE, not a name-only
+# kubectl annotate. A replacement between GET and UPDATE must yield conflict
+# rather than writing to an unrelated Queue.
+jq '.metadata.annotations["stageb.volcano.probe/rv-bump"] = "concurrent" |
+    del(.status)' "$evidence/initial-get.json" >"$evidence/concurrent-annotate-request.json" ||
+  die "cannot prepare fenced concurrent UPDATE"
+kubectl --context "$context" replace -f "$evidence/concurrent-annotate-request.json" -o json \
+  >"$evidence/concurrent-update-response.json" 2>"$evidence/concurrent-update.stderr" ||
+  die "concurrent UPDATE failed or Queue identity changed; refuse name-only retry"
+old_rv="$(jq -r '.metadata.resourceVersion' "$evidence/initial-get.json")"
+jq -e --arg uid "$created_uid" --arg old_rv "$old_rv" '
+  .metadata.uid == $uid and
+  .metadata.resourceVersion != null and .metadata.resourceVersion != $old_rv and
+  .metadata.annotations["stageb.volcano.probe/rv-bump"] == "concurrent"
+' "$evidence/concurrent-update-response.json" >/dev/null ||
+  die "concurrent UPDATE ACK lost Queue UID or did not advance resourceVersion"
 
 # The same concurrent write must also fence a stale conditional DELETE.
 # This intentionally uses the PRE-annotation UID/RV and must return 409;
