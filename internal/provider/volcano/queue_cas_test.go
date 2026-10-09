@@ -277,7 +277,6 @@ func TestVolcanoQueueCASRejectsForeignTakeoverAfterConflict(t *testing.T) {
 	}
 }
 
-
 func TestVolcanoQueueCASSameGenerationSpecDriftFailsClosed(t *testing.T) {
 	client := &queueCASTestClient{object: oldQueueWithServerIdentity(t)}
 	desired := adoptionPoolProjection()
