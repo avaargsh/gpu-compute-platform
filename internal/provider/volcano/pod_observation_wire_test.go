@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -50,9 +51,11 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 
 			var mu sync.Mutex
 			var jobGets, podLists, podGets, forbiddenWrites int
+			var orderedCalls []string
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				defer mu.Unlock()
+				orderedCalls = append(orderedCalls, r.Method+" "+r.URL.Path)
 				w.Header().Set("Content-Type", "application/json")
 				if r.Method != http.MethodGet {
 					forbiddenWrites++
@@ -121,6 +124,13 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 			if jobGets != 2 || podLists != 1 || podGets != 1 || forbiddenWrites != 0 {
 				t.Fatalf("wire calls: jobs GET=%d, pods LIST=%d, pods GET=%d, writes=%d",
 					jobGets, podLists, podGets, forbiddenWrites)
+			}
+			wantOrder := []string{
+				"GET " + jobPath, "GET " + jobPath,
+				"GET " + listPath, "GET " + podPath,
+			}
+			if !reflect.DeepEqual(orderedCalls, wantOrder) {
+				t.Fatalf("Pod readback is out of order: got=%v want=%v", orderedCalls, wantOrder)
 			}
 		})
 	}
