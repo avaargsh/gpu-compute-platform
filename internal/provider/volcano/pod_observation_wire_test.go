@@ -24,6 +24,7 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 		name        string
 		readbackUID string
 		readbackRV  string
+		invalidLink string
 		wantStatus  string
 		wantReason  string
 	}{
@@ -48,9 +49,31 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 			wantStatus:  "Unknown",
 			wantReason:  "VolcanoPodReadbackDrift",
 		},
+		{
+			name:        "wrong PodGroup link on LIST",
+			invalidLink: "group",
+			wantStatus:  "Unknown",
+			wantReason:  "VolcanoPodOwnerMismatch",
+		},
+		{
+			name:        "wrong task index on LIST",
+			invalidLink: "index",
+			wantStatus:  "Unknown",
+			wantReason:  "VolcanoPodOwnerMismatch",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			job, pod := jobAndPodFixture(t)
+			switch tt.invalidLink {
+			case "group":
+				annotations := pod.GetAnnotations()
+				annotations["scheduling.k8s.io/group-name"] = "foreign-podgroup"
+				pod.SetAnnotations(annotations)
+			case "index":
+				labels := pod.GetLabels()
+				labels["volcano.sh/task-index"] = "1"
+				pod.SetLabels(labels)
+			}
 			wantSelector := labels.Set{
 				"volcano.sh/job-name": job.GetName(),
 			}.AsSelector().String()
@@ -132,13 +155,20 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			if jobGets != 2 || podLists != 1 || podGets != 1 || forbiddenWrites != 0 {
+			wantPodGets := 1
+			if tt.invalidLink != "" {
+				wantPodGets = 0
+			}
+			if jobGets != 2 || podLists != 1 || podGets != wantPodGets || forbiddenWrites != 0 {
 				t.Fatalf("wire calls: jobs GET=%d, pods LIST=%d, pods GET=%d, writes=%d",
 					jobGets, podLists, podGets, forbiddenWrites)
 			}
 			wantOrder := []string{
 				"GET " + jobPath, "GET " + jobPath,
-				"GET " + listPath, "GET " + podPath,
+				"GET " + listPath,
+			}
+			if wantPodGets == 1 {
+				wantOrder = append(wantOrder, "GET "+podPath)
 			}
 			if !reflect.DeepEqual(orderedCalls, wantOrder) {
 				t.Fatalf("Pod readback is out of order: got=%v want=%v", orderedCalls, wantOrder)
