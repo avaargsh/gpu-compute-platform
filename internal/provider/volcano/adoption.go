@@ -161,7 +161,9 @@ func allowedVolcanoDefault(kind, path, key string, value any) bool {
 		case "parent":
 			return reflect.DeepEqual(value, "root")
 		case "reclaimable":
-			return reflect.DeepEqual(value, false)
+			return reflect.DeepEqual(value, true)
+		case "dequeueStrategy":
+			return reflect.DeepEqual(value, "traverse")
 		case "weight":
 			return reflect.DeepEqual(value, int64(1))
 		}

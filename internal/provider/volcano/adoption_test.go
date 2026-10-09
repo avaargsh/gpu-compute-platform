@@ -269,7 +269,8 @@ func TestClassifyExistingObjectAllowsVolcanoAndAPIServerDefaultMapFields(t *test
 	existingQueue := queue.DeepCopy()
 	queueSpec, _, _ := unstructured.NestedMap(existingQueue.Object, "spec")
 	queueSpec["parent"] = "root"
-	queueSpec["reclaimable"] = false
+	queueSpec["reclaimable"] = true
+	queueSpec["dequeueStrategy"] = "traverse"
 	queueSpec["weight"] = int64(1)
 	if err := unstructured.SetNestedMap(existingQueue.Object, queueSpec, "spec"); err != nil {
 		t.Fatal(err)
@@ -354,6 +355,20 @@ func TestClassifyExistingObjectRejectsUnreviewedSpecDefaultsAndInjectedBehavior(
 			base: queue,
 			mutate: func(obj *unstructured.Unstructured) {
 				obj.Object["spec"].(map[string]any)["weight"] = int64(999)
+			},
+		},
+		{
+			name: "queue false reclaimable is not the pinned Volcano default",
+			base: queue,
+			mutate: func(obj *unstructured.Unstructured) {
+				obj.Object["spec"].(map[string]any)["reclaimable"] = false
+			},
+		},
+		{
+			name: "queue alternate dequeue strategy",
+			base: queue,
+			mutate: func(obj *unstructured.Unstructured) {
+				obj.Object["spec"].(map[string]any)["dequeueStrategy"] = "fifo"
 			},
 		},
 		{

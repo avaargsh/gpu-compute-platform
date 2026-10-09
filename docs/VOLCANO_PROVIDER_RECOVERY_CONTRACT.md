@@ -135,9 +135,9 @@ Given an expected projection and an observed object:
 Stage B now permits a **narrow, exact-valued defaulting allowlist** while
 comparing every platform-projected field, including list shape and GPU resource
 maps. All other extra spec fields are conflicts, even with the same generation.
-The provisional fixtures permit only:
+The Stage B v1.15.3 reviewed API-server fixtures permit only:
 
-- Queue `spec.parent=root`, `spec.reclaimable=false`, `spec.weight=1`;
+- Queue `spec.parent=root`, `spec.reclaimable=true`, `spec.dequeueStrategy=traverse`, `spec.weight=1`;
 - VolcanoJob `spec.maxRetry=3`;
 - Job Pod template `dnsPolicy=ClusterFirst` and
   `terminationGracePeriodSeconds=30`.
@@ -145,8 +145,7 @@ The provisional fixtures permit only:
 Additional `spec` fields such as Pod `hostNetwork`, `nodeSelector`, or
 container resource requests are **not** adoptable. The allowlist captures
 Stage B test-fixture assumptions, not verified universal Volcano defaults.
-A real kind+Volcano server-defaulting test must confirm each value before
-this can become a production adapter. Version changes fail closed pending
+The Queue values above were confirmed by pinned Volcano v1.15.3 on disposable kind; **Job/PodGroup and runtime promotion are separate unproven gates**. Version changes fail closed pending
 review, not silently widened via generic map-subset comparison.
 
 This classifier validates the decision boundary only. It does not yet prove a
@@ -403,14 +402,18 @@ Neither an UPDATE ACK, a fresh GET, nor an Open status may be promoted into
 The additional condition is intentionally visible to Stage B consumers. It
 is not a reason to register Volcano as a production adapter.
 
-A second **unresolved upstream-default mismatch** needs a real API-server
-probe: the current test-fixture allowlist admits `spec.reclaimable=false`
-while Volcano's Queue documentation says its default is `true`; the
-current API also lists the `dequeueStrategy=traverse` default. Do not
-silently widen the allowlist on the strength of these docs alone: pin the
-specific Volcano release/CRD, create a Queue in a real kind API-server,
-capture the stored resource, and update comparator fixtures based on the
-observed JSON. Until then, adoption must fail closed on unreviewed fields.
+**Resolved from real API-server evidence (2026-10-09):** temp-runner
+[run #37918508288](https://github.com/avaargsh/temp-runner/actions/runs/37918508288)
+deployed pinned Volcano v1.15.3 in disposable kind and created a Queue.
+Its preserved `queue-cas/observed-defaults.json` showed exactly:
+`parent=root`, `reclaimable=true`, `dequeueStrategy=traverse`,
+`weight=1`. The same run proved stale UPDATE and conditional DELETE
+conflicts, and correctly blocked the old narrower comparator. The
+classifier and the live comparator now accept **only these exact reviewed
+defaults**; unrelated or alternative scheduling fields still fail closed.
+This evidence does **not** establish PodGroup/scheduler quota application,
+GPU execution or production provider readiness. A clean rerun at the new
+exact SHA is mandatory before merging.
 
 The conflict/replacement unit tests remain fake-client contract tests, not
 Kubernetes atomic precondition or Volcano controller proof.
