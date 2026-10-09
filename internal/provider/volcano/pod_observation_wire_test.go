@@ -27,16 +27,16 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 		wantReason  string
 	}{
 		{
-			name: "consistent Pod HTTP readback",
+			name:        "consistent Pod HTTP readback",
 			readbackUID: "pod-uid-1",
-			wantStatus: "True",
-			wantReason: "VolcanoOwnedPodReady",
+			wantStatus:  "True",
+			wantReason:  "VolcanoOwnedPodReady",
 		},
 		{
-			name: "recreated Pod same name over HTTP",
+			name:        "recreated Pod same name over HTTP",
 			readbackUID: "recreated-pod-uid",
-			wantStatus: "Unknown",
-			wantReason: "VolcanoPodReadbackDrift",
+			wantStatus:  "Unknown",
+			wantReason:  "VolcanoPodReadbackDrift",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -79,7 +79,7 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{
 						"apiVersion": "v1", "kind": "PodList",
 						"metadata": map[string]any{"resourceVersion": "31"},
-						"items": []any{pod.Object},
+						"items":    []any{pod.Object},
 					})
 				case podPath:
 					podGets++
