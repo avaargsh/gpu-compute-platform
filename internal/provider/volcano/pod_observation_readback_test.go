@@ -136,3 +136,29 @@ func TestVolcanoPodReadbackRequiresServerResourceVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestVolcanoUnreadyPodSkipsPositiveReadback(t *testing.T) {
+	job, pod := jobAndPodFixture(t)
+	pod.Object["status"].(map[string]any)["conditions"] = []any{
+		map[string]any{"type": "Ready", "status": "False"},
+	}
+	client := fakeJobPodClient(job, pod)
+	provider, err := NewProvider(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := provider.ReconcileWorkload(
+		context.Background(), adoptionWorkloadProjection(),
+	)
+	if err != nil || len(observed.Conditions) != 2 ||
+		observed.Conditions[0].Status != "False" ||
+		observed.Conditions[1].Status != "False" ||
+		observed.Conditions[1].Reason != "VolcanoOwnedPodNotReady" {
+		t.Fatalf("unready Pod must remain unready: observed=%#v err=%v", observed, err)
+	}
+	for _, action := range client.Actions() {
+		if action.Matches("get", "pods") {
+			t.Fatalf("an already-unready LIST must not run positive readback: %#v", action)
+		}
+	}
+}
