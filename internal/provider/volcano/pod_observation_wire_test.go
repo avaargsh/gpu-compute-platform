@@ -64,6 +64,7 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			job, pod := jobAndPodFixture(t)
+			pg := jobPodGroupFixture(t, job)
 			switch tt.invalidLink {
 			case "group":
 				annotations := pod.GetAnnotations()
@@ -81,9 +82,11 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 				job.GetNamespace(), job.GetName())
 			listPath := fmt.Sprintf("/api/v1/namespaces/%s/pods", job.GetNamespace())
 			podPath := listPath + "/" + pod.GetName()
+			pgPath := fmt.Sprintf("/apis/scheduling.volcano.sh/v1beta1/namespaces/%s/podgroups/%s",
+				job.GetNamespace(), pg.GetName())
 
 			var mu sync.Mutex
-			var jobGets, podLists, podGets, forbiddenWrites int
+			var jobGets, podLists, podGets, pgGets, forbiddenWrites int
 			var orderedCalls []string
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
@@ -114,6 +117,12 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 						"metadata": map[string]any{"resourceVersion": "31"},
 						"items":    []any{pod.Object},
 					})
+				case pgPath:
+					pgGets++
+					if r.URL.RawQuery != "" {
+						t.Errorf("PodGroup GET unexpectedly has query: %s", r.URL.RawQuery)
+					}
+					_ = json.NewEncoder(w).Encode(pg.Object)
 				case podPath:
 					podGets++
 					if r.URL.RawQuery != "" {
@@ -145,7 +154,13 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if observation.Phase != "Running" || len(observation.Conditions) != 2 ||
+			wantConditions := 2
+			wantPgGets := 0
+			if tt.wantStatus == "True" {
+				wantConditions = 3
+				wantPgGets = 2
+			}
+			if observation.Phase != "Running" || len(observation.Conditions) != wantConditions ||
 				observation.Conditions[0].Type != "Ready" ||
 				observation.Conditions[0].Status != "False" ||
 				observation.Conditions[1].Type != "PodsReady" ||
@@ -153,15 +168,20 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 				observation.Conditions[1].Reason != tt.wantReason {
 				t.Fatalf("unexpected wire-observed state: %#v", observation)
 			}
+			if wantPgGets == 2 && (observation.Conditions[2].Type != "PodGroupLinked" ||
+				observation.Conditions[2].Status != "True") {
+				t.Fatalf("consistent HTTP PodGroup evidence not linked: %#v", observation)
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			wantPodGets := 1
 			if tt.invalidLink != "" {
 				wantPodGets = 0
 			}
-			if jobGets != 2 || podLists != 1 || podGets != wantPodGets || forbiddenWrites != 0 {
-				t.Fatalf("wire calls: jobs GET=%d, pods LIST=%d, pods GET=%d, writes=%d",
-					jobGets, podLists, podGets, forbiddenWrites)
+			if jobGets != 2 || podLists != 1 || podGets != wantPodGets ||
+				pgGets != wantPgGets || forbiddenWrites != 0 {
+				t.Fatalf("wire calls: jobs GET=%d, pods LIST=%d, pods GET=%d, groups GET=%d, writes=%d",
+					jobGets, podLists, podGets, pgGets, forbiddenWrites)
 			}
 			wantOrder := []string{
 				"GET " + jobPath, "GET " + jobPath,
@@ -169,6 +189,9 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 			}
 			if wantPodGets == 1 {
 				wantOrder = append(wantOrder, "GET "+podPath)
+			}
+			if wantPgGets == 2 {
+				wantOrder = append(wantOrder, "GET "+pgPath, "GET "+pgPath)
 			}
 			if !reflect.DeepEqual(orderedCalls, wantOrder) {
 				t.Fatalf("Pod readback is out of order: got=%v want=%v", orderedCalls, wantOrder)
