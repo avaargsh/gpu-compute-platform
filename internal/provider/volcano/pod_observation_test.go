@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -49,6 +50,7 @@ func jobAndPodFixture(t *testing.T) (*unstructured.Unstructured, *unstructured.U
 		APIVersion: "batch.volcano.sh/v1alpha1", Kind: "Job",
 		Name: job.GetName(), UID: job.GetUID(), Controller: &controller,
 	}})
+	pod.SetResourceVersion("31")
 	return job, pod
 }
 
@@ -88,7 +90,16 @@ func TestVolcanoRunningJobAddsUIDBoundPodReadinessWithoutReadyPromotion(t *testi
 		t.Fatalf("UID-bound Pod is observed, not promoted to scheduler Ready: %#v", observation)
 	}
 	podLists := 0
+	podGets := 0
 	for _, action := range client.Actions() {
+		if action.Matches("get", "pods") {
+			podGets++
+			getAction, ok := action.(k8stesting.GetAction)
+			if !ok || action.GetNamespace() != job.GetNamespace() ||
+				getAction.GetName() != pod.GetName() {
+				t.Fatalf("Pod GET must re-read the one named Pod in the Job namespace: %#v", action)
+			}
+		}
 		if action.Matches("list", "pods") {
 			podLists++
 			listAction, ok := action.(k8stesting.ListAction)
@@ -106,8 +117,8 @@ func TestVolcanoRunningJobAddsUIDBoundPodReadinessWithoutReadyPromotion(t *testi
 			t.Fatalf("Pod evidence must remain strictly read-only: %#v", action)
 		}
 	}
-	if podLists != 1 {
-		t.Fatalf("Pod LIST calls=%d, want 1", podLists)
+	if podLists != 1 || podGets != 1 {
+		t.Fatalf("Pod LIST/GET calls=(%d,%d), want (1,1)", podLists, podGets)
 	}
 }
 
