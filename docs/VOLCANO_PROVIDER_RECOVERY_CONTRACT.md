@@ -322,14 +322,16 @@ git fetch origin feat/stage-b-volcano-queue-cas-v2
 git switch feat/stage-b-volcano-queue-cas-v2
 git pull --ff-only
 
-STAGE_B_EXPECTED_SHA="$(git rev-parse HEAD)" \
+STAGE_B_EXPECTED_SHA="<40-hex-independently-reviewed-PR-head>" \
 STAGE_B_KIND_CONTEXT="kind-stageb-volcano" \
 STAGE_B_KIND_MUTATION_ACK=1 \
 STAGE_B_EXPECTED_QUEUE_CRD_SPEC_SHA256="<64-hex-pinned-schema-digest>" \
 bash scripts/e2e/volcano-queue-apiserver-contract.sh
 ```
 
-The 64-hex schema digest is a **reviewed release baseline**: compute it
+The 40-hex commit SHA must come from independent review, **not** by
+reading the local `HEAD` being tested (which would make the freeze check
+vacuous). The 64-hex schema digest is a **reviewed release baseline**: compute it
 from a trusted copy of the Queue CRD **as persisted after Kubernetes CRD
 defaulting** (not from the same live cluster run being tested), using
 `jq -S '.spec' pinned-queue-crd.json | sha256sum`. Record the Volcano
@@ -338,7 +340,8 @@ blocks before creating any resource if the installed Queue CRD schema differs.
 
 This emits **versioned, reviewable** evidence under a unique directory
 outside the repository:
-- original CREATE request, fresh readback and exact server default values;
+- original CREATE request, first readback fenced to CREATE UID + probe nonce + owner/generation, and exact server default values;
+- metadata concurrent-write injection via UID-bearing, resourceVersion-fenced `kubectl replace` (never name-only `kubectl annotate`), with a checked ACK;
 - installed Queue CRD JSON, canonical CRD spec SHA256 and Kubernetes version JSON;
 - a real stale-resourceVersion UPDATE rejected as `409 Conflict`;
 - an intentionally stale UID/RV **conditional DELETE** rejected as `409 Conflict`, followed by a fresh GET proving the Queue survived;
@@ -350,7 +353,11 @@ The test fails closed if live server defaults disagree with the current
 reviewed comparator (notably `reclaimable` and `dequeueStrategy`), if any
 CAS/identity step is ambiguous, or if it cannot independently prove cleanup.
 On successful CREATE, the test records the API-server-issued **UID from
-the CREATE response**. Before cleanup, a fresh GET must match that original
+the CREATE response**. **Before the first post-CREATE mutation**, the fresh
+GET must match that UID, probe token, owner, generation and quota. The
+resourceVersion-fenced metadata update refuses concurrent replacements; a
+new Queue sharing the old name cannot be annotated by accident. Before
+cleanup, a fresh GET must match that original
 UID, the unique test nonce, and a nonempty live resourceVersion. Cleanup then
 uses raw Kubernetes `DeleteOptions` with those observed UID and RV
 preconditions. Unlike `kubectl delete queues/<name>`, this enforces atomic
