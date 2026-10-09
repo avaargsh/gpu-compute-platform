@@ -6,8 +6,8 @@ import (
 
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -29,18 +29,18 @@ func jobAndPodFixture(t *testing.T) (*unstructured.Unstructured, *unstructured.U
 	pod := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1", "kind": "Pod",
 		"metadata": map[string]any{
-			"name": job.GetName() + "-workload-0",
+			"name":      job.GetName() + "-workload-0",
 			"namespace": job.GetNamespace(),
-			"uid": "pod-uid-1",
+			"uid":       "pod-uid-1",
 			"labels": map[string]any{
-				"volcano.sh/job-name": job.GetName(),
+				"volcano.sh/job-name":      job.GetName(),
 				"volcano.sh/job-namespace": job.GetNamespace(),
-				"volcano.sh/task-spec": "workload",
+				"volcano.sh/task-spec":     "workload",
 			},
 		},
 		"spec": map[string]any{"nodeName": "node-a"},
 		"status": map[string]any{
-			"phase": "Running",
+			"phase":      "Running",
 			"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
 		},
 	}}
@@ -61,8 +61,8 @@ func fakeJobPodClient(job *unstructured.Unstructured, pods ...*unstructured.Unst
 		runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{
 			volcanoQueueGVR: "QueueList",
-			volcanoJobGVR: "JobList",
-			volcanoPodGVR: "PodList",
+			volcanoJobGVR:   "JobList",
+			volcanoPodGVR:   "PodList",
 		},
 		objects...,
 	)
@@ -111,9 +111,9 @@ func TestVolcanoRunningJobAddsUIDBoundPodReadinessWithoutReadyPromotion(t *testi
 
 func TestVolcanoPodReadinessNegativeControls(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		mutate func(*unstructured.Unstructured, *unstructured.Unstructured)
-		want string
+		want   string
 	}{
 		{"foreign UID", func(_, p *unstructured.Unstructured) {
 			owners := p.GetOwnerReferences()
@@ -229,4 +229,3 @@ func TestPodReadinessRejectsDuplicateReadyConditions(t *testing.T) {
 		t.Fatal("duplicate Ready conditions must not provide positive evidence")
 	}
 }
-
