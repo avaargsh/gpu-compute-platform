@@ -437,7 +437,12 @@ When `ReconcilePool` observes a Queue at a **lower** generation:
 4. Treat a `409 Conflict` or ambiguous/lost UPDATE acknowledgement as a
    **retryable reconciliation error**, *not* an instruction to retry the same
    mutation. Agent backoff must start from a fresh GET and revalidate identity.
-5. On successful UPDATE response, require the same UID and exact new projection.
+5. On successful UPDATE response, require the same UID, an **ACK
+   resourceVersion that is nonempty and differs from the submitted CAS
+   version**, and exact new projection. An empty or unchanged response RV
+   makes the operation's acknowledgement ambiguous: report a retryable
+   error and only reconcile again from a fresh GET (never blindly repeat
+   the UPDATE). This is not a cryptographic ownership proof.
    Reconcile then independently GETs and validates the observed Queue **and
    matches its UID to the successful UPDATE response**. Equal names, generation,
    ownership annotations and quotas do not prove identity if a Queue was
