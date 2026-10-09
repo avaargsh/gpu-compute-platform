@@ -311,8 +311,13 @@ part of v0.1 acceptance or the normal local unit-test gate: it mutates a
 uniquely named, cluster-scoped Queue on a specifically authorized disposable
 kind cluster.
 
-Prerequisites: `kubectl`, `jq`, a disposable kind context whose name starts
-with `kind-`, and an installed, version-pinned Volcano Queue CRD. The script
+Prerequisites: `kubectl`, `kind`, `jq`, a **local disposable kind cluster**
+with a corresponding `kind-*` context, and an installed, version-pinned
+Volcano Queue CRD. The preflight requires `kind get clusters` to enumerate
+the named cluster and compares the chosen context's API-server endpoint and
+CA against `kind get kubeconfig --name <cluster>`; a similarly named arbitrary
+context cannot authorize mutation. No kubeconfig credentials are saved to
+the evidence directory. The script
 does **not** install/upgrade Volcano or require a GPU. Do not point this
 experiment at any production cluster.
 
