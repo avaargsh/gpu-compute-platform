@@ -23,18 +23,28 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
 		readbackUID string
+		readbackRV  string
 		wantStatus  string
 		wantReason  string
 	}{
 		{
 			name:        "consistent Pod HTTP readback",
 			readbackUID: "pod-uid-1",
+			readbackRV:  "31",
 			wantStatus:  "True",
 			wantReason:  "VolcanoOwnedPodReady",
 		},
 		{
 			name:        "recreated Pod same name over HTTP",
 			readbackUID: "recreated-pod-uid",
+			readbackRV:  "31",
+			wantStatus:  "Unknown",
+			wantReason:  "VolcanoPodReadbackDrift",
+		},
+		{
+			name:        "same UID changed resourceVersion over HTTP",
+			readbackUID: "pod-uid-1",
+			readbackRV:  "32",
 			wantStatus:  "Unknown",
 			wantReason:  "VolcanoPodReadbackDrift",
 		},
@@ -88,6 +98,7 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 					}
 					fresh := pod.DeepCopy()
 					fresh.SetUID(types.UID(tt.readbackUID))
+					fresh.SetResourceVersion(tt.readbackRV)
 					_ = json.NewEncoder(w).Encode(fresh.Object)
 				default:
 					t.Errorf("unexpected Kubernetes dynamic REST path %s", r.URL.Path)
