@@ -19,6 +19,7 @@ func fakeVolcanoDynamicClient() *dynamicfake.FakeDynamicClient {
 		map[schema.GroupVersionResource]string{
 			volcanoQueueGVR: "QueueList",
 			volcanoJobGVR:   "JobList",
+			volcanoPodGVR:   "PodList",
 		},
 	)
 }
