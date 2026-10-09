@@ -21,8 +21,8 @@ type queueCASTestClient struct {
 	updateCalls   int
 	failConflict  bool
 	lostAck       bool
-	postACKObject  *unstructured.Unstructured
-	ackRVOverride  *string
+	postACKObject *unstructured.Unstructured
+	ackRVOverride *string
 }
 
 func (c *queueCASTestClient) Get(
