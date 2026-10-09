@@ -132,6 +132,17 @@ func (p *Provider) ReconcileWorkload(
 			)
 		}
 		conditions = append(conditions, podCondition)
+		if podCondition.Status == "True" {
+			// PodGroup linkage is a second, independent read-only identity
+			// observation, never a reason to promote the Job's Ready state.
+			link, err := p.observeOwnedPodGroupLink(ctx, current, now)
+			if err != nil {
+				return baseprovider.WorkloadObservation{}, fmt.Errorf(
+					"observe Volcano PodGroup linkage: %w", err,
+				)
+			}
+			conditions = append(conditions, link)
+		}
 	}
 	switch phase {
 	case "Completed":
