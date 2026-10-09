@@ -365,7 +365,10 @@ func TestVolcanoProviderFreshObservationNotFoundIsRetryable(t *testing.T) {
 	if err == nil || !baseprovider.IsRetryable(err) {
 		t.Fatalf("post-ensure disappearance must be retryable: %v", err)
 	}
-	if client.createCalls != 1 || client.getCalls != 2 {
+	// Queue creation rechecks absence inside ensureProjectedObject: the
+	// initial Queue GET, create/adopt GET and independent observation GET
+	// are separate calls; none may be mistaken for an ownership receipt.
+	if client.createCalls != 1 || client.getCalls != 3 {
 		t.Fatalf("unexpected calls: gets=%d creates=%d", client.getCalls, client.createCalls)
 	}
 }
