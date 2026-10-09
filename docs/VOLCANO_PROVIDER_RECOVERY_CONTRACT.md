@@ -276,6 +276,31 @@ remains an unregistered falsification target. Full provider status translation,
 evidence projection into the platform API, real Volcano CRDs, kind+Volcano
 acceptance, process-takeover proof, and real-GPU execution remain separate gates.
 
+## Standalone unregistered provider adapter (Stage B)
+
+The CPU-only Stage B integration provides a standalone `NewProvider(dynamic.Interface)`
+which implements the portable provider SPI but is **not** registered in the
+production Cluster Runtime or advertised as an executable cluster capability.
+
+- `ReconcilePool`: ensure deterministic Queue, then GET/verify its current
+  ownership and generation before translating controller status.
+- `ReconcileWorkload`: ensure deterministic VolcanoJob, then independently
+  GET/verify its current ownership and generation. A mere `Running` phase
+  does **not** imply `Ready=True`: Pod/PodGroup readiness evidence remains an
+  explicit future contract. A terminal `Completed` phase can establish
+  completion.
+- `DeletePool` / `DeleteWorkload`: reuse the already-tested
+  `deleteProjectedObject` primitive from PR #54, including UID +
+  resourceVersion API preconditions and observed-NotFound convergence.
+  There must be no parallel name-only deletion implementation.
+- Retryable transport failures are classified for the existing Agent retry
+  contract, but cluster-agent registration, kind+Volcano, lease-takeover
+  integration and real-GPU acceptance are independent promotion gates.
+
+This is an executable contract/falsification target only. The Kueue path
+remains the only production execution path. Other overlapping old Stage B
+draft PRs must be consolidated without reintroducing a weaker DELETE path.
+
 ## Create-or-adopt
 
 Every reconcile follows the existing provider recovery contract.
