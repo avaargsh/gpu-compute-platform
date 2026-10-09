@@ -16,7 +16,10 @@ candidate must carry:
 
 - `apiVersion=v1`, `kind=Pod`, nonempty Pod UID, matching namespace;
 - `volcano.sh/job-name`, `volcano.sh/job-namespace`,
-  `volcano.sh/task-spec=workload`;
+  `volcano.sh/task-spec=workload` and `volcano.sh/task-index=0`;
+- the `scheduling.k8s.io/group-name` annotation exactly equal to
+  `<JobName>-<JobUID>` (the v1.15.3 Job-controller-generated PodGroup
+  identity); **this verifies a link, not PodGroup existence or admission**;
 - a *controller* ownerReference to the observed Job API version, kind,
   name and **Kubernetes Job UID**;
 - no deletion timestamp; Pod phase `Running`; nonempty `spec.nodeName`;
@@ -56,7 +59,7 @@ make stage-b-volcano-contract
 
 The authored synthetic tests exercise a UID-owned Ready Pod, label-selector
 and namespace scoping, prohibited Pod writes, foreign job UID/controller,
-wrong task, missing Pod UID, Pending/no-node/non-Ready Pod, missing Job UID,
+wrong task, incorrect/missing task-index, incorrect/missing PodGroup link, missing Pod UID, Pending/no-node/non-Ready Pod, missing Job UID,
 missing Pods, immutable Job task drift, duplicate Ready condition, and
 transient list failure; additionally a vanished/recreated Pod on GET,
 changed resourceVersion, stale Ready, foreign owner, terminating Pod, missing
@@ -74,6 +77,27 @@ readback that keeps the Pod name but replaces the UID must yield
 `PodsReady=Unknown`. This is **not a Kubernetes API server**, and cannot
 prove controller defaulting, scheduler admission or atomic multi-object
 consistency. The test runs in the ordinary Go test suite without GPUs.
+
+## Pinned upstream implementation evidence (static, not live acceptance)
+
+For the **Volcano v1.15.3** annotated tag
+(`d2dd7024f4af3070f9d99d68a78973893908a743`), the checked upstream
+`pkg/controllers/job/job_controller_util.go` blob
+(`66fae5dc75a6b4f216388badfbd0d8bb1b6fcea2`) constructs a Pod
+with the Job controller ownerReference (lines 46-55), writes the
+`scheduling.k8s.io/group-name` annotation as
+`job.Name + "-" + job.UID` (lines 110-115), and assigns
+`volcano.sh/task-index`, `job-name`, `task-spec` and `job-namespace`
+labels (lines 143-152).
+
+Immutable source:
+https://github.com/volcano-sh/volcano/blob/d2dd7024f4af3070f9d99d68a78973893908a743/pkg/controllers/job/job_controller_util.go
+
+These source facts justify stricter **unregistered** read-only identity
+fences for the one-task/one-replica fixture. They do not prove that a
+deployed Volcano controller follows this source, that the PodGroup exists,
+or that any workload was admitted. Actual kind+Volcano v1.15.3 is still
+required before promotion.
 
 ## Promotion/compatibility gates
 
