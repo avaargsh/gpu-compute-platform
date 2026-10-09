@@ -36,6 +36,10 @@ func jobAndPodFixture(t *testing.T) (*unstructured.Unstructured, *unstructured.U
 				"volcano.sh/job-name":      job.GetName(),
 				"volcano.sh/job-namespace": job.GetNamespace(),
 				"volcano.sh/task-spec":     "workload",
+				"volcano.sh/task-index":    "0",
+			},
+			"annotations": map[string]any{
+				"scheduling.k8s.io/group-name": job.GetName() + "-" + string(job.GetUID()),
 			},
 		},
 		"spec": map[string]any{"nodeName": "node-a"},
@@ -145,6 +149,26 @@ func TestVolcanoPodReadinessNegativeControls(t *testing.T) {
 		}, "Unknown"},
 		{"missing pod UID", func(_, p *unstructured.Unstructured) {
 			p.SetUID("")
+		}, "Unknown"},
+		{"foreign task index", func(_, p *unstructured.Unstructured) {
+			labels := p.GetLabels()
+			labels["volcano.sh/task-index"] = "1"
+			p.SetLabels(labels)
+		}, "Unknown"},
+		{"missing task index", func(_, p *unstructured.Unstructured) {
+			labels := p.GetLabels()
+			delete(labels, "volcano.sh/task-index")
+			p.SetLabels(labels)
+		}, "Unknown"},
+		{"wrong PodGroup annotation", func(_, p *unstructured.Unstructured) {
+			annotations := p.GetAnnotations()
+			annotations["scheduling.k8s.io/group-name"] = "foreign-group"
+			p.SetAnnotations(annotations)
+		}, "Unknown"},
+		{"missing PodGroup annotation", func(_, p *unstructured.Unstructured) {
+			annotations := p.GetAnnotations()
+			delete(annotations, "scheduling.k8s.io/group-name")
+			p.SetAnnotations(annotations)
 		}, "Unknown"},
 		{"not scheduled", func(_, p *unstructured.Unstructured) {
 			p.Object["spec"].(map[string]any)["nodeName"] = ""
