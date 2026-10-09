@@ -125,7 +125,10 @@ func TestVolcanoPodGroupLinkFalsification(t *testing.T) {
 			job, pod := jobAndPodFixture(t)
 			pg := jobPodGroupFixture(t, job)
 			tt.change(pg)
-			client := fakeJobPodClient(job, pod, pg)
+			client := fakeJobPodClient(job, pod)
+			client.PrependReactor("get", "podgroups", func(action k8stesting.Action) (bool, runtime.Object, error) {
+				return true, pg.DeepCopy(), nil
+			})
 			provider, err := NewProvider(client)
 			if err != nil {
 				t.Fatal(err)
