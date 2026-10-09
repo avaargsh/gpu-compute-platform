@@ -20,7 +20,15 @@ candidate must carry:
 - a *controller* ownerReference to the observed Job API version, kind,
   name and **Kubernetes Job UID**;
 - no deletion timestamp; Pod phase `Running`; nonempty `spec.nodeName`;
-- exactly one Kubernetes `status.conditions[type=Ready].status=True`.
+- exactly one Kubernetes `status.conditions[type=Ready].status=True`;
+- a **fresh, independent GET of that named Pod** with the same UID and
+  nonempty, unchanged server resourceVersion, unchanged owner/labels and
+  Ready condition. A LIST-only ready Pod is insufficient evidence.
+
+This double-observation fence rejects a Pod deleted/recreated under the same
+name, a Pod whose Ready status changed between LIST/GET, and ambiguous
+readback. It proves only a stable observed snapshot, **not** a linearizable
+snapshot of the Job+Pod and never a durable operation ownership attestation.
 
 Any missing UID, absent/extra Pod, unmatched owner, or unreviewed task shape
 returns `PodsReady=Unknown` rather than claiming ready. An owned but not
@@ -50,8 +58,10 @@ The authored synthetic tests exercise a UID-owned Ready Pod, label-selector
 and namespace scoping, prohibited Pod writes, foreign job UID/controller,
 wrong task, missing Pod UID, Pending/no-node/non-Ready Pod, missing Job UID,
 missing Pods, immutable Job task drift, duplicate Ready condition, and
-transient list failure. All synthetic tests require execution on the exact
-PR head before claiming they passed.
+transient list failure; additionally a vanished/recreated Pod on GET,
+changed resourceVersion, stale Ready, foreign owner, terminating Pod, missing
+server resourceVersion and transient Pod readback failure. All synthetic tests
+require execution on the exact PR head before claiming they passed.
 
 ## Promotion/compatibility gates
 
