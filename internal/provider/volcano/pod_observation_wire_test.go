@@ -9,7 +9,6 @@ import (
 	"sync"
 	"testing"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
@@ -21,10 +20,10 @@ import (
 // server acceptance or evidence of Volcano scheduling.
 func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 	for _, tt := range []struct {
-		name          string
-		readbackUID   string
-		wantStatus    string
-		wantReason    string
+		name        string
+		readbackUID string
+		wantStatus  string
+		wantReason  string
 	}{
 		{
 			name: "consistent Pod HTTP readback",
@@ -126,5 +125,3 @@ func TestVolcanoPodsReadyWireListThenReadback(t *testing.T) {
 		})
 	}
 }
-
-var _ = unstructured.Unstructured{}
