@@ -8,8 +8,8 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // volcanoPodGVR is read-only in Stage B. The unregistered adapter never
@@ -47,8 +47,8 @@ func (p *Provider) observeOwnedPodReadiness(
 ) (domain.Condition, error) {
 	condition := domain.Condition{
 		Type: "PodsReady", Status: "Unknown",
-		Reason: "OwnedPodEvidenceUnavailable",
-		Message: "No complete UID-bound Pod readiness observation",
+		Reason:             "OwnedPodEvidenceUnavailable",
+		Message:            "No complete UID-bound Pod readiness observation",
 		LastTransitionTime: now,
 	}
 	if job.GetUID() == "" {
