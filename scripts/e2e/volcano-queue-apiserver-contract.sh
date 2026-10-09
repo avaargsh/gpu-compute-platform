@@ -255,10 +255,11 @@ jq -e --arg uid "$(jq -r '.metadata.uid' "$evidence/initial-get.json")" \
 # These are the exact defaults currently admitted by the v0.1 Stage B
 # classifier, not a universal Volcano schema assertion.
 if jq -e '
-  ((.spec | keys) - ["capability", "parent", "reclaimable", "weight"] | length) == 0 and
-  (.spec.parent == null or .spec.parent == "root") and
-  (.spec.reclaimable == null or .spec.reclaimable == false) and
-  (.spec.weight == null or .spec.weight == 1)
+  ((.spec | keys) - ["capability", "dequeueStrategy", "parent", "reclaimable", "weight"] | length) == 0 and
+  .spec.parent == "root" and
+  .spec.reclaimable == true and
+  .spec.dequeueStrategy == "traverse" and
+  .spec.weight == 1
 ' "$evidence/initial-get.json" >/dev/null; then
   default_gate=PASS
 else
