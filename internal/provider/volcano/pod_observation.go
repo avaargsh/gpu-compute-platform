@@ -154,7 +154,10 @@ func belongsToVolcanoJob(pod, job *unstructured.Unstructured) bool {
 		pod.GetNamespace() != job.GetNamespace() ||
 		pod.GetLabels()["volcano.sh/job-name"] != job.GetName() ||
 		pod.GetLabels()["volcano.sh/job-namespace"] != job.GetNamespace() ||
-		pod.GetLabels()["volcano.sh/task-spec"] != "workload" {
+		pod.GetLabels()["volcano.sh/task-spec"] != "workload" ||
+		pod.GetLabels()["volcano.sh/task-index"] != "0" ||
+		pod.GetAnnotations()["scheduling.k8s.io/group-name"] !=
+			job.GetName()+"-"+string(job.GetUID()) {
 		return false
 	}
 	for _, owner := range pod.GetOwnerReferences() {
