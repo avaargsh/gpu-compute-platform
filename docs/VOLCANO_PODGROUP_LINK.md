@@ -30,8 +30,12 @@ reads `scheduling.volcano.sh/v1beta1` PodGroup by
   resourceVersion and all identity/spec comparisons.
 
 Only then is a separate `PodGroupLinked=True` condition emitted. Missing,
-foreign-owned, deleting, changed, unversioned or unverifiable groups produce
-`PodGroupLinked=Unknown`; transient read errors fail closed with retryability.
+foreign-owned, deleting, unversioned or unverifiable groups, and **UID/RV
+changes between the two reads**, produce `PodGroupLinked=Unknown`;
+transient read errors fail closed with retryability. A different PodGroup UID
+seen consistently on both reads is **not by itself** proof of foreign Job
+ownership. A replacement made before both reads cannot be ruled out without
+a previously retained UID receipt; this condition never claims otherwise.
 
 This is an observation of a stable controller-owned API object, **not**
 cryptographic evidence, an atomic cross-object snapshot, or a guarantee that
