@@ -3,10 +3,10 @@ package volcano
 import (
 	"context"
 	"testing"
-	"time"
 
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -94,7 +94,7 @@ func TestVolcanoRunningJobAddsUIDBoundPodReadinessWithoutReadyPromotion(t *testi
 			listAction, ok := action.(k8stesting.ListAction)
 			if !ok || action.GetNamespace() != job.GetNamespace() ||
 				!listAction.GetListRestrictions().Labels.Matches(
-					pod.GetLabels(),
+					labels.Set(pod.GetLabels()),
 				) {
 				t.Fatalf("Pod LIST must scope namespace and Volcano job label: %#v", action)
 			}
@@ -230,4 +230,3 @@ func TestPodReadinessRejectsDuplicateReadyConditions(t *testing.T) {
 	}
 }
 
-var _ = time.Time{}
