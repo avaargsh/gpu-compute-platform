@@ -173,7 +173,7 @@ func TestVolcanoQueueCASAdvancePreservesControllerMetadata(t *testing.T) {
 
 func TestVolcanoQueueCASRejectsIncompleteUpdateACKBeforeReadback(t *testing.T) {
 	for _, tt := range []struct {
-		name string
+		name  string
 		ackRV string
 	}{
 		{name: "missing ACK version", ackRV: ""},
