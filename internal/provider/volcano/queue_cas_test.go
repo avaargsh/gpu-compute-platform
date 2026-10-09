@@ -186,8 +186,9 @@ func TestVolcanoQueueCASRejectsIncompleteUpdateACKBeforeReadback(t *testing.T) {
 			}
 			p := newProvider(client)
 			observed, err := p.ReconcilePool(context.Background(), nextQueueProjection())
-			if err == nil || observed.ObservedGeneration != 0 ||
-				client.updateCalls != 1 || client.getCalls != 1 {
+			if err == nil || !baseprovider.IsRetryable(err) ||
+				observed.ObservedGeneration != 0 || client.updateCalls != 1 ||
+				client.getCalls != 1 {
 				t.Fatalf("non-advancing UPDATE ACK must not establish a completed CAS: observed=%#v err=%v writes=%d reads=%d",
 					observed, err, client.updateCalls, client.getCalls)
 			}
