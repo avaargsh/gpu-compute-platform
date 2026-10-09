@@ -63,6 +63,18 @@ changed resourceVersion, stale Ready, foreign owner, terminating Pod, missing
 server resourceVersion and transient Pod readback failure. All synthetic tests
 require execution on the exact PR head before claiming they passed.
 
+## Kubernetes REST transport test (HTTP simulator)
+
+`TestVolcanoPodsReadyWireListThenReadback` exercises the **real client-go
+dynamic HTTP transport** against an in-process `httptest.Server`, in addition
+to the `dynamic/fake` tests. It checks that two Job GETs use the namespaced
+Volcano Job URL, the Pod LIST carries the exact job-name label selector, the
+follow-up GET targets that one Pod name, and no mutation occurs. An HTTP
+readback that keeps the Pod name but replaces the UID must yield
+`PodsReady=Unknown`. This is **not a Kubernetes API server**, and cannot
+prove controller defaulting, scheduler admission or atomic multi-object
+consistency. The test runs in the ordinary Go test suite without GPUs.
+
 ## Promotion/compatibility gates
 
 1. Keep this PR stacked on #56; #56 itself is stacked on #55. No independent
