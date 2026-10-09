@@ -4,7 +4,7 @@
 set -euo pipefail
 
 die() { printf 'VOLCANO API CONTRACT: BLOCKED: %s\n' "$*" >&2; exit 2; }
-for tool in git kubectl jq sha256sum; do
+for tool in git kubectl kind jq sha256sum; do
   command -v "$tool" >/dev/null || die "missing $tool"
 done
 
@@ -19,6 +19,34 @@ expected_crd_spec_sha="${STAGE_B_EXPECTED_QUEUE_CRD_SPEC_SHA256:-}"
 [[ "$expected_crd_spec_sha" =~ ^[0-9a-f]{64}$ ]] ||
   die "pin SHA256 of independently reviewed Queue CRD .spec in STAGE_B_EXPECTED_QUEUE_CRD_SPEC_SHA256"
 [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || die "working tree must be clean"
+
+# A context called kind-* can be an arbitrary kubeconfig alias. Before any
+# cluster mutation, require a locally enumerated kind cluster and the exact
+# API-server endpoint + CA supplied by kind itself. Never persist kubeconfig
+# credentials or weaken this fence into a name-prefix-only check.
+kind_cluster="${context#kind-}"
+[[ -n "$kind_cluster" ]] || die "missing kind cluster name"
+if ! kind get clusters | grep -Fx -- "$kind_cluster" >/dev/null; then
+  die "the authorized context is not a local kind cluster"
+fi
+cluster_identity_jq='
+  .clusters |
+  if length == 1 then .[0].cluster else empty end |
+  select((.server | type) == "string" and (.server | length) > 0 and
+         (."certificate-authority-data" | type) == "string" and
+         (."certificate-authority-data" | length) > 0) |
+  [.server, ."certificate-authority-data"] | @json
+'
+kind_identity="$(kind get kubeconfig --name "$kind_cluster" |
+  kubectl config view --kubeconfig=/dev/stdin --raw -o json |
+  jq -er "$cluster_identity_jq")" ||
+  die "cannot obtain trusted kind API-server/CA identity"
+context_identity="$(kubectl --context "$context" config view --minify --raw -o json |
+  jq -er "$cluster_identity_jq")" ||
+  die "cannot obtain selected context API-server/CA identity"
+[[ "$kind_identity" == "$context_identity" ]] ||
+  die "kubeconfig context endpoint/CA differs from local kind cluster; refuse mutation"
+unset kind_identity context_identity
 
 kubectl --context "$context" get crd queues.scheduling.volcano.sh >/dev/null ||
   die "Volcano Queue CRD is absent"
