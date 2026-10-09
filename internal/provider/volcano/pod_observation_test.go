@@ -67,7 +67,8 @@ func fakeJobPodClient(job *unstructured.Unstructured, pods ...*unstructured.Unst
 		map[schema.GroupVersionResource]string{
 			volcanoQueueGVR: "QueueList",
 			volcanoJobGVR:   "JobList",
-			volcanoPodGVR:   "PodList",
+			volcanoPodGVR:      "PodList",
+			volcanoPodGroupGVR: "PodGroupList",
 		},
 		objects...,
 	)
@@ -84,12 +85,15 @@ func TestVolcanoRunningJobAddsUIDBoundPodReadinessWithoutReadyPromotion(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if observation.Phase != "Running" || len(observation.Conditions) != 2 ||
+	if observation.Phase != "Running" || len(observation.Conditions) != 3 ||
 		observation.Conditions[0].Type != "Ready" ||
 		observation.Conditions[0].Status != "False" ||
 		observation.Conditions[1].Type != "PodsReady" ||
 		observation.Conditions[1].Status != "True" ||
-		observation.Conditions[1].Reason != "VolcanoOwnedPodReady" {
+		observation.Conditions[1].Reason != "VolcanoOwnedPodReady" ||
+		observation.Conditions[2].Type != "PodGroupLinked" ||
+		observation.Conditions[2].Status != "Unknown" ||
+		observation.Conditions[2].Reason != "VolcanoPodGroupNotFound" {
 		t.Fatalf("UID-bound Pod is observed, not promoted to scheduler Ready: %#v", observation)
 	}
 	podLists := 0
