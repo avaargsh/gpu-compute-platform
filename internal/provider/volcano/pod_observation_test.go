@@ -92,11 +92,13 @@ func TestVolcanoRunningJobAddsUIDBoundPodReadinessWithoutReadyPromotion(t *testi
 		if action.Matches("list", "pods") {
 			podLists++
 			listAction, ok := action.(k8stesting.ListAction)
+			expectedSelector := labels.Set{
+				"volcano.sh/job-name": job.GetName(),
+			}.AsSelector().String()
 			if !ok || action.GetNamespace() != job.GetNamespace() ||
-				!listAction.GetListRestrictions().Labels.Matches(
-					labels.Set(pod.GetLabels()),
-				) {
-				t.Fatalf("Pod LIST must scope namespace and Volcano job label: %#v", action)
+				listAction.GetListRestrictions().Labels == nil ||
+				listAction.GetListRestrictions().Labels.String() != expectedSelector {
+				t.Fatalf("Pod LIST must use exact namespace/job-name selector: %#v", action)
 			}
 		}
 		if action.Matches("create", "pods") || action.Matches("update", "pods") ||
