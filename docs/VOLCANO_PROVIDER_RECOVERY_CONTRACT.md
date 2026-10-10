@@ -349,13 +349,17 @@ outside the repository:
 - installed Queue CRD JSON, canonical CRD spec SHA256 and Kubernetes version JSON;
 - a real stale-resourceVersion UPDATE rejected as `409 Conflict`;
 - an intentionally stale UID/RV **conditional DELETE** rejected as `409 Conflict`, followed by a fresh GET proving the Queue survived;
-- a new-GET-based quota CAS from 8 to 16 with the same resource UID;
+- a new-GET-based quota CAS from 8 to 16 with the same resource UID; an incidental controller status write can cause a *new* 409, in which case the test retries **at most four times**, each with a new GET and a fresh UID/RV-fenced request after validating the same owner, generation 4 and quota 8;
+- per-attempt resourceVersion/Conflict/PASS receipts (`fresh-cas-attempts.tsv`), with non-409 failure and exhausted retry budget blocking acceptance;
 - final independent GET and cleanup NotFound evidence;
 - per-file SHA256 of JSON receipts and per-gate status.
 
 The test fails closed if live server defaults disagree with the current
 reviewed comparator (notably `reclaimable` and `dequeueStrategy`), if any
-CAS/identity step is ambiguous, or if it cannot independently prove cleanup.
+CAS/identity step is ambiguous, if the source generation/quota changes
+unexpectedly during a retry, or if cleanup cannot be independently proved.
+This bounded **test-fixture** retry does not change the production Provider's
+409 handling or claim exactly-once effects.
 On successful CREATE, the test records the API-server-issued **UID from
 the CREATE response**. **Before the first post-CREATE mutation**, the fresh
 GET must match that UID, probe token, owner, generation and quota. The
@@ -376,9 +380,10 @@ operator cleanup only after independently proving ownership.
 
 **This tests Kubernetes object CAS and defaulting, not the actual Volcano
 scheduler applying quota, lease takeover, multi-agent fencing or GPU runtime
-behavior.** `QuotaApplied` remains `Unknown`. The script has not been
-executed against a live cluster at the time of this change; the gate stays
-unchecked until independent evidence is attached to the PR.
+behavior.** `QuotaApplied` remains `Unknown`. Earlier pinned
+disposable kind runs include [full passing evidence #37919203307](https://github.com/avaargsh/temp-runner/actions/runs/37919203307)
+and [a legitimate fresh-CAS 409 under controller status concurrency #38007371410](https://github.com/avaargsh/temp-runner/actions/runs/38007371410).
+Each changed exact-head script requires an independent fresh kind re-run before acceptance.
 
 ## External Volcano Queue API findings (2026-10-08)
 

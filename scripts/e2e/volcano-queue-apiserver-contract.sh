@@ -237,13 +237,54 @@ jq -e --arg uid "$(jq -r '.metadata.uid' "$evidence/initial-get.json")" \
   "$evidence/post-conflict-get.json" >/dev/null ||
   die "409 caused unexpected object replacement or metadata loss"
 
-# A fresh GET is the only allowed source for another CAS attempt.
-jq '.spec.capability["nvidia.com/gpu"] = "16" |
-    .metadata.annotations["ai.compute/generation"] = "5" |
-    del(.status)' "$evidence/post-conflict-get.json" >"$evidence/fresh-cas-request.json"
-kubectl --context "$context" replace -f "$evidence/fresh-cas-request.json" -o json \
-  >"$evidence/fresh-update-response.json" ||
-  die "resourceVersion-fenced fresh CAS failed"
+# After proving stale-CAS conflicts, controllers may independently update
+# Queue status between any new GET and UPDATE (new resourceVersion).
+# A fresh CAS can legitimately get 409. Never replay a stale request or
+# retry by name: read again, validate exact UID/owner/generation/quota, rebuild
+# the request with that RV, and cap retries. Unknown drift is a hard failure.
+fresh_cas_succeeded=0
+: >"$evidence/fresh-cas-attempts.tsv"
+for attempt in 1 2 3 4; do
+  kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
+    >"$evidence/fresh-cas-base.json" ||
+    die "fresh CAS base GET failed; refuse name-only retry"
+  jq -e --arg uid "$created_uid" --arg token "$name" '
+    .metadata.uid == $uid and
+    .metadata.annotations["stageb.volcano.probe/token"] == $token and
+    .metadata.annotations["stageb.volcano.probe/rv-bump"] == "concurrent" and
+    .metadata.annotations["ai.compute/pool-id"] == "stageb-api-probe" and
+    .metadata.annotations["ai.compute/generation"] == "4" and
+    .metadata.resourceVersion != null and .metadata.resourceVersion != "" and
+    (.spec.capability | keys | length) == 1 and
+    .spec.capability["nvidia.com/gpu"] == "8"
+  ' "$evidence/fresh-cas-base.json" >/dev/null ||
+    die "fresh CAS observed foreign UID/owner/generation/quota; refusing retry"
+  jq '.spec.capability["nvidia.com/gpu"] = "16" |
+      .metadata.annotations["ai.compute/generation"] = "5" |
+      del(.status)' "$evidence/fresh-cas-base.json" >"$evidence/fresh-cas-request.json" ||
+    die "cannot construct UID/RV-fenced fresh CAS request"
+  base_rv="$(jq -r '.metadata.resourceVersion' "$evidence/fresh-cas-base.json")"
+  if kubectl --context "$context" replace -f "$evidence/fresh-cas-request.json" -o json \
+    >"$evidence/fresh-update-response.json" 2>"$evidence/fresh-update.stderr"; then
+    jq -e --arg uid "$created_uid" --arg base_rv "$base_rv" '
+      .metadata.uid == $uid and
+      .metadata.resourceVersion != null and .metadata.resourceVersion != $base_rv and
+      .metadata.annotations["ai.compute/generation"] == "5" and
+      (.spec.capability | keys | length) == 1 and
+      .spec.capability["nvidia.com/gpu"] == "16"
+    ' "$evidence/fresh-update-response.json" >/dev/null ||
+      die "fresh CAS ACK lost UID, RV increment, generation or quota"
+    printf '%s\t%s\tPASS\n' "$attempt" "$base_rv" >>"$evidence/fresh-cas-attempts.tsv"
+    fresh_cas_succeeded=1
+    break
+  fi
+  if ! grep -Eq 'Conflict|the object has been modified' "$evidence/fresh-update.stderr"; then
+    die "fresh CAS failed for non-409 reason; refuse retry"
+  fi
+  printf '%s\t%s\tCONFLICT\n' "$attempt" "$base_rv" >>"$evidence/fresh-cas-attempts.tsv"
+done
+(( fresh_cas_succeeded == 1 )) ||
+  die "fresh CAS exhausted four UID/RV-fenced attempts under controller conflict"
 kubectl --context "$context" get queues.scheduling.volcano.sh "$name" -o json \
   >"$evidence/final-get.json" || die "fresh independent readback failed"
 jq -e --arg uid "$(jq -r '.metadata.uid' "$evidence/initial-get.json")" \
