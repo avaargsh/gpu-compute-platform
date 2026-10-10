@@ -9,8 +9,8 @@ import (
 func TestVolcanoSchedulerEvidenceIsNeverQuotaProof(t *testing.T) {
 	tests := []struct {
 		name, phase, scheduled, expected, reason string
-		unschedulable bool
-		duplicate bool
+		unschedulable                            bool
+		duplicate                                bool
 	}{
 		{"running without scheduled condition", "Running", "", "Unknown", "VolcanoScheduledConditionUnavailable", false, false},
 		{"scheduled true", "Running", "True", "True", "VolcanoScheduledConditionObserved", false, false},
@@ -35,7 +35,7 @@ func TestVolcanoSchedulerEvidenceIsNeverQuotaProof(t *testing.T) {
 			}
 			pg := &unstructured.Unstructured{Object: map[string]any{
 				"apiVersion": "scheduling.volcano.sh/v1beta1",
-				"kind": "PodGroup",
+				"kind":       "PodGroup",
 				"metadata": map[string]any{
 					"name": "a", "namespace": "b", "uid": "pg-uid", "resourceVersion": "41",
 				},
@@ -54,7 +54,7 @@ func TestVolcanoSchedulerEvidenceIsNeverQuotaProof(t *testing.T) {
 
 func TestVolcanoSchedulerEvidenceRequiresServerIdentity(t *testing.T) {
 	for _, change := range []struct {
-		name string
+		name  string
 		apply func(*unstructured.Unstructured)
 	}{
 		{"missing UID", func(pg *unstructured.Unstructured) { pg.SetUID("") }},
@@ -64,7 +64,7 @@ func TestVolcanoSchedulerEvidenceRequiresServerIdentity(t *testing.T) {
 			pg := &unstructured.Unstructured{Object: map[string]any{
 				"metadata": map[string]any{"uid": "uid", "resourceVersion": "41"},
 				"status": map[string]any{
-					"phase": "Running",
+					"phase":      "Running",
 					"conditions": []any{map[string]any{"type": "Scheduled", "status": "True"}},
 				},
 			}}
