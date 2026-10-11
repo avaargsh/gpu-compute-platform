@@ -48,7 +48,7 @@ json_request POST agent/report '{"clusterId":"portal-ci","observations":[{"kind"
 
 (
   cd frontend
-  npm run portal:dev -- --host 127.0.0.1 >"$TMP_LOG/vite.log" 2>&1
+  exec env -u PORTAL_OPERATOR_TOKEN -u PORTAL_OPERATOR_PROJECT_IDS -u PORTAL_OPERATOR_CLUSTER_ID -u DATABASE_URL node node_modules/vite/bin/vite.js --config vite.portal.config.ts --host 127.0.0.1 >"$TMP_LOG/vite.log" 2>&1
 ) &
 VITE_PID=$!
 for attempt in $(seq 1 45); do
