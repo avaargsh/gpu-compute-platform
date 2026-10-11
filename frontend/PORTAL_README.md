@@ -8,8 +8,10 @@ llm-d's router, or revive the legacy Python control-plane APIs.
 
 The existing `frontend/src/main.ts` and `frontend/index.html` still belong
 to the legacy Python-facing UI. The new Go-backed portal starts from
-`frontend/portal.html`, uses the explicit Go HTTP contract and deliberately
-does **not** treat the old Python login token as authorization to the Go API.
+`frontend/portal.html`, uses the **operator-scoped Go snapshot API**, and
+deliberately does **not** treat the old Python login token as authorization.
+For an up-to-date runnable local setup and its strict limits, read
+`docs/PORTAL_OPERATOR_PREVIEW.md`.
 
 ## Start locally
 
@@ -17,7 +19,10 @@ Run the existing Go server (port 8080) with a disposable local PostgreSQL DB,
 or its documented in-memory development store, and register a Cluster Agent.
 
 ```bash
-# Terminal 1, repo root: MUST bind the unauthenticated Go API to loopback
+# Terminal 1: strong ephemeral preview token, exact cluster/project scope
+export PORTAL_OPERATOR_TOKEN="$(openssl rand -hex 32)"
+export PORTAL_OPERATOR_CLUSTER_ID=cluster-a
+export PORTAL_OPERATOR_PROJECT_IDS=research,serving
 CONTROL_PLANE_LISTEN_ADDR=127.0.0.1:8080 go run ./cmd/control-plane
 
 # Terminal 2, repo root
@@ -27,9 +32,10 @@ npm run portal:dev
 # http://127.0.0.1:3001/portal.html
 ```
 
-Enter an **existing** Cluster ID. There are no synthetic resource fixtures in
-the Portal. Vite proxies only `/api/v1` to `http://127.0.0.1:8080`, and
-the developer server binds exclusively to loopback.
+Enter the **configured** Cluster ID and its in-memory operator token.
+The Go snapshot endpoint applies project scoping and signed pagination
+server-side; there are no synthetic resource fixtures. Vite proxies only
+`/api/v1` to `http://127.0.0.1:8080` and binds to loopback.
 
 ```bash
 cd frontend
@@ -44,27 +50,28 @@ from the legacy Python UI.
 
 | Portal panel | Existing Go API | Trust boundary |
 | --- | --- | --- |
-| Cluster / heartbeat / capabilities | `GET /api/v1/clusters/{clusterID}/status` | Heartbeat recency is an estimate, not authoritative liveness |
-| Existing pools and workloads | `GET /api/v1/agent/desired?clusterId=...` | Desired resources only; not proof of scheduling |
-| Per-resource state and evidence | `GET /api/v1/internal/clusters/{clusterID}/state/{kind}/{id}` | Synced generation != Ready / Admitted / GPU allocated |
+| Cluster / heartbeat / capabilities | `GET /api/v1/operator/clusters/{clusterID}/snapshot` (Bearer preview token) | Heartbeat recency is an estimate, not authoritative liveness |
+| Existing pools and workloads | Same scoped snapshot endpoint | Server-enforced project allowlist; not full user RBAC |
+| Per-resource state and evidence | Same scoped snapshot endpoint | Synced generation != Ready / Admitted / GPU allocated |
 | Project views | Existing Desired `spec.projectID` | Client-only grouping, **never** RBAC or authoritative tenant isolation |
 | Operations Inbox | Independent State + Conditions + GET errors | Evidence-based triage; `Synced` != Ready, read failure != resource failure |
 | Ecosystem page | Agent `capabilities.providers` and `schedulers` | Discovered scheduler != registered executable provider |
 | llm-d | Explicitly unintegrated | Separate Draft PR #61; no claimed GAIE/EPP/Router health |
 
-The client permits only simple resource-path segments, limits its observation to
-120 supported resources with at most 6 simultaneous detail GETs, and labels
-truncation instead of presenting a partial count as a full-cluster inventory.
-Read failures are shown; no mock metrics, auth token, or fake success values
-are inserted.
+The Go snapshot API limits each page to 120 records and issues a signed
+nextCursor. The Portal loads more only when explicitly requested. Partial
+counts are labeled as a loaded sample. The operator token exists only in
+component memory, never in localStorage, and is required for every request.
+There are no synthetic metrics or false success values.
 
 ## Security and deliberate non-goals
 
-The current Go server has no verified user auth or RBAC protecting these
-read APIs. Consequently, this entry must be used **only against local trusted
-development services**. The Portal does not implement login, provide a write
-button, store credentials, or bypass any authentication boundary. **Do not
-expose port 3001 or the unauthenticated Go API on a public network.**
+The Go preview snapshot now has a server-checked operator token, cluster
+identity and project allowlist, but the **existing Agent API routes on the
+same Go server have NOT gained user authentication**. This is therefore
+**loopback-only developer access**, not a deployable OIDC/RBAC solution.
+The Portal provides no write button. **Never expose either port 3001 or
+port 8080 to a public or untrusted network.**
 
 This is a **read-only inventory and evidence slice**, not a finished GPU
 management product. It does not implement resource create/delete, billing,
