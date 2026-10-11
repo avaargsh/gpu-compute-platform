@@ -238,3 +238,85 @@ func TestOperatorPreviewRejectsCrossOriginAndFormAgentWrites(t *testing.T) {
 		})
 	}
 }
+
+func TestOperatorPreviewPaginationRejectsDesiredChangeEvenAtSameCount(t *testing.T) {
+	server, store := fixtureOperatorPreview(t)
+	defer server.Close()
+	base := server.URL + "/api/v1/operator/clusters/cluster-a/snapshot?limit=1"
+
+	resp := callPreview(t, server.Client(), base, previewTestToken)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("initial page status=%d", resp.StatusCode)
+	}
+	var first operatorSnapshot
+	if err := json.NewDecoder(resp.Body).Decode(&first); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if first.Total != 3 || first.NextCursor == "" {
+		t.Fatalf("expected three scoped records and cursor: %#v", first)
+	}
+
+	// Changing foreign project state must not disrupt an authorized reader.
+	if err := store.UpsertDesired(context.Background(), "cluster-a", agent.DesiredResource{
+		Kind: "Workload", ID: "secret-foreign", Generation: 2,
+		Spec: map[string]any{"projectID": "foreign"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	urlWithCursor := base + "&cursor=" + url.QueryEscape(first.NextCursor)
+	foreignResp := callPreview(t, server.Client(), urlWithCursor, previewTestToken)
+	foreignResp.Body.Close()
+	if foreignResp.StatusCode != http.StatusOK {
+		t.Fatalf("foreign update invalidated scoped cursor: %d", foreignResp.StatusCode)
+	}
+
+	// An update that preserves authorized Total MUST still fail closed.
+	if err := store.UpsertDesired(context.Background(), "cluster-a", agent.DesiredResource{
+		Kind: "Workload", ID: "work-b", Generation: 3,
+		Spec: map[string]any{"projectID": "allowed"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stale := callPreview(t, server.Client(), urlWithCursor, previewTestToken)
+	defer stale.Body.Close()
+	if stale.StatusCode != http.StatusConflict {
+		t.Fatalf("stale same-count cursor status=%d, want 409", stale.StatusCode)
+	}
+	if stale.Header.Get("Cache-Control") != "no-store" {
+		t.Fatal("stale response must not be cached")
+	}
+}
+
+func TestOperatorPreviewInvalidatesCursorOnScopedReassignment(t *testing.T) {
+	server, store := fixtureOperatorPreview(t)
+	defer server.Close()
+	base := server.URL + "/api/v1/operator/clusters/cluster-a/snapshot?limit=1"
+
+	resp := callPreview(t, server.Client(), base, previewTestToken)
+	var first operatorSnapshot
+	if err := json.NewDecoder(resp.Body).Decode(&first); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if err := store.UpsertDesired(context.Background(), "cluster-a", agent.DesiredResource{
+		Kind: "Workload", ID: "work-b", Generation: 3,
+		Spec: map[string]any{"projectID": "foreign"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stale := callPreview(t, server.Client(), base+"&cursor="+url.QueryEscape(first.NextCursor), previewTestToken)
+	stale.Body.Close()
+	if stale.StatusCode != http.StatusConflict {
+		t.Fatalf("project reassignment must invalidate cursor, got %d", stale.StatusCode)
+	}
+	fresh := callPreview(t, server.Client(), base, previewTestToken)
+	defer fresh.Body.Close()
+	var after operatorSnapshot
+	if err := json.NewDecoder(fresh.Body).Decode(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after.Total != 2 {
+		t.Fatalf("foreign reassignment still in authorized count: %d", after.Total)
+	}
+}
