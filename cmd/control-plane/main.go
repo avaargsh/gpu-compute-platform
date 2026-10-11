@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	postgresstore "github.com/avaargsh/gpu-compute-platform/internal/store/postgres"
@@ -19,9 +22,24 @@ func main() {
 	store, placement, cleanup := buildStore()
 	defer cleanup()
 
+	handler := httpapi.NewRouterWithDependencies(store, placement)
+	if operatorPreviewConfigured() {
+		if !isLoopbackAddress(listenAddress()) {
+			log.Fatal("operator preview requires CONTROL_PLANE_LISTEN_ADDR=127.0.0.1:8080")
+		}
+		var err error
+		handler, err = httpapi.NewRouterWithOperatorPreview(store, placement, httpapi.OperatorPreview{
+			Token: os.Getenv("PORTAL_OPERATOR_TOKEN"),
+			ClusterID: domain.ID(os.Getenv("PORTAL_OPERATOR_CLUSTER_ID")),
+			Projects: strings.Split(os.Getenv("PORTAL_OPERATOR_PROJECT_IDS"), ","),
+		})
+		if err != nil {
+			log.Fatalf("operator preview configuration invalid: %v", err)
+		}
+	}
 	server := &http.Server{
 		Addr:    listenAddress(),
-		Handler: httpapi.NewRouterWithDependencies(store, placement),
+		Handler: handler,
 	}
 
 	log.Printf("control-plane listening on %s", server.Addr)
@@ -60,4 +78,18 @@ func listenAddress() string {
 		return addr
 	}
 	return ":8080"
+}
+
+func operatorPreviewConfigured() bool {
+	return os.Getenv("PORTAL_OPERATOR_TOKEN") != "" ||
+		os.Getenv("PORTAL_OPERATOR_CLUSTER_ID") != "" ||
+		os.Getenv("PORTAL_OPERATOR_PROJECT_IDS") != ""
+}
+
+func isLoopbackAddress(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		return false
+	}
+	return host == "127.0.0.1" || host == "::1"
 }
