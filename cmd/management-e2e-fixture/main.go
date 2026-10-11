@@ -11,8 +11,8 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"net/url"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"time"
 
