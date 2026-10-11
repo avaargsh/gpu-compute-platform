@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"sort"
 	"strconv"
@@ -243,5 +244,30 @@ func NewRouterWithOperatorPreview(store agentstore.Store, bindings BindingStore,
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/operator/", operator)
 	mux.Handle("/", NewRouterWithDependencies(store, bindings))
-	return mux, nil
+	return previewBrowserWriteBoundary(mux), nil
+}
+
+// In the optional preview mode, a browser on a different origin must not be
+// able to submit a simple HTML form to the otherwise-unmodified Agent API.
+// Machine Agent JSON requests without Origin remain supported. This is only
+// a CSRF/browser-content-type boundary, NOT machine authentication.
+func previewBrowserWriteBoundary(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if (r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch || r.Method == http.MethodDelete) &&
+			strings.HasPrefix(r.URL.Path, "/api/v1/") &&
+			!strings.HasPrefix(r.URL.Path, "/api/v1/operator/") {
+			if r.Header.Get("Origin") != "" || strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
+				http.Error(w, "browser-origin mutations are not allowed in operator preview", http.StatusForbidden)
+				return
+			}
+			if r.Method != http.MethodDelete {
+				mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+				if err != nil || mediaType != "application/json" {
+					http.Error(w, "operator preview requires application/json for machine mutations", http.StatusUnsupportedMediaType)
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
