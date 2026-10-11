@@ -44,6 +44,8 @@ func oidcFixture(t *testing.T) (Introspector, *httptest.Server) {
 			answer["active"] = false
 		case "missing-subject":
 			delete(answer, "sub")
+		case "missing-token-type":
+			delete(answer, "token_type")
 		case "bob-token":
 			answer["sub"] = "bob"
 		}
@@ -58,7 +60,7 @@ func TestOIDCProviderIntrospectionDeniesForgedWrongAndRevokedTokens(t *testing.T
 	if id, err := verifier.Verify(context.Background(), "good-access-token"); err != nil || id.Subject != "alice" {
 		t.Fatalf("verified identity %+v err %v", id, err)
 	}
-	for _, token := range []string{"wrong-audience", "wrong-issuer", "expired-token", "revoked-token", "missing-subject", "short", "malformed token"} {
+	for _, token := range []string{"wrong-audience", "wrong-issuer", "expired-token", "revoked-token", "missing-subject", "missing-token-type", "short", "malformed token"} {
 		if _, err := verifier.Verify(context.Background(), token); err == nil {
 			t.Fatalf("accepted forbidden token %q", token)
 		}
