@@ -34,6 +34,12 @@ func oidcFixture(t *testing.T) (Introspector, *httptest.Server) {
 		token := r.Form.Get("token")
 		answer := map[string]any{"active": active, "iss": "https://issuer.example", "sub": "alice", "aud": []string{"manager-api"}, "exp": time.Now().Add(time.Minute).Unix(), "token_type": "Bearer"}
 		switch token {
+		case "provider-unavailable":
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		case "provider-malformed":
+			_, _ = w.Write([]byte("{"))
+			return
 		case "wrong-audience":
 			answer["aud"] = "other-api"
 		case "wrong-issuer":
@@ -90,6 +96,10 @@ func TestManagementRejectsUnconfiguredRoutesAndBearer(t *testing.T) {
 		{"POST", "/api/v1/agent/register", "", 404},
 		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "", 401},
 		{"PUT", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer short", 401},
+		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer provider-unavailable", 503},
+		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer provider-malformed", 503},
+		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/operations/0123456789abcdef0123456789abcdef", "Bearer provider-unavailable", 503},
+		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/operations/0123456789abcdef0123456789abcdef", "Bearer revoked-token", 401},
 		{"DELETE", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/bad!id", "", 400},
 	} {
 		rec := httptest.NewRecorder()
