@@ -49,6 +49,7 @@ func NewHandler(db *sql.DB, auth Introspector) (http.Handler, error) {
 	mux.HandleFunc("GET /api/v1/management/clusters/{clusterID}/projects/{projectID}/resources/{kind}/{resourceID}", svc.serve)
 	mux.HandleFunc("PUT /api/v1/management/clusters/{clusterID}/projects/{projectID}/resources/{kind}/{resourceID}", svc.serve)
 	mux.HandleFunc("DELETE /api/v1/management/clusters/{clusterID}/projects/{projectID}/resources/{kind}/{resourceID}", svc.serve)
+	mux.HandleFunc("GET /api/v1/management/clusters/{clusterID}/projects/{projectID}/operations/{operationID}", svc.receipt)
 	return mux, nil
 }
 
