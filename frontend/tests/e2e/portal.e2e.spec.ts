@@ -33,7 +33,7 @@ test('operator can inspect actual scoped Go resources, evidence, projects and se
   await expect(page.getByText('other-tenant', { exact: true })).toHaveCount(0)
 
   await page.getByRole('button', { name: /资源与工作负载/ }).click()
-  await expect(page.getByText('已加载 120 条')).toBeVisible()
+  await expect(page.getByText('已载入 120 条')).toBeVisible()
   const row = page.locator('.el-table__body tr').filter({ hasText: 'work-001' }).first()
   await row.click()
   await expect(page.getByText('job/work-001')).toBeVisible()
@@ -41,8 +41,7 @@ test('operator can inspect actual scoped Go resources, evidence, projects and se
 
   await page.getByRole('button', { name: '继续加载下一页' }).click()
   await expect(page.getByText('work-124', { exact: true })).toBeVisible()
-  await expect(page.getByText('已加载 125 / 125 条')).toHaveCount(0)
-  await expect(page.getByText('已加载 125 / 125')).toHaveCount(0)
+  await expect(page.locator('.el-table__body tr')).toHaveCount(125)
   await expect(page.getByRole('button', { name: '继续加载下一页' })).toHaveCount(0)
   await expect(page.getByText('secret-foreign')).toHaveCount(0)
   expect(operatorRequests.length).toBeGreaterThanOrEqual(2)
