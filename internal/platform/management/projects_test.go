@@ -52,7 +52,7 @@ func TestProjectsDiscoveryCurrentOIDCSubjectAndRevokedGrantPostgres(t *testing.T
 			t.Fatal(err)
 		}
 	}
-	for _, row := range []struct{subject, project, role string}{
+	for _, row := range []struct{ subject, project, role string }{
 		{"alice", aliceProject, "operator"},
 		{"bob", bobProject, "viewer"},
 		{"alice", unboundProject, "admin"},
