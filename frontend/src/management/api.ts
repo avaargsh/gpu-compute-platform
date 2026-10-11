@@ -37,6 +37,15 @@ export interface Receipt {
   requestDigest: string
 }
 
+// Never apply an If-Match from a previously selected resource after the
+// operator changes cluster, project, kind or resource fields.
+export function desiredMatchesScope(desired: DesiredView, scope: Scope): boolean {
+  return desired.clusterId === scope.cluster &&
+    desired.projectId === scope.project &&
+    desired.kind === scope.kind &&
+    desired.id === scope.resource
+}
+
 export class ManagementHTTPError extends Error {
   readonly status: number
   constructor(status: number, detail: string) {
