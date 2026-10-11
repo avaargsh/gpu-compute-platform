@@ -71,7 +71,7 @@ test('browser completes one-use S256 PKCE and sends audited CRUD without legacy 
     }
     if (url.endsWith('/resources/ComputePool/pool-a') && method === 'DELETE') {
       expect(match).toBe('"2"')
-      expect(operation).toMatch(/^[0-9a-f]{64}$/)
+      expect(operation).toMatch(/^[0-9a-f]{32}$/)
       deletionCommitted = true
       await route.fulfill({ status: 202, body: '' })
       return
