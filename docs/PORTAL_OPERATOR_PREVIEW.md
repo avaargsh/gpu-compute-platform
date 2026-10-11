@@ -61,14 +61,21 @@ Production comparison: see `docs/PORTAL_PRODUCT_BENCHMARK.md`.
 - Only configured project IDs are returned; rows without a valid project
   identity are hidden.
 - Signed cursor tampering -> 400; limit max 120; page GET only.
-- Only named read-only operator endpoint is exposed; mutations remain
-  disabled. Legacy Agent API is unchanged and must remain private/loopback.
+- The browser Vite proxy exposes **only** `/api/v1/operator`; it never proxies
+  legacy Agent/management mutation paths.
+- In preview mode, cross-origin browser write requests and non-JSON machine
+  POST/PUT/PATCH payloads are rejected (CSRF/form-post hardening). This is
+  **not** authentication for Agent or other local machine clients.
+- Operator endpoint is GET-only, while the underlying legacy Agent API
+  remains on the loopback Go server and must never be published.
 - `Synced` means matching generations, never model Ready, GPU assigned,
   Kueue Admitted, quota applied or llm-d Serving Ready.
 - Project aggregates are derived from the pages loaded; declared accelerator
   quota is not actual GPU consumption or a cost/billing measurement.
-- Credentials are kept only in memory until page refresh. Keep localhost
-  access trusted; a shared/untrusted workstation is not an isolation boundary.
+- Credentials are kept only in memory until page refresh; changing the token
+  or cluster clears the old resource list and discards in-flight results.
+  A Lock button clears the operator credential. Keep localhost access trusted;
+  a shared/untrusted workstation is not an isolation boundary.
 - No browser E2E or real hardware proof is claimed by the code/CI alone.
 
 ## Required gates
