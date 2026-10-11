@@ -107,6 +107,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 18
     needs: portal
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gpu
+          POSTGRES_PASSWORD: gpu
+          POSTGRES_DB: gpu_platform_browser_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gpu -d gpu_platform_browser_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_DSN: postgres://gpu:gpu@localhost:5432/gpu_platform_browser_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -128,13 +144,15 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
       - name: Validate local launch scripts syntax
-        run: bash -n scripts/dev/portal-local.sh scripts/e2e/portal-local-launch-smoke.sh scripts/e2e/portal-browser-e2e.sh
+        run: bash -n scripts/dev/portal-local.sh scripts/e2e/portal-local-launch-smoke.sh scripts/e2e/portal-browser-e2e.sh scripts/e2e/management-browser-e2e.sh scripts/e2e/management-postgres-browser-e2e.sh
       - name: Run real API-backed Portal Chromium acceptance
         run: bash scripts/e2e/portal-browser-e2e.sh
       - name: Smoke one-command local Portal startup, isolation and shutdown
         run: bash scripts/e2e/portal-local-launch-smoke.sh
       - name: Run isolated Management PKCE Chromium acceptance (test IdP / API)
         run: bash scripts/e2e/management-browser-e2e.sh
+      - name: Run live Go Management API and PostgreSQL browser CRUD acceptance
+        run: bash scripts/e2e/management-postgres-browser-e2e.sh
 
   golden-path:
     name: Golden Path / kind + Kueue
