@@ -88,7 +88,7 @@ func TestManagementRejectsUnconfiguredRoutesAndBearer(t *testing.T) {
 		{"POST", "/api/v1/agent/register", "", 404},
 		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "", 401},
 		{"PUT", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer short", 401},
-		{"DELETE", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/../job-a", "", 404},
+		{"DELETE", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/bad!id", "", 400},
 	} {
 		rec := httptest.NewRecorder()
 		r := httptest.NewRequest(req.method, req.path, nil)
