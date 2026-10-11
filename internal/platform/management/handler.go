@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,8 +24,9 @@ var safeID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 var operationID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 type Service struct {
-	DB   *sql.DB
-	Auth Introspector
+	DB                   *sql.DB
+	Auth                 Introspector
+	AllowedBrowserOrigin string
 }
 
 type mutationInput struct {
@@ -33,14 +35,25 @@ type mutationInput struct {
 	Spec               json.RawMessage `json:"spec"`
 }
 
+// NewHandler keeps the non-browser CLI default: no Origin-bearing writes.
 func NewHandler(db *sql.DB, auth Introspector) (http.Handler, error) {
+	return NewHandlerWithBrowserOrigin(db, auth, "")
+}
+
+// NewHandlerWithBrowserOrigin opts into one exact loopback browser origin.
+// The Origin is a CSRF/browser boundary only, NOT identity or project auth:
+// each request still requires a verified bearer and DB-owned RBAC.
+func NewHandlerWithBrowserOrigin(db *sql.DB, auth Introspector, origin string) (http.Handler, error) {
+	if err := validateBrowserOrigin(origin); err != nil {
+		return nil, err
+	}
 	if db == nil {
 		return nil, errors.New("PostgreSQL is required; no in-memory management mutations")
 	}
 	if err := auth.ValidateConfig(); err != nil {
 		return nil, err
 	}
-	svc := &Service{DB: db, Auth: auth}
+	svc := &Service{DB: db, Auth: auth, AllowedBrowserOrigin: origin}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -64,6 +77,36 @@ func createRequestID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(bytes[:]), nil
+}
+
+// For the isolated local preview, never enable wildcard, LAN or internet
+// Origins. Later production TLS ingress must be a separately reviewed path.
+func validateBrowserOrigin(origin string) error {
+	if origin == "" {
+		return nil // CLI only (no Origin header); browser writes remain blocked.
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" ||
+		u.User != nil || u.Path != "" || u.RawPath != "" || u.RawQuery != "" || u.Fragment != "" ||
+		u.Port() == "" || u.String() != origin {
+		return errors.New("MANAGEMENT_BROWSER_ORIGIN must be exactly http://127.0.0.1:<port>")
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil || port < 1 || port > 65535 {
+		return errors.New("MANAGEMENT_BROWSER_ORIGIN has invalid loopback port")
+	}
+	return nil
+}
+
+func (s *Service) browserWriteAllowed(r *http.Request) bool {
+	if strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
+		return false
+	}
+	values := r.Header.Values("Origin")
+	if len(values) == 0 {
+		return true // CLI without browser Origin, still OIDC + project RBAC.
+	}
+	return len(values) == 1 && s.AllowedBrowserOrigin != "" && values[0] == s.AllowedBrowserOrigin
 }
 
 func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
@@ -94,7 +137,7 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 		s.read(w, r, identity, cluster, project, kind, id)
 		return
 	}
-	if r.Header.Get("Origin") != "" || strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
+	if !s.browserWriteAllowed(r) {
 		problem(w, 403)
 		return
 	}
