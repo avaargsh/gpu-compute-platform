@@ -82,7 +82,7 @@ func (i Introspector) Verify(ctx context.Context, token string) (Identity, error
 	if err := dec.Decode(&result); err != nil {
 		return Identity{}, errors.New("invalid identity provider response")
 	}
-	if !result.Active || result.Issuer != i.Issuer || result.Subject == "" || len(result.Subject) > 512 || result.ExpiresAt <= time.Now().Unix() || result.TokenType != "" && !strings.EqualFold(result.TokenType, "Bearer") {
+	if !result.Active || result.Issuer != i.Issuer || result.Subject == "" || len(result.Subject) > 512 || result.ExpiresAt <= time.Now().Unix() || !strings.EqualFold(result.TokenType, "Bearer") {
 		return Identity{}, errors.New("inactive, expired, or untrusted identity")
 	}
 	var single string
