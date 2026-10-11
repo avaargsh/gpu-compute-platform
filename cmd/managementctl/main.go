@@ -25,14 +25,14 @@ var safeSegment = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 var safeOperationKey = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 type options struct {
-	Action string
-	Cluster string
-	Project string
-	Kind string
-	Resource string
+	Action      string
+	Cluster     string
+	Project     string
+	Kind        string
+	Resource    string
 	OperationID string
-	File string
-	Generation int64
+	File        string
+	Generation  int64
 }
 
 func validate(o options) error {
@@ -143,8 +143,8 @@ func run(o options, out, stderr io.Writer) error {
 	// No proxy, cookies, redirect-following, or arbitrary remote URL. This
 	// tool must never send a Bearer access token outside 127.0.0.1.
 	client := &http.Client{
-		Timeout: 15 * time.Second,
-		Transport: &http.Transport{Proxy: nil},
+		Timeout:       15 * time.Second,
+		Transport:     &http.Transport{Proxy: nil},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 	resp, err := client.Do(req)
