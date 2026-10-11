@@ -3,13 +3,13 @@ package management
 import (
  "context"
  "database/sql"
- "encoding/base64"
  "encoding/json"
  "net/http"
  "net/http/httptest"
  "os"
  "path/filepath"
  "strings"
+ "strconv"
  "testing"
  "time"
 
@@ -139,4 +139,3 @@ func fmtID(prefix string,n int64)string {
  return prefix+"-"+strconv.FormatInt(n,10)
 }
 
-var _=base64.StdEncoding
