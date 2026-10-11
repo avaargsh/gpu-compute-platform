@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"mime"
@@ -101,38 +103,61 @@ func resourceKey(r agent.DesiredResource) string {
 	return r.Kind + "/" + string(r.ID)
 }
 
-func (a *operatorAPI) cursorSignature(after string) []byte {
+// inventoryFingerprint ties an opaque cursor to a complete, sorted,
+// authorized Desired-resource collection. The operator preview is not a
+// transactional snapshot: Observations can still change between page GETs.
+// However, any mutation to visible desired state invalidates old cursors,
+// including updates that leave Total unchanged.
+func inventoryFingerprint(items []agent.DesiredResource) (string, error) {
+	hash := sha256.New()
+	for _, item := range items {
+		encoded, err := json.Marshal(item)
+		if err != nil {
+			return "", fmt.Errorf("encode resource inventory: %w", err)
+		}
+		_, _ = hash.Write(encoded)
+		_, _ = hash.Write([]byte{10})
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func (a *operatorAPI) cursorSignature(after, fingerprint string) []byte {
 	mac := hmac.New(sha256.New, a.tokenSHA[:])
-	_, _ = mac.Write([]byte("operator-preview-v1\n" + string(a.cluster) + "\n" + after))
+	_, _ = mac.Write([]byte("operator-preview-v2\\n" + string(a.cluster) + "\\n" + after + "\\n" + fingerprint))
 	return mac.Sum(nil)
 }
 
-func (a *operatorAPI) nextCursor(after string) string {
-	payload := after + "\n" + base64.RawURLEncoding.EncodeToString(a.cursorSignature(after))
+func (a *operatorAPI) nextCursor(after, fingerprint string) string {
+	payload := after + "\\n" + fingerprint + "\\n" + base64.RawURLEncoding.EncodeToString(a.cursorSignature(after, fingerprint))
 	return base64.RawURLEncoding.EncodeToString([]byte(payload))
 }
 
-func (a *operatorAPI) parseCursor(value string) (string, bool) {
+// Returns HTTP 400 for malformed or forged cursors, HTTP 409 when a correctly
+// signed cursor belongs to an obsolete Desired-state inventory.
+func (a *operatorAPI) parseCursor(value, fingerprint string) (string, int) {
 	if value == "" {
-		return "", true
+		return "", 0
 	}
 	if len(value) > 1024 {
-		return "", false
+		return "", http.StatusBadRequest
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil {
-		return "", false
+		return "", http.StatusBadRequest
 	}
-	index := strings.LastIndexByte(string(raw), '\n')
-	if index < 0 {
-		return "", false
+	parts := strings.Split(string(raw), "\\n")
+	if len(parts) != 3 || parts[0] == "" || len(parts[1]) != 64 {
+		return "", http.StatusBadRequest
 	}
-	after, signature := string(raw[:index]), string(raw[index+1:])
-	decoded, err := base64.RawURLEncoding.DecodeString(signature)
-	if err != nil || !hmac.Equal(decoded, a.cursorSignature(after)) {
-		return "", false
+	after, previousFingerprint, encodedSignature := parts[0], parts[1], parts[2]
+	signature, err := base64.RawURLEncoding.DecodeString(encodedSignature)
+	if err != nil || !hmac.Equal(signature, a.cursorSignature(after, previousFingerprint)) {
+		return "", http.StatusBadRequest
 	}
-	return after, true
+	if previousFingerprint != fingerprint {
+		return "", http.StatusConflict
+	}
+	return after, 0
 }
 
 func (a *operatorAPI) snapshot(w http.ResponseWriter, r *http.Request) {
@@ -155,11 +180,6 @@ func (a *operatorAPI) snapshot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		limit = n
-	}
-	after, valid := a.parseCursor(r.URL.Query().Get("cursor"))
-	if !valid {
-		http.Error(w, "invalid cursor", http.StatusBadRequest)
-		return
 	}
 	status, found, err := a.store.GetAgentStatus(r.Context(), a.cluster)
 	if err != nil {
@@ -197,6 +217,20 @@ func (a *operatorAPI) snapshot(w http.ResponseWriter, r *http.Request) {
 		visible = append(visible, item)
 	}
 	sort.Slice(visible, func(i, j int) bool { return resourceKey(visible[i]) < resourceKey(visible[j]) })
+	fingerprint, err := inventoryFingerprint(visible)
+	if err != nil {
+		http.Error(w, "resource inventory cannot be fingerprinted", http.StatusInternalServerError)
+		return
+	}
+	after, cursorStatus := a.parseCursor(r.URL.Query().Get("cursor"), fingerprint)
+	if cursorStatus != 0 {
+		if cursorStatus == http.StatusConflict {
+			http.Error(w, "resource inventory changed; restart pagination", http.StatusConflict)
+		} else {
+			http.Error(w, "invalid cursor", http.StatusBadRequest)
+		}
+		return
+	}
 	out := operatorSnapshot{
 		Agent: status, Rows: make([]operatorRow, 0, limit),
 		Total: len(visible), RefreshedAt: time.Now().UTC(),
@@ -228,7 +262,7 @@ func (a *operatorAPI) snapshot(w http.ResponseWriter, r *http.Request) {
 		count++
 	}
 	if out.Truncated && len(out.Rows) != 0 {
-		out.NextCursor = a.nextCursor(resourceKey(out.Rows[len(out.Rows)-1].Desired))
+		out.NextCursor = a.nextCursor(resourceKey(out.Rows[len(out.Rows)-1].Desired), fingerprint)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
