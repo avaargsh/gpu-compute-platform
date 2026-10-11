@@ -78,4 +78,3 @@ LIMIT 101`, id.Issuer, id.Subject)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
 }
-
