@@ -38,7 +38,11 @@ export interface Receipt {
 }
 
 export class ManagementHTTPError extends Error {
-  constructor(readonly status: number, detail: string) { super(detail) }
+  readonly status: number
+  constructor(status: number, detail: string) {
+    super(detail)
+    this.status = status
+  }
 }
 
 function safe(segment: string): void {
