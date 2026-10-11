@@ -11,6 +11,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
 	"net/http/httptest"
 	"os"
 	"time"
@@ -25,9 +26,25 @@ func fail(err error) {
 	}
 }
 
+// Refuse to grant test identities in any database other than the CI-only
+// disposable browser database on loopback. An explicit test env flag alone
+// is NOT enough to protect a user-configured production DSN.
+func validateFixtureDSN(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") ||
+		(u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1") ||
+		u.Port() != "5432" || u.Path != "/gpu_platform_browser_test" {
+		return errors.New("fixture requires localhost:5432/gpu_platform_browser_test disposable database")
+	}
+	return nil
+}
+
 func main() {
 	if os.Getenv("MANAGEMENT_E2E_TEST_ONLY") != "1" || os.Getenv("TEST_POSTGRES_DSN") == "" {
 		log.Fatal("refusing to start test identity provider: MANAGEMENT_E2E_TEST_ONLY=1 and TEST_POSTGRES_DSN required")
+	}
+	if err := validateFixtureDSN(os.Getenv("TEST_POSTGRES_DSN")); err != nil {
+		log.Fatal(err)
 	}
 	db, err := sql.Open("pgx", os.Getenv("TEST_POSTGRES_DSN"))
 	fail(err)
