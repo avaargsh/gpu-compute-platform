@@ -10,7 +10,37 @@ reverse proxy, or a production-ready portal. Agent endpoints on the same Go
 server still use the pre-existing machine protocol, so **NEVER expose this Go
 server on a network interface**.
 
-## Start with an ephemeral operator credential
+## Recommended: one-terminal local launch
+
+Run from the repository root in a trusted interactive terminal:
+
+```bash
+PORTAL_OPERATOR_CLUSTER_ID=cluster-a \
+PORTAL_OPERATOR_PROJECT_IDS=research,serving \
+bash scripts/dev/portal-local.sh
+```
+
+The launcher checks prerequisites and local ports, uses the existing locked
+Vue dependencies (runs `npm ci` only when the Vite executable is missing),
+builds and starts the Go server and Vite on **127.0.0.1 only**, and prints a
+fresh one-time operator token **only to an interactive terminal**. Enter the
+same Cluster ID and displayed token at
+`http://127.0.0.1:3001/portal.html`. Press Ctrl-C to stop both processes.
+
+For noninteractive scripts, you **must** set `PORTAL_OPERATOR_TOKEN`
+explicitly; the launcher will not print credentials into redirected logs.
+It never adds demonstration resources. An empty in-memory Go store returns a
+real cluster 404 until an actual Agent registers; set `DATABASE_URL` to
+use an existing trusted development PostgreSQL store instead. Legacy Agent
+endpoints still require localhost isolation and are **not authenticated**
+by the Portal's operator token.
+
+The accompanying `scripts/e2e/portal-local-launch-smoke.sh` tests process
+startup, protected GET rejection, no token in logs, browser proxy isolation,
+and automatic process cleanup against real local HTTP servers. The smoke test
+does not claim GPU execution or project membership RBAC.
+
+## Manual start with an ephemeral operator credential
 
 Run from repo root (Linux/macOS Bash):
 
@@ -84,7 +114,9 @@ Production comparison: see `docs/PORTAL_PRODUCT_BENCHMARK.md`.
   or cluster clears the old resource list and discards in-flight results.
   A Lock button clears the operator credential. Keep localhost access trusted;
   a shared/untrusted workstation is not an isolation boundary.
-- No browser E2E or real hardware proof is claimed by the code/CI alone.
+- Chromium E2E proves the local disposable Go/Vue HTTP path, including
+  pagination and stale-Desired 409; it does **not** prove real hardware,
+  production authentication, or multi-user tenant RBAC.
 
 ## Required gates
 
