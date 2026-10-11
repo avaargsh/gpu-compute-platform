@@ -133,6 +133,8 @@ jobs:
         run: bash scripts/e2e/portal-browser-e2e.sh
       - name: Smoke one-command local Portal startup, isolation and shutdown
         run: bash scripts/e2e/portal-local-launch-smoke.sh
+      - name: Run isolated Management PKCE Chromium acceptance (test IdP / API)
+        run: bash scripts/e2e/management-browser-e2e.sh
 
   golden-path:
     name: Golden Path / kind + Kueue
