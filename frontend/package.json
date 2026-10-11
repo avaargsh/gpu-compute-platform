@@ -10,7 +10,7 @@
     "portal:dev": "vite --config vite.portal.config.ts --open /portal.html",
     "portal:build": "vue-tsc -p tsconfig.portal.json --noEmit && vite build --config vite.portal.config.ts",
     "portal:preview": "vite preview --config vite.portal.config.ts",
-    "portal:test": "node --experimental-strip-types --test tests/project-model.test.mts"
+    "portal:test": "node --experimental-strip-types --test tests/*.test.mts"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
