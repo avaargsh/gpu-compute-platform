@@ -111,6 +111,12 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   browserToken = 'e2e-access-token-viewer'
   await page.getByRole('button', { name: '通过 OIDC 登录' }).click()
   await expect(page.getByText(/已取得短期访问令牌/)).toBeVisible()
+  // OAuth code redirect reloads the tab. Scope is intentionally held only
+  // in volatile component state, so the viewer must select it afresh.
+  await expect(page.getByPlaceholder('cluster-a')).toHaveValue('')
+  await expect(page.getByPlaceholder('research')).toHaveValue('')
+  await page.getByPlaceholder('cluster-a').fill('browser-ci')
+  await page.getByPlaceholder('research').fill('research')
   await page.locator('select').selectOption('ComputePool')
   await page.getByPlaceholder('pool-a').fill('pool-a')
   await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
