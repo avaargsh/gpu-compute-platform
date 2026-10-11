@@ -104,18 +104,18 @@ async function request<T>(path: string, method: Method, token: string, payload?:
   return { status: resp.status, value }
 }
 
-export function readResource(scope: Scope, token: string): Promise<{ status: number; value: DesiredView | null }> {
+export async function readResource(scope: Scope, token: string): Promise<{ status: number; value: DesiredView | null }> {
   return request<DesiredView>(resourcePath(scope), 'GET', token)
 }
 
-export function writeResource(scope: Scope, token: string, rawJSON: string, operationId: string): Promise<{ status: number; value: null }> {
+export async function writeResource(scope: Scope, token: string, rawJSON: string, operationId: string): Promise<{ status: number; value: null }> {
   return request<null>(resourcePath(scope), 'PUT', token, rawJSON, operationId)
 }
 
-export function deleteResource(scope: Scope, token: string, generation: number, operationId: string): Promise<{ status: number; value: null }> {
+export async function deleteResource(scope: Scope, token: string, generation: number, operationId: string): Promise<{ status: number; value: null }> {
   return request<null>(resourcePath(scope), 'DELETE', token, undefined, operationId, generation)
 }
 
-export function readReceipt(cluster: string, project: string, operationId: string, token: string): Promise<{ status: number; value: Receipt | null }> {
+export async function readReceipt(cluster: string, project: string, operationId: string, token: string): Promise<{ status: number; value: Receipt | null }> {
   return request<Receipt>(receiptPath(cluster, project, operationId), 'GET', token)
 }
