@@ -152,7 +152,7 @@ async function write() {
     JSON.parse(requestJSON.value)
     token()
     if (!window.confirm('确认向项目 ' + project.value + ' 提交 ' + kind.value + '/' + resource.value + ' Desired 变更？')) return
-    const original = secureRandom()
+    const original = createOperationId()
     operationId.value = original
     busy.value = true
     // Never reuse an earlier operation ID for a *different* write.
