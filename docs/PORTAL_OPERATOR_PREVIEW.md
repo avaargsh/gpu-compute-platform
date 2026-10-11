@@ -90,3 +90,6 @@ denials in a real browser. These remain required in Issue #63.
 
 Existing Stage B remains Kueue-only. llm-d's separate Draft #61 is not
 automatically promoted by this Portal change.
+
+CI note: PR #64 temporarily targets master for the existing Go/Portal workflow;
+it must not merge ahead of independent acceptance of its Portal baseline #62.
