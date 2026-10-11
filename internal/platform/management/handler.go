@@ -55,6 +55,7 @@ func NewHandlerWithBrowserOrigin(db *sql.DB, auth Introspector, origin string) (
 	}
 	svc := &Service{DB: db, Auth: auth, AllowedBrowserOrigin: origin}
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/management/projects", svc.projects)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(204)
