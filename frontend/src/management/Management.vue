@@ -19,6 +19,17 @@
 
     <section class="management-card">
       <h2>2. 项目与资源</h2>
+      <div class="management-actions">
+        <button type="button" :disabled="!authenticated || busy" @click="loadProjects">查询当前账号的项目</button>
+      </div>
+      <p>下列项目与角色来自服务端当前 OIDC 身份、PostgreSQL 授权和项目绑定；点击选择，不依赖浏览器声明角色。</p>
+      <div v-if="availableProjects.length" class="management-actions">
+        <button v-for="item in availableProjects" :key="item.projectId + '/' + item.clusterId"
+          type="button" :disabled="busy" @click="selectProject(item)">
+          使用 {{ item.projectId }} ({{ item.clusterId }}) · {{ item.role }}
+        </button>
+      </div>
+      <p v-if="projectListTruncated">只显示前 100 个项目，列表不完整。请联系管理员或手动输入授权项目。</p>
       <div class="management-fields">
         <label>Cluster ID<input v-model.trim="cluster" autocomplete="off" placeholder="cluster-a" /></label>
         <label>Project ID<input v-model.trim="project" autocomplete="off" placeholder="research" /></label>
@@ -66,7 +77,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
-import { readResource, writeResource, deleteResource, readReceipt, type Kind, type DesiredView, type Receipt, desiredMatchesScope, createOperationId } from './api'
+import { readResource, writeResource, deleteResource, readReceipt, listProjects, type Kind, type DesiredView, type Receipt, type ProjectAccess, desiredMatchesScope, createOperationId } from './api'
 
 const issuer = import.meta.env.VITE_MANAGEMENT_OIDC_ISSUER || ''
 const clientId = import.meta.env.VITE_MANAGEMENT_OIDC_CLIENT_ID || ''
@@ -87,6 +98,8 @@ const requestJSON = ref(JSON.stringify({
   },
 }, null, 2))
 const desired = ref<DesiredView | null>(null)
+const availableProjects = ref<ProjectAccess[]>([])
+const projectListTruncated = ref(false)
 const receiptData = ref<Receipt | null>(null)
 const operationId = ref('')
 const busy = ref(false)
@@ -135,8 +148,39 @@ function signOut() {
   clearPendingLogin(sessionStorage)
   desired.value = null
   receiptData.value = null
+  availableProjects.value = []
+  projectListTruncated.value = false
   message.value = '本页访问令牌已清除；身份提供商 SSO 会话未注销'
 }
+async function loadProjects() {
+  clearResult()
+  busy.value = true
+  try {
+    const result = await listProjects(token())
+    availableProjects.value = result.value?.projects ?? []
+    projectListTruncated.value = result.value?.truncated ?? false
+    message.value = '服务端返回 ' + availableProjects.value.length + ' 个当前授权项目'
+  } catch (e) {
+    availableProjects.value = []
+    projectListTruncated.value = false
+    describeError(e)
+  } finally { busy.value = false }
+}
+
+function selectProject(item: ProjectAccess) {
+  cluster.value = item.clusterId
+  project.value = item.projectId
+  // A scope change must invalidate any previously read Generation and
+  // the prior operation receipt ID, even if the resource name is identical.
+  resource.value = ''
+  kind.value = 'ComputePool'
+  desired.value = null
+  receiptData.value = null
+  operationId.value = ''
+  message.value = '已选择项目 ' + item.projectId + '（' + item.role + '），请重新选择资源'
+  error.value = ''
+}
+
 async function read() {
   clearResult(); busy.value = true
   try {
