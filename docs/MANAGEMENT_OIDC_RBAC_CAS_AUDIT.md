@@ -190,6 +190,47 @@ The receipt only reports the initiating subject's own operation. Audit
 export to project admins and independent execution attestation are separate
 future endpoints, not implicit in this API.
 
+## Loopback management client (no browser login bypass)
+
+The CLI is a minimal operator interface for **existing, externally obtained
+OIDC access tokens**. It never handles the IdP client secret, does not
+generate/trust a browser role and is hard-pinned to local
+`http://127.0.0.1:8081`; redirect-following and HTTP proxies are disabled.
+Keep port 8081 inaccessible from other hosts.
+
+```bash
+export MANAGEMENT_ACCESS_TOKEN='<provider-issued-access-token>'
+# A unique operation ID is generated before each distinct mutation.
+OP_ID="$(go run ./cmd/managementctl -action new-key)"
+
+# JSON request file must include expectedGeneration and typed resource spec.
+go run ./cmd/managementctl \
+  -action put -cluster cluster-a -project research \
+  -kind ComputePool -resource pool-a \
+  -file compute-pool-request.json -operation-id "$OP_ID"
+
+# After a broken connection, query the original operation ID. No newly
+# generated ID may be used for a retry of that ambiguous operation.
+go run ./cmd/managementctl \
+  -action receipt -cluster cluster-a -project research \
+  -operation-id "$OP_ID"
+
+# If receipt is unavailable, retry the exact same file, operation ID and
+# resource path. To delete a different resource, generate a NEW operation ID.
+DEL_ID="$(go run ./cmd/managementctl -action new-key)"
+go run ./cmd/managementctl \
+  -action delete -cluster cluster-a -project research \
+  -kind Workload -resource job-a -generation 1 \
+  -operation-id "$DEL_ID"
+```
+
+Credentials are read from `MANAGEMENT_ACCESS_TOKEN` (not command arguments)
+and the CLI prints the operation ID **before** sending a mutating request.
+Record that ID in an external trusted operator journal if automation needs
+crash recovery. This CLI is not a replacement for reviewed browser OIDC
+Authorization Code + PKCE login, CSRF protection and project-scoped Portal
+workflows.
+
 ## Release blockers
 
 - IdP interoperability: issuer discovery, documented provider setup,
