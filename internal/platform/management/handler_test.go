@@ -194,7 +194,9 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	issue := func(method, url, body, token, ifMatch string) (int, http.Header) {
 		t.Helper()
 		key, err := createRequestID()
-		if err != nil {t.Fatal(err)}
+		if err != nil {
+			t.Fatal(err)
+		}
 		return issueWithKey(method, url, body, token, ifMatch, key)
 	}
 	poolBody := `{"expectedGeneration":0,"spec":{"accelerators":[{"class":"h100","quota":2}],"acceleratorBindings":[{"class":"h100","resourceName":"nvidia.com/gpu","flavor":"h100"}],"scheduling":{"mode":"kueue"}}}`
@@ -212,7 +214,9 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 		t.Fatalf("foreign project delete: %d", status)
 	}
 	poolOperationID, err := createRequestID()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if status, _ := issueWithKey("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID); status != 204 {
 		t.Fatalf("create pool: %d", status)
 	}
