@@ -29,9 +29,9 @@ func main() {
 		}
 		var err error
 		handler, err = httpapi.NewRouterWithOperatorPreview(store, placement, httpapi.OperatorPreview{
-			Token: os.Getenv("PORTAL_OPERATOR_TOKEN"),
+			Token:     os.Getenv("PORTAL_OPERATOR_TOKEN"),
 			ClusterID: domain.ID(os.Getenv("PORTAL_OPERATOR_CLUSTER_ID")),
-			Projects: strings.Split(os.Getenv("PORTAL_OPERATOR_PROJECT_IDS"), ","),
+			Projects:  strings.Split(os.Getenv("PORTAL_OPERATOR_PROJECT_IDS"), ","),
 		})
 		if err != nil {
 			log.Fatalf("operator preview configuration invalid: %v", err)
