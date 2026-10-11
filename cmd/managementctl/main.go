@@ -34,7 +34,7 @@ type options struct {
 	OperationID string
 	File        string
 	Generation  int64
-	APIURL     string
+	APIURL      string
 }
 
 func localAPIURL(raw string) (string, error) {
