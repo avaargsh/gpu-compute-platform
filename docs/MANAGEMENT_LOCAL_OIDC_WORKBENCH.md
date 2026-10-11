@@ -63,6 +63,7 @@ export OIDC_AUDIENCE='gpu-management'
 export OIDC_CLIENT_ID='management-introspection-confidential'
 export OIDC_CLIENT_SECRET='...'            # server only; never in VITE_ vars
 export MANAGEMENT_LISTEN_ADDR='127.0.0.1:8081'
+export MANAGEMENT_BROWSER_ORIGIN='http://127.0.0.1:3002' # explicitly allow local browser writes
 go run ./cmd/management-api
 ```
 
@@ -80,6 +81,26 @@ confidential server-to-provider introspection client; the second is a public
 browser PKCE client. The issuer and audience must agree across both. Setting
 `VITE_MANAGEMENT_OIDC_CLIENT_SECRET` or sending DB credentials to the
 browser is forbidden.
+
+### Browser Origin and local proxy requirement
+
+Real browsers send an `Origin` header on PUT/DELETE. The Management API
+**rejects all Origin-bearing mutations by default**. For the local workbench,
+the operator must opt in with exactly
+`MANAGEMENT_BROWSER_ORIGIN=http://127.0.0.1:3002`, passed **only to the Go
+management-api process**. It is not an OIDC grant or project authorization
+mechanism; verified Bearer token introspection, current project RBAC, CAS,
+idempotency and atomic audit are still mandatory for every mutation.
+
+The Go handler rejects a different Origin, `null`, duplicate Origin headers,
+`Sec-Fetch-Site: cross-site`, any wildcard, any external host, and any
+malformed origin configuration. The CLI omits `Origin` and remains supported
+without this opt-in. The Vite development proxy preserves the browser Origin
+while routing ONLY `/api/v1/management` to loopback Go.
+
+This is a loopback pilot exception, **not a permitted production CORS,
+reverse proxy or public TLS configuration**. Do not weaken the restriction
+or add `Access-Control-Allow-Origin: *`.
 
 ## Operator acceptance
 
