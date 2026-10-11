@@ -208,6 +208,8 @@ watch([clusterId, operatorToken], () => {
   selected.value = null
   drawerOpen.value = false
   projectFilter.value = 'all'
+  loading.value = false
+  loadingMore.value = false
   error.value = ''
 }, { flush: 'sync' })
 
@@ -271,28 +273,28 @@ function showDetails(row: ResourceRow): void {
 }
 async function refresh(): Promise<void> {
   if (loading.value || !clusterId.value) return
+  const epoch = sessionEpoch
   loading.value = true
   error.value = ''
   snapshot.value = null
   projectFilter.value = 'all'
   drawerOpen.value = false
   try {
-    const epoch = sessionEpoch
     const next = await loadSnapshot(clusterId.value, operatorToken.value)
     if (epoch === sessionEpoch) snapshot.value = next
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : 'Go Control Plane 读取失败'
+    if (epoch === sessionEpoch) error.value = cause instanceof Error ? cause.message : 'Go Control Plane 读取失败'
   } finally {
-    loading.value = false
+    if (epoch === sessionEpoch) loading.value = false
   }
 }
 async function loadMore(): Promise<void> {
   if (loadingMore.value || !snapshot.value?.nextCursor || !clusterId.value) return
+  const epoch = sessionEpoch
   loadingMore.value = true
   error.value = ''
   try {
     const old = snapshot.value
-    const epoch = sessionEpoch
     const next = await loadSnapshot(clusterId.value, operatorToken.value, old.nextCursor)
     if (epoch !== sessionEpoch) return
     if (next.agent.clusterId !== old.agent.clusterId || next.total !== old.total) {
@@ -304,9 +306,16 @@ async function loadMore(): Promise<void> {
     }
     snapshot.value = { ...next, rows: [...old.rows, ...next.rows] }
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '加载资源失败'
+    if (epoch === sessionEpoch) {
+      error.value = cause instanceof Error ? cause.message : '加载资源失败'
+      if (error.value.includes('资源清单在翻页期间发生变化')) {
+        snapshot.value = null
+        selected.value = null
+        drawerOpen.value = false
+      }
+    }
   } finally {
-    loadingMore.value = false
+    if (epoch === sessionEpoch) loadingMore.value = false
   }
 }
 </script>
