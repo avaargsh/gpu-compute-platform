@@ -20,3 +20,13 @@
 .el-table{cursor:pointer}
 @media(max-width:1100px){.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.two-columns{grid-template-columns:1fr}}
 @media(max-width:760px){.portal-shell{display:block}.portal-sidebar{width:100%;height:auto;padding:12px;flex-direction:row;align-items:center;flex-wrap:wrap}.brand-mark{padding:4px 10px;margin-right:auto}.sidebar-section,.sidebar-bottom{display:none}.nav-item{width:auto;padding:9px;font-size:12px}.nav-item span{display:none}.portal-main{width:100%;padding:24px 14px}.portal-topbar h1{font-size:23px}.metric-grid{gap:10px}.metric-card{padding:17px}.context-bar{padding:14px}.detail-grid{grid-template-columns:1fr}.panel{padding:16px}.panel-heading{flex-wrap:wrap}.last-sync{margin:0}}
+
+/* Enterprise operations workbench additions: consistent hierarchy, severity
+   semantics and keyboard focus, without synthetic GPU health indicators. */
+.nav-count{margin-left:auto;min-width:24px;height:21px;padding:1px 7px;border-radius:12px;background:#4b3340;color:#ffc2b7;font-size:11px;font-weight:700;text-align:center}
+.finding-row{display:grid;grid-template-columns:180px minmax(100px,1fr) minmax(160px,2fr) auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid #f0f3f8;font-size:13px}
+.finding-row:last-child{border-bottom:0}.finding-row strong{overflow-wrap:anywhere}.finding-row span:not(.el-tag__content){color:#758397;overflow-wrap:anywhere}
+.nav-item:focus-visible,.context-bar button:focus-visible{outline:2px solid #85bbff;outline-offset:3px}
+.el-table :deep(.cell){word-break:break-word}
+@media(max-width:900px){.finding-row{grid-template-columns:minmax(120px,1fr) minmax(100px,1fr)}}
+@media(max-width:760px){.nav-count{margin-left:0}.finding-row{grid-template-columns:1fr}.finding-row .el-button{justify-self:start}}
