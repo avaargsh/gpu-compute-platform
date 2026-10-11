@@ -58,8 +58,12 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await page.goto('/management.html')
   await page.getByRole('button', { name: '通过 OIDC 登录' }).click()
   await expect(page.getByText(/已取得短期访问令牌/)).toBeVisible()
-  await page.getByPlaceholder('cluster-a').fill('browser-ci')
-  await page.getByPlaceholder('research').fill('research')
+  await page.getByRole('button', { name: '查询当前账号的项目' }).click()
+  await expect(page.getByRole('button', { name: '使用 research (browser-ci) · operator' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /viewer/ })).toHaveCount(0)
+  await page.getByRole('button', { name: '使用 research (browser-ci) · operator' }).click()
+  await expect(page.getByPlaceholder('cluster-a')).toHaveValue('browser-ci')
+  await expect(page.getByPlaceholder('research')).toHaveValue('research')
   await page.getByPlaceholder('pool-a').fill('pool-a')
 
   // First write must reach the real Go handler and persist to PostgreSQL.
@@ -115,8 +119,10 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   // in volatile component state, so the viewer must select it afresh.
   await expect(page.getByPlaceholder('cluster-a')).toHaveValue('')
   await expect(page.getByPlaceholder('research')).toHaveValue('')
-  await page.getByPlaceholder('cluster-a').fill('browser-ci')
-  await page.getByPlaceholder('research').fill('research')
+  await page.getByRole('button', { name: '查询当前账号的项目' }).click()
+  await expect(page.getByRole('button', { name: '使用 research (browser-ci) · viewer' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /operator/ })).toHaveCount(0)
+  await page.getByRole('button', { name: '使用 research (browser-ci) · viewer' }).click()
   await page.locator('select').selectOption('ComputePool')
   await page.getByPlaceholder('pool-a').fill('pool-a')
   await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
