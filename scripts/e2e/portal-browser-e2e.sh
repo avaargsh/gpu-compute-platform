@@ -20,7 +20,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-go run ./cmd/control-plane >"$TMP_LOG/go.log" 2>&1 &
+go build -o "$TMP_LOG/control-plane" ./cmd/control-plane
+"$TMP_LOG/control-plane" >"$TMP_LOG/go.log" 2>&1 &
 GO_PID=$!
 for attempt in $(seq 1 120); do
   if curl -fsS --max-time 1 http://127.0.0.1:8080/healthz >/dev/null 2>&1; then break; fi
