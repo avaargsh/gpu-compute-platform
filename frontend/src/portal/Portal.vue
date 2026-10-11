@@ -17,12 +17,14 @@
         <el-tag type="warning" effect="plain" size="large">LOCAL PREVIEW · READ ONLY</el-tag>
       </header>
 
-      <el-alert title="此入口直接读取 Go Control Plane，尚未接入可信身份认证。仅可在本机开发环境使用，不支持公开部署和资源写入。" type="warning" :closable="false" show-icon class="safety-banner" />
+      <el-alert title="本机单操作员试用：服务端校验凭证及项目范围。尚未实现 OIDC / 多用户 RBAC，禁止公网部署和资源写入。凭证仅保留在本页内存，不持久化。"  type="warning" :closable="false" show-icon class="safety-banner" />
 
       <section class="context-bar">
         <label class="context-label" for="cluster-id">Cluster ID</label>
-        <el-input id="cluster-id" v-model.trim="clusterId" placeholder="输入已有集群 ID，例如 kind-golden" clearable class="cluster-input" @keyup.enter="refresh" />
-        <el-button type="primary" :loading="loading" :disabled="!clusterId || loading" @click="refresh">读取实时状态</el-button>
+        <el-input id="cluster-id" v-model.trim="clusterId" placeholder="已授权集群 ID" clearable class="cluster-input" @keyup.enter="refresh" />
+        <label class="context-label" for="operator-token">本机操作员凭证</label>
+        <el-input id="operator-token" v-model="operatorToken" type="password" show-password autocomplete="off" placeholder="本机只读访问凭证（不存储）" class="cluster-input" @keyup.enter="refresh" />
+        <el-button type="primary" :loading="loading" :disabled="!clusterId || operatorToken.length < 32 || loading" @click="refresh">授权读取</el-button>
         <span v-if="snapshot" class="last-sync">读取时间：{{ formatTime(snapshot.refreshedAt) }}</span>
       </section>
       <el-alert v-if="error" :title="error" type="error" :closable="true" @close="error = ''" show-icon class="error-banner" />
@@ -31,13 +33,13 @@
         <div class="welcome-box">
           <div class="welcome-icon">◈</div>
           <h2>连接你的计算集群</h2>
-          <p>输入 Go Control Plane 中已注册的 Cluster ID，即可查看真实能力、计算池、工作负载与执行证据。这里不会生成演示数据。</p>
-          <div class="welcome-hint"><code>GET /api/v1/clusters/{clusterID}/status</code> <span>·</span> <code>GET /api/v1/agent/desired</code></div>
+          <p>输入已授权 Cluster ID 和本机操作员凭证，读取服务端按项目过滤的计算池、工作负载与执行证据。没有模拟数据，也不允许在这里创建或删除资源。</p>
+          <div class="welcome-hint"><code>GET /api/v1/operator/clusters/{clusterID}/snapshot</code><span>·</span><code>Read-only / scoped</code></div>
         </div>
       </template>
 
       <template v-else>
-        <el-alert v-if="snapshot.truncated" type="warning" :closable="false" title="资源读取已达到 120 条限制：所有项目、异常和配额汇总仅基于已读取的样本，不代表全量集群。" class="resource-alert" />
+        <el-alert v-if="snapshot.truncated" type="warning" :closable="false" title="当前展示的是授权项目的一页结果，项目、异常和配额统计仅针对已加载页面。继续加载后才能查看更多资源。" class="resource-alert" />
         <div v-if="view === 'overview'" class="content-stack">
           <div class="metric-grid">
             <div class="metric-card"><div class="metric-label">集群状态</div><strong>{{ heartbeatLabel }}</strong><small>根据上次 Agent 心跳估算，非权威在线标记</small></div>
@@ -95,7 +97,7 @@
               <el-input v-model="keyword" placeholder="搜索资源 ID" clearable style="width: 190px" />
             </div>
           </div>
-          <el-alert v-if="snapshot.truncated" type="warning" :closable="false" :title="'集群共有 ' + snapshot.total + ' 条符合类型的资源，本地安全限制只读取前 120 条；当前计数不代表全集群。'" class="resource-alert" />
+          <el-alert v-if="snapshot.truncated" type="warning" :closable="false" :title="'当前授权范围内共有 ' + snapshot.total + ' 条资源，已载入 ' + snapshot.rows.length + ' 条，可按页继续读取。'" class="resource-alert" />
           <el-table :data="visibleRows" empty-text="没有匹配的实际资源" stripe @row-click="showDetails">
             <el-table-column label="类型" prop="desired.kind" width="145" />
             <el-table-column label="资源 ID" prop="desired.id" min-width="180" show-overflow-tooltip />
@@ -105,6 +107,7 @@
             <el-table-column label="删除中" width="95"><template #default="{ row }">{{ row.desired.deletionTimestamp ? '是' : '否' }}</template></el-table-column>
             <el-table-column label="证据条目" width="100"><template #default="{ row }">{{ row.state?.evidenceRefs?.length ?? '—' }}</template></el-table-column>
           </el-table>
+          <div class="paging-controls" v-if="snapshot.nextCursor"><el-button :loading="loadingMore" type="primary" plain @click="loadMore">继续加载下一页</el-button><span>已加载 {{ snapshot.rows.length }} / {{ snapshot.total }} 条</span></div>
           <p class="table-footnote">Synced 只表示观察 Generation 与期望 Generation 一致，不表示工作负载已 Ready、Kueue 已准入或 GPU 实际分配成功。</p>
         </section>
 
@@ -184,6 +187,8 @@ import { findingsFor, projectIdOf, projectSummaries, triageFindings, type Findin
 type View = 'overview' | 'projects' | 'resources' | 'diagnostics' | 'integrations'
 const view = ref<View>('overview')
 const clusterId = ref('')
+const operatorToken = ref('')
+const loadingMore = ref(false)
 const snapshot = ref<PortalSnapshot | null>(null)
 const error = ref('')
 const loading = ref(false)
@@ -251,11 +256,32 @@ async function refresh(): Promise<void> {
   projectFilter.value = 'all'
   drawerOpen.value = false
   try {
-    snapshot.value = await loadSnapshot(clusterId.value)
+    snapshot.value = await loadSnapshot(clusterId.value, operatorToken.value)
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Go Control Plane 读取失败'
   } finally {
     loading.value = false
+  }
+}
+async function loadMore(): Promise<void> {
+  if (loadingMore.value || !snapshot.value?.nextCursor || !clusterId.value) return
+  loadingMore.value = true
+  error.value = ''
+  try {
+    const old = snapshot.value
+    const next = await loadSnapshot(clusterId.value, operatorToken.value, old.nextCursor)
+    if (next.agent.clusterId !== old.agent.clusterId || next.total !== old.total) {
+      throw new Error('读取期间资源集合发生变化，请重新读取以避免误判。')
+    }
+    const existing = new Set(old.rows.map(row => row.desired.kind + '/' + row.desired.id))
+    if (next.rows.some(row => existing.has(row.desired.kind + '/' + row.desired.id))) {
+      throw new Error('跨页资源身份重复，请重新读取。')
+    }
+    snapshot.value = { ...next, rows: [...old.rows, ...next.rows] }
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '加载资源失败'
+  } finally {
+    loadingMore.value = false
   }
 }
 </script>
