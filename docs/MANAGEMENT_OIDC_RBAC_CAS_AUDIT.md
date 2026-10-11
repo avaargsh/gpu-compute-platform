@@ -7,7 +7,8 @@ declaration that the full production portal is ready.
 
 `cmd/management-api` is a **separate service** from the pre-existing Go
 Control Plane / Cluster Agent API. Only `/healthz` and scoped
-`/api/v1/management/...` GET/PUT/DELETE are registered. The legacy
+`/api/v1/management/...` GET/PUT/DELETE plus owner-scoped operation
+receipt GET are registered. The legacy
 `/api/v1/agent`, `/api/v1/internal` and legacy resource routes are never
 registered or proxied in this service. The management listener is
 **127.0.0.1:8081 only**, until independently reviewed TLS ingress / reverse
@@ -137,6 +138,57 @@ curl -sS -X PUT \
 Workload creation additionally requires `"poolId":"existing-pool"` and a
 Workload `spec` with `image`, `command`, and
 `accelerator: {class, quota}`.
+
+## Operation commit receipt and safe recovery
+
+A successful PUT or DELETE stores an immutable Desired-state audit receipt in
+the *same PostgreSQL transaction*. After an HTTP timeout, disconnect or
+ambiguous `503` response, do **not** assume the mutation failed and do not
+mint a new operation ID. Re-introspect the current access token, then query:
+
+```text
+GET /api/v1/management/clusters/{clusterID}/projects/{projectID}/operations/{operationID}
+Authorization: Bearer <access-token>
+```
+
+The receipt endpoint requires the **same verified issuer and subject**
+responsible for the write **and a live operator/admin project grant**.
+Unauthorized or nonexistent operation IDs both return 404, while missing
+or invalid access tokens return 401. Project membership downgrade/revocation
+removes access even to earlier receipts.
+
+A committed request returns HTTP 200 with `Cache-Control: no-store`,
+`X-Request-ID`, the resulting Generation `ETag`, and a JSON object:
+
+```json
+{
+  "requestId": "0123456789abcdef0123456789abcdef",
+  "status": "desired-committed",
+  "clusterId": "cluster-a",
+  "projectId": "research",
+  "kind": "ComputePool",
+  "resourceId": "pool-a",
+  "action": "create",
+  "expectedGeneration": 0,
+  "resultingGeneration": 1,
+  "requestDigest": "sha256-hex",
+  "committedAt": "2026-10-11T00:00:00Z"
+}
+```
+
+`requestDigest` is an actual 64-character lowercase SHA-256 hex digest,
+not the placeholder shown here. `status=desired-committed` **proves a
+management Desired write and its audit commit only**; it is NOT proof of
+Kueue admission, provider resource existence, Agent ownership, or Workload
+execution. For a 404 where the caller still has a grant, the operation is
+not known to have committed at query time; repeat the **identical** original
+PUT/DELETE with the **same** Idempotency-Key, then look up the receipt
+again. A late in-flight transaction may still win; the operation-level
+idempotency key prevents a second write.
+
+The receipt only reports the initiating subject's own operation. Audit
+export to project admins and independent execution attestation are separate
+future endpoints, not implicit in this API.
 
 ## Release blockers
 
