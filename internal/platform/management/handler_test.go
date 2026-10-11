@@ -166,7 +166,7 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 	base := server.URL + "/api/v1/management/clusters/" + cluster + "/projects/" + project + "/resources/"
-	issue := func(method, url, body, token, ifMatch string) (int, http.Header) {
+	issueWithKey := func(method, url, body, token, ifMatch, key string) (int, http.Header) {
 		t.Helper()
 		r, err := http.NewRequest(method, url, strings.NewReader(body))
 		if err != nil {
@@ -174,6 +174,9 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 		}
 		if token != "" {
 			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		if key != "" {
+			r.Header.Set("Idempotency-Key", key)
 		}
 		if method == "PUT" {
 			r.Header.Set("Content-Type", "application/json")
@@ -187,6 +190,12 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 		}
 		defer resp.Body.Close()
 		return resp.StatusCode, resp.Header
+	}
+	issue := func(method, url, body, token, ifMatch string) (int, http.Header) {
+		t.Helper()
+		key, err := createRequestID()
+		if err != nil {t.Fatal(err)}
+		return issueWithKey(method, url, body, token, ifMatch, key)
 	}
 	poolBody := `{"expectedGeneration":0,"spec":{"accelerators":[{"class":"h100","quota":2}],"acceleratorBindings":[{"class":"h100","resourceName":"nvidia.com/gpu","flavor":"h100"}],"scheduling":{"mode":"kueue"}}}`
 	if status, _ := issue("PUT", base+"ComputePool/"+pool, poolBody, "", ""); status != 401 {
@@ -202,8 +211,22 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	if status, _ := issue("DELETE", foreignBase+"ComputePool/"+pool, "", "good-access-token", `"1"`); status != 403 {
 		t.Fatalf("foreign project delete: %d", status)
 	}
-	if status, _ := issue("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", ""); status != 204 {
+	poolOperationID, err := createRequestID()
+	if err != nil { t.Fatal(err) }
+	if status, _ := issueWithKey("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID); status != 204 {
 		t.Fatalf("create pool: %d", status)
+	}
+	// A lost HTTP response may be retried with the exact same operation ID:
+	// it must replay the original result rather than mutate or audit again.
+	if status, header := issueWithKey("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID); status != 204 || header.Get("ETag") != `"1"` {
+		t.Fatalf("idempotent replay status=%d ETag=%s", status, header.Get("ETag"))
+	}
+	modifiedBody := strings.Replace(poolBody, `"quota":2`, `"quota":3`, 1)
+	if status, _ := issueWithKey("PUT", base+"ComputePool/"+pool, modifiedBody, "good-access-token", "", poolOperationID); status != 409 {
+		t.Fatalf("operation ID reused for a different payload: %d", status)
+	}
+	if status, _ := issueWithKey("DELETE", base+"ComputePool/"+pool, "", "good-access-token", `"1"`, poolOperationID); status != 409 {
+		t.Fatalf("operation ID reused for a different method: %d", status)
 	}
 	if status, _ := issue("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", ""); status != 409 {
 		t.Fatalf("stale create should be 409: %d", status)
