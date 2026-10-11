@@ -62,12 +62,30 @@ export OIDC_CLIENT_ID='management-api'
 export OIDC_CLIENT_SECRET='...'
 export OIDC_AUDIENCE='management-api'
 export MANAGEMENT_LISTEN_ADDR=127.0.0.1:8081
+export MANAGEMENT_BROWSER_ORIGIN='http://127.0.0.1:3002' # explicit loopback UI opt-in
 go run ./cmd/management-api
 ```
 
 Secrets never belong in the frontend or in committed configuration.
 Production must also restrict the Postgres management DB role, TLS upstream,
 and all network policies.
+
+### Browser Origin gate
+
+The management API denies **all Origin-bearing write requests by default**.
+This protects the CLI-only default even if a browser can reach loopback Go.
+For the local PKCE workbench alone, set
+`MANAGEMENT_BROWSER_ORIGIN=http://127.0.0.1:3002` in the Go process. It
+must be exactly a loopback HTTP origin, never `*`, `null`, `localhost`, a
+LAN address or a public ingress. Requests with a different/duplicate Origin
+or `Sec-Fetch-Site: cross-site` fail with 403 before any Desired/audit write.
+CLI requests without Origin remain supported. Browser Origin admission is
+not identity or tenant authorization; every request still uses OIDC provider
+introspection, DB project grants, CAS and append-only audit.
+
+This setting does not grant production CORS. External TLS ingress,
+proxy-level identity and machine Agent authorization remain blocked pending
+independent review.
 
 ## REST operation contract
 
