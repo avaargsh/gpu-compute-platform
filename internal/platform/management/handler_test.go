@@ -249,6 +249,23 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM management_operation_audit WHERE project_id=$1", project).Scan(&audits); err != nil || audits != 3 {
 		t.Fatalf("audit failed write count=%d err=%v", audits, err)
 	}
+	// Project authorization comes from a fresh DB lookup on every request.
+	// Role downgrade immediately blocks writes; revoke blocks reads too.
+	if _, err := db.ExecContext(ctx, "UPDATE management_project_grants SET role='viewer' WHERE issuer=$1 AND subject=$2 AND project_id=$3", "https://issuer.example", "alice", project); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := issue("DELETE", base+"Workload/"+job, "", "good-access-token", `"1"`); status != 403 {
+		t.Fatalf("downgraded operator still allowed to delete: %d", status)
+	}
+	if status, _ := issue("GET", base+"ComputePool/"+pool, "", "good-access-token", ""); status != 200 {
+		t.Fatalf("viewer should retain scoped read: %d", status)
+	}
+	if _, err := db.ExecContext(ctx, "DELETE FROM management_project_grants WHERE issuer=$1 AND subject=$2 AND project_id=$3", "https://issuer.example", "alice", project); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := issue("GET", base+"ComputePool/"+pool, "", "good-access-token", ""); status != 403 {
+		t.Fatalf("revoked membership still granted read: %d", status)
+	}
 }
 
 func fmtID(prefix string, n int64) string {
