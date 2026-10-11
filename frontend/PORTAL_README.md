@@ -33,6 +33,7 @@ the developer server binds exclusively to loopback.
 
 ```bash
 cd frontend
+npm run portal:test
 npm run portal:build
 ```
 
@@ -46,6 +47,8 @@ from the legacy Python UI.
 | Cluster / heartbeat / capabilities | `GET /api/v1/clusters/{clusterID}/status` | Heartbeat recency is an estimate, not authoritative liveness |
 | Existing pools and workloads | `GET /api/v1/agent/desired?clusterId=...` | Desired resources only; not proof of scheduling |
 | Per-resource state and evidence | `GET /api/v1/internal/clusters/{clusterID}/state/{kind}/{id}` | Synced generation != Ready / Admitted / GPU allocated |
+| Project views | Existing Desired `spec.projectID` | Client-only grouping, **never** RBAC or authoritative tenant isolation |
+| Operations Inbox | Independent State + Conditions + GET errors | Evidence-based triage; `Synced` != Ready, read failure != resource failure |
 | Ecosystem page | Agent `capabilities.providers` and `schedulers` | Discovered scheduler != registered executable provider |
 | llm-d | Explicitly unintegrated | Separate Draft PR #61; no claimed GAIE/EPP/Router health |
 
@@ -86,3 +89,7 @@ Before any production Portal release:
 
 Do not silently convert this local preview into an Internet-accessible
 management console.
+
+Product parity and UI decision record: `docs/PORTAL_PRODUCT_BENCHMARK.md`.
+All quota aggregates in the local UI are **declared** ComputePool intent, not
+GPU utilization, billed usage, available capacity, or Kueue acceptance.
