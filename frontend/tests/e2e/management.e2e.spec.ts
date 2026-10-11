@@ -65,7 +65,7 @@ test('browser completes one-use S256 PKCE and sends audited CRUD without legacy 
       return
     }
     if (url.endsWith('/resources/ComputePool/pool-a') && method === 'PUT') {
-      expect(operation).toMatch(/^[0-9a-f]{64}$/) // UI uses 32 bytes entropy, server currently accepts 16-byte operation IDs.
+      expect(operation).toMatch(/^[0-9a-f]{32}$/)
       await route.fulfill({ status: 204, body: '' })
       return
     }
