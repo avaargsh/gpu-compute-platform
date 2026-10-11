@@ -118,8 +118,12 @@ jobs:
       - name: Install pinned Chromium browser
         working-directory: frontend
         run: npx playwright install --with-deps chromium
+      - name: Validate local launch scripts syntax
+        run: bash -n scripts/dev/portal-local.sh scripts/e2e/portal-local-launch-smoke.sh scripts/e2e/portal-browser-e2e.sh
       - name: Run real API-backed Portal Chromium acceptance
         run: bash scripts/e2e/portal-browser-e2e.sh
+      - name: Smoke one-command local Portal startup, isolation and shutdown
+        run: bash scripts/e2e/portal-local-launch-smoke.sh
 
   golden-path:
     name: Golden Path / kind + Kueue
