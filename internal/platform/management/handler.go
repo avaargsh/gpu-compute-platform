@@ -248,6 +248,27 @@ func specHash(data []byte) string {
 	return hex.EncodeToString(digest[:])
 }
 
+// mutationFingerprint contains every API-authorized input including the
+// exact expected Generation. It intentionally does not include token text.
+func mutationFingerprint(cluster, project, kind, resourceID string, in mutationInput, method string) (string, error) {
+	payload, err := json.Marshal(struct {
+		Method string `json:"method"`
+		Cluster string `json:"cluster"`
+		Project string `json:"project"`
+		Kind string `json:"kind"`
+		ResourceID string `json:"resourceId"`
+		ExpectedGeneration int64 `json:"expectedGeneration"`
+		PoolID string `json:"poolId"`
+		Spec json.RawMessage `json:"spec,omitempty"`
+	}{
+		Method: method, Cluster: cluster, Project: project, Kind: kind,
+		ResourceID: resourceID, ExpectedGeneration: *in.ExpectedGeneration,
+		PoolID: in.PoolID, Spec: in.Spec,
+	})
+	if err != nil {return "", err}
+	return specHash(payload), nil
+}
+
 func (s *Service) mutate(ctx context.Context, id Identity, cluster, project, kind, resourceID string, in mutationInput, method, requestID string) (int, int64) {
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -263,6 +284,35 @@ func (s *Service) mutate(ctx context.Context, id Identity, cluster, project, kin
 	}
 	if role != "operator" && role != "admin" {
 		return 403, 0
+	}
+	// Bind the same client operation ID to the exact authenticated action.
+	// The same ID + same payload can be replayed after a lost response; ID
+	// reuse across users, projects, resources or different payloads is 409.
+	fingerprint, err := mutationFingerprint(cluster, project, kind, resourceID, in, method)
+	if err != nil {
+		return 400, 0
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "management-request/"+requestID); err != nil {
+		return 503, 0
+	}
+	var priorIssuer, priorSubject, priorProject, priorCluster, priorKind, priorResource, priorAction, priorDigest string
+	var priorExpected, priorGeneration int64
+	err = tx.QueryRowContext(ctx, `SELECT issuer,subject,project_id,cluster_id,kind,resource_id,action,expected_generation,resulting_generation,request_digest
+ FROM management_operation_audit WHERE request_id=$1`, requestID).Scan(
+		&priorIssuer, &priorSubject, &priorProject, &priorCluster, &priorKind, &priorResource,
+		&priorAction, &priorExpected, &priorGeneration, &priorDigest)
+	if err != nil && err != sql.ErrNoRows {
+		return 503, 0
+	}
+	if err == nil {
+		actionMatches := (method == http.MethodDelete && priorAction == "delete-request") ||
+			(method == http.MethodPut && (priorAction == "create" || priorAction == "update"))
+		if priorIssuer != id.Issuer || priorSubject != id.Subject || priorProject != project ||
+			priorCluster != cluster || priorKind != kind || priorResource != resourceID ||
+			priorExpected != *in.ExpectedGeneration || priorDigest != fingerprint || !actionMatches {
+			return 409, 0
+		}
+		return 0, priorGeneration
 	}
 
 	// Use the same lifecycle advisory key as the Agent Store; serialize
@@ -424,15 +474,18 @@ func (s *Service) mutate(ctx context.Context, id Identity, cluster, project, kin
 	// This append-only audit event commits atomically with the Desired change.
 	// An audit insert failure rolls back the *entire* write and CAS outcome.
 	_, err = tx.ExecContext(ctx, `INSERT INTO management_operation_audit
- (request_id,issuer,subject,project_id,cluster_id,kind,resource_id,action,expected_generation,resulting_generation,prior_spec_sha256,resulting_spec_sha256)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-		requestID, id.Issuer, id.Subject, project, cluster, kind, resourceID, action, expected, newGen, specHash(previousSpec), specHash(newSpec))
+ (request_id,request_digest,issuer,subject,project_id,cluster_id,kind,resource_id,action,expected_generation,resulting_generation,prior_spec_sha256,resulting_spec_sha256)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+		requestID, fingerprint, id.Issuer, id.Subject, project, cluster, kind, resourceID, action, expected, newGen, specHash(previousSpec), specHash(newSpec))
 	if err != nil {
 		return 503, 0
 	}
 	if err := tx.Commit(); err != nil {
-		return 409, 0
-	} // serializable conflict, commit state uncertain only if connection failed; no replay guarantees
+		// Commit outcome can be uncertain after a transport failure; never
+		// falsely report an authoritative CAS conflict. The caller may safely
+		// retry with the SAME Idempotency-Key and identical request.
+		return 503, 0
+	}
 	return 0, newGen
 }
 
