@@ -4,7 +4,9 @@
       <div class="brand-mark"><span class="brand-icon">◈</span><div><strong>GPU Compute</strong><small>Control Portal · Local</small></div></div>
       <div class="sidebar-section">工作空间</div>
       <button type="button" class="nav-item" :class="{ active: view === 'overview' }" @click="view = 'overview'">◫ <span>总览</span></button>
+      <button type="button" class="nav-item" :class="{ active: view === 'projects' }" @click="view = 'projects'">▦ <span>项目视图</span></button>
       <button type="button" class="nav-item" :class="{ active: view === 'resources' }" @click="view = 'resources'">▤ <span>资源与工作负载</span></button>
+      <button type="button" class="nav-item" :class="{ active: view === 'diagnostics' }" @click="view = 'diagnostics'">△ <span>异常待办</span><span v-if="findings.length" class="nav-count">{{ findings.length }}</span></button>
       <button type="button" class="nav-item" :class="{ active: view === 'integrations' }" @click="view = 'integrations'">◇ <span>生态集成</span></button>
       <div class="sidebar-bottom"><span class="local-dot"></span>开发环境 · 只读模式</div>
     </aside>
@@ -35,6 +37,7 @@
       </template>
 
       <template v-else>
+        <el-alert v-if="snapshot.truncated" type="warning" :closable="false" title="资源读取已达到 120 条限制：所有项目、异常和配额汇总仅基于已读取的样本，不代表全量集群。" class="resource-alert" />
         <div v-if="view === 'overview'" class="content-stack">
           <div class="metric-grid">
             <div class="metric-card"><div class="metric-label">集群状态</div><strong>{{ heartbeatLabel }}</strong><small>根据上次 Agent 心跳估算，非权威在线标记</small></div>
@@ -61,6 +64,15 @@
               <div class="capability-line"><span>加速器类</span><strong>{{ snapshot.agent.capabilities.accelerators?.join(', ') || '未上报' }}</strong></div>
             </section>
           </div>
+          <section class="panel" v-if="findings.length">
+            <div class="panel-heading"><h2>需要操作员关注</h2><el-button text type="primary" @click="view = 'diagnostics'">进入异常待办 →</el-button></div>
+            <div v-for="finding in findings.slice(0, 4)" :key="finding.key" class="finding-row">
+              <el-tag :type="finding.severity === 'critical' ? 'danger' : 'warning'" effect="plain">{{ finding.code }}</el-tag>
+              <strong>{{ finding.resourceId }}</strong>
+              <span>{{ finding.description }}</span>
+              <el-button text type="primary" @click="showFinding(finding)">查看证据</el-button>
+            </div>
+          </section>
           <section class="panel">
             <div class="panel-heading"><h2>资源状态预览</h2><el-button text type="primary" @click="view = 'resources'">查看所有资源 →</el-button></div>
             <el-table :data="snapshot.rows.slice(0, 8)" empty-text="当前集群无 ComputePool / Workload" stripe @row-click="showDetails">
@@ -74,7 +86,14 @@
 
         <section v-else-if="view === 'resources'" class="panel">
           <div class="panel-heading heading-with-controls"><div><h2>ComputePool 与 Workload</h2><p>Go Desired / Observed Generation · 点击记录查看原始条件和证据</p></div>
-            <div class="filters"><el-select v-model="kindFilter" style="width: 160px"><el-option label="全部类型" value="all" /><el-option label="ComputePool" value="ComputePool" /><el-option label="Workload" value="Workload" /></el-select><el-input v-model="keyword" placeholder="搜索资源 ID" clearable style="width: 210px" /></div>
+            <div class="filters">
+              <el-select v-model="projectFilter" aria-label="按项目筛选" style="width: 165px">
+                <el-option label="所有项目" value="all" />
+                <el-option v-for="project in projects" :key="project.id" :label="project.id || '未标记项目'" :value="project.id" />
+              </el-select>
+              <el-select v-model="kindFilter" aria-label="按资源类型筛选" style="width: 155px"><el-option label="全部类型" value="all" /><el-option label="ComputePool" value="ComputePool" /><el-option label="Workload" value="Workload" /></el-select>
+              <el-input v-model="keyword" placeholder="搜索资源 ID" clearable style="width: 190px" />
+            </div>
           </div>
           <el-alert v-if="snapshot.truncated" type="warning" :closable="false" :title="'集群共有 ' + snapshot.total + ' 条符合类型的资源，本地安全限制只读取前 120 条；当前计数不代表全集群。'" class="resource-alert" />
           <el-table :data="visibleRows" empty-text="没有匹配的实际资源" stripe @row-click="showDetails">
@@ -87,6 +106,42 @@
             <el-table-column label="证据条目" width="100"><template #default="{ row }">{{ row.state?.evidenceRefs?.length ?? '—' }}</template></el-table-column>
           </el-table>
           <p class="table-footnote">Synced 只表示观察 Generation 与期望 Generation 一致，不表示工作负载已 Ready、Kueue 已准入或 GPU 实际分配成功。</p>
+        </section>
+
+        <section v-else-if="view === 'projects'" class="panel">
+          <div class="panel-heading"><div><h2>项目 / AI Initiatives</h2><p>按资源 spec.projectID 聚合；不是已鉴权的租户列表</p></div><el-tag effect="plain">{{ projects.length }} 个已观察项目分组</el-tag></div>
+          <el-table :data="projects" stripe empty-text="当前集群没有可归组的资源">
+            <el-table-column label="项目 ID" min-width="180">
+              <template #default="{ row }"><strong>{{ row.id || '未标记项目（不可用于授权）' }}</strong></template>
+            </el-table-column>
+            <el-table-column label="ComputePool" prop="poolCount" width="135" />
+            <el-table-column label="Workload" prop="workloadCount" width="135" />
+            <el-table-column label="需关注" width="120">
+              <template #default="{ row }"><el-tag :type="row.needsAttention ? 'warning' : 'info'" effect="plain">{{ row.needsAttention }}</el-tag></template>
+            </el-table-column>
+            <el-table-column label="声明 GPU 配额" width="160">
+              <template #default="{ row }">{{ row.poolCount ? (row.declaredPoolGpuQuota ?? '未知') : '—' }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="110">
+              <template #default="{ row }"><el-button type="primary" link @click="openProject(row.id)">查看资源 →</el-button></template>
+            </el-table-column>
+          </el-table>
+          <p class="table-footnote">声明 GPU 配额是 ComputePool.spec.accelerators 中的 quota 总和，仅表示产品意图；不是 GPU 已分配量、GPU 利用率、Kueue 准入，也不能据此计费。</p>
+        </section>
+
+        <section v-else-if="view === 'diagnostics'" class="panel">
+          <div class="panel-heading"><div><h2>异常待办 / Operations Inbox</h2><p>从真实 Desired、Observation、Condition 派生，不调用 LLM 推断故障原因</p></div><el-tag :type="findings.length ? 'warning' : 'info'" effect="plain">{{ findings.length }} 条待检查</el-tag></div>
+          <el-table :data="findings" stripe empty-text="在已读取的资源样本中，没有匹配的异常；不表示全平台健康">
+            <el-table-column label="优先级" width="110">
+              <template #default="{ row }"><el-tag :type="row.severity === 'critical' ? 'danger' : 'warning'" effect="plain">{{ row.severity === 'critical' ? '高' : '待确认' }}</el-tag></template>
+            </el-table-column>
+            <el-table-column label="项目" min-width="120"><template #default="{ row }">{{ row.projectId || '未标记' }}</template></el-table-column>
+            <el-table-column label="资源" min-width="155"><template #default="{ row }">{{ row.kind }} / {{ row.resourceId }}</template></el-table-column>
+            <el-table-column label="异常类型" min-width="180" prop="code" />
+            <el-table-column label="证据 / 原因" min-width="200" show-overflow-tooltip prop="description" />
+            <el-table-column label="操作" width="112"><template #default="{ row }"><el-button type="primary" link @click="showFinding(row)">查看证据 →</el-button></template></el-table-column>
+          </el-table>
+          <p class="table-footnote">异常待办是只读观测分类，状态同步不等于推理就绪。当前不提供修复、重新调度、删除或手动重试按钮。</p>
         </section>
 
         <section v-else class="content-stack">
@@ -124,8 +179,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { loadSnapshot, type PortalSnapshot, type ResourceRow } from './api'
+import { findingsFor, projectIdOf, projectSummaries, triageFindings, type Finding } from './project-model'
 
-type View = 'overview' | 'resources' | 'integrations'
+type View = 'overview' | 'projects' | 'resources' | 'diagnostics' | 'integrations'
 const view = ref<View>('overview')
 const clusterId = ref('')
 const snapshot = ref<PortalSnapshot | null>(null)
@@ -133,14 +189,21 @@ const error = ref('')
 const loading = ref(false)
 const keyword = ref('')
 const kindFilter = ref('all')
+const projectFilter = ref('all')
 const selected = ref<ResourceRow | null>(null)
 const drawerOpen = ref(false)
 
-const viewTitle = computed(() => ({ overview: '计算平台总览', resources: '资源与工作负载', integrations: '生态集成' })[view.value])
+const viewTitle = computed(() => ({
+  overview: '计算平台总览', projects: '项目视图', resources: '资源与工作负载',
+  diagnostics: '异常待办', integrations: '生态集成',
+})[view.value])
+const projects = computed(() => projectSummaries(snapshot.value?.rows ?? []))
+const findings = computed(() => triageFindings(snapshot.value?.rows ?? []))
 const poolCount = computed(() => snapshot.value?.rows.filter(x => x.desired.kind === 'ComputePool').length ?? 0)
 const workloadCount = computed(() => snapshot.value?.rows.filter(x => x.desired.kind === 'Workload').length ?? 0)
-const attentionCount = computed(() => snapshot.value?.rows.filter(x => !x.state || x.error || x.state.syncState !== 'Synced').length ?? 0)
+const attentionCount = computed(() => snapshot.value?.rows.filter(x => findingsFor(x).length > 0).length ?? 0)
 const visibleRows = computed(() => (snapshot.value?.rows ?? []).filter(x =>
+  (projectFilter.value === 'all' || projectIdOf(x) === projectFilter.value) &&
   (kindFilter.value === 'all' || x.desired.kind === kindFilter.value) &&
   x.desired.id.toLowerCase().includes(keyword.value.toLowerCase()),
 ))
@@ -166,6 +229,16 @@ function statusColor(row: ResourceRow): 'success' | 'warning' | 'danger' | 'info
   if (row.state.syncState === 'Synced') return 'success'
   return 'warning'
 }
+function openProject(id: string): void {
+  projectFilter.value = id
+  kindFilter.value = 'all'
+  keyword.value = ''
+  view.value = 'resources'
+}
+function showFinding(finding: Finding): void {
+  const row = snapshot.value?.rows.find(x => x.desired.kind === finding.kind && x.desired.id === finding.resourceId)
+  if (row) showDetails(row)
+}
 function showDetails(row: ResourceRow): void {
   selected.value = row
   drawerOpen.value = true
@@ -175,6 +248,7 @@ async function refresh(): Promise<void> {
   loading.value = true
   error.value = ''
   snapshot.value = null
+  projectFilter.value = 'all'
   drawerOpen.value = false
   try {
     snapshot.value = await loadSnapshot(clusterId.value)
