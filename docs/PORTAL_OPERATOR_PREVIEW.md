@@ -48,10 +48,18 @@ fetch is used by the new Portal.
 
 The operator endpoint returns JSON with `agent, rows, total, truncated,
 nextCursor, refreshedAt`. Each row has a `desired`, a nullable `state`
-and nullable `error`. Fetching more uses an HMAC-authenticated cursor. It
-is deterministic over a stable resource set, **not a snapshot-isolated
-database transaction**; concurrent modifications can require a manual
-refresh. The UI flags duplicate resources or changed counts.
+and nullable `error`. Fetching more uses an HMAC-authenticated cursor **bound to a SHA-256
+fingerprint of the complete authorized Desired inventory**. A changed
+Desired generation, spec, deletion state, or project scope returns **HTTP
+409**, even if the record count stays unchanged. The Portal discards any
+previously loaded partial table and requires the operator to re-read.
+Invalid/forged cursors still return 400. Updates to excluded foreign-project
+resources do not invalidate the authorized cursor.
+
+This is **not** a database snapshot-isolated transaction: independent
+observations can change between pages, and Desired may mutate while an
+individual page is being produced. Never treat pagination coherence as
+operation ownership, task readiness or a transactional inventory receipt.
 
 Production comparison: see `docs/PORTAL_PRODUCT_BENCHMARK.md`.
 
