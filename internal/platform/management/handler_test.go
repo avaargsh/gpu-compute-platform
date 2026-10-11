@@ -32,6 +32,7 @@ func oidcFixture(t *testing.T)(Introspector,*httptest.Server){
   case "expired-token":answer["exp"]=time.Now().Add(-time.Minute).Unix()
   case "revoked-token":answer["active"]=false
   case "missing-subject":delete(answer,"sub")
+  case "bob-token":answer["sub"]="bob"
   }
   _=json.NewEncoder(w).Encode(answer)
  }))
@@ -114,6 +115,10 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T){
  }
  poolBody:=`{"expectedGeneration":0,"spec":{"accelerators":[{"class":"h100","quota":2}],"acceleratorBindings":[{"class":"h100","resourceName":"nvidia.com/gpu","flavor":"h100"}],"scheduling":{"mode":"kueue"}}}`
  if status,_:=issue("PUT",base+"ComputePool/"+pool,poolBody,"", "");status!=401{t.Fatalf("anonymous write: %d",status)}
+ if status,_:=issue("PUT",base+"ComputePool/"+pool,poolBody,"bob-token","");status!=403{t.Fatalf("viewer write: %d",status)}
+ foreignBase:=server.URL+"/api/v1/management/clusters/"+cluster+"/projects/forbidden-project/resources/"
+ if status,_:=issue("PUT",foreignBase+"ComputePool/"+pool,poolBody,"good-access-token","");status!=403{t.Fatalf("foreign project create: %d",status)}
+ if status,_:=issue("DELETE",foreignBase+"ComputePool/"+pool,"","good-access-token",`"1"`);status!=403{t.Fatalf("foreign project delete: %d",status)}
  if status,_:=issue("PUT",base+"ComputePool/"+pool,poolBody,"good-access-token","");status!=204{t.Fatalf("create pool: %d",status)}
  if status,_:=issue("PUT",base+"ComputePool/"+pool,poolBody,"good-access-token","");status!=409{t.Fatalf("stale create should be 409: %d",status)}
  jobBody:=`{"expectedGeneration":0,"poolId":"`+pool+`","spec":{"image":"example.invalid/train:1","accelerator":{"class":"h100","quota":1}}}`
