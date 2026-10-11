@@ -19,50 +19,8 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
-var safeID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}package management
-
-import (
-	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"database/sql"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"regexp"
-	"strconv"
-	"strings"
-
-	"github.com/avaargsh/gpu-compute-platform/internal/domain"
-	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
-)
-
-)
-var operationID = regexp.MustCompile(`^[0-9a-f]{32}package management
-
-import (
-	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"database/sql"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"regexp"
-	"strconv"
-	"strings"
-
-	"github.com/avaargsh/gpu-compute-platform/internal/domain"
-	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
-)
-
-)
+var safeID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
+var operationID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 type Service struct {
 	DB   *sql.DB
