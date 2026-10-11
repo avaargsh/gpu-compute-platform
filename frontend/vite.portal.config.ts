@@ -11,7 +11,9 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 3001,
     strictPort: true,
-    proxy: { '/api/v1': { target: 'http://127.0.0.1:8080', changeOrigin: false } },
+    // Expose only the authenticated, read-only operator API to this
+    // browser origin. Never proxy legacy /api/v1/agent or mutation paths.
+    proxy: { '/api/v1/operator': { target: 'http://127.0.0.1:8080', changeOrigin: false } },
   },
   preview: { host: '127.0.0.1', port: 3001, strictPort: true },
   build: {
