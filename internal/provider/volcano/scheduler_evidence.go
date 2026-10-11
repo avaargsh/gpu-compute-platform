@@ -20,8 +20,12 @@ func inspectPodGroupSchedulerEvidence(group *unstructured.Unstructured) podGroup
 	result := podGroupSchedulerEvidence{
 		Phase: "Unknown", Scheduled: "Unknown", Reason: "VolcanoSchedulerEvidenceUnavailable",
 	}
-	if group == nil || group.GetUID() == "" || group.GetResourceVersion() == "" ||
-		group.GetDeletionTimestamp() != nil {
+	// Do not interpret an unrelated Kubernetes object's conditions as a
+	// Volcano PodGroup scheduler decision.
+	if group == nil || group.GetAPIVersion() != "scheduling.volcano.sh/v1beta1" ||
+		group.GetKind() != "PodGroup" || group.GetName() == "" ||
+		group.GetNamespace() == "" || group.GetUID() == "" ||
+		group.GetResourceVersion() == "" || group.GetDeletionTimestamp() != nil {
 		return result
 	}
 	phase, found, err := unstructured.NestedString(group.Object, "status", "phase")
@@ -62,7 +66,13 @@ func inspectPodGroupSchedulerEvidence(group *unstructured.Unstructured) podGroup
 			}
 			result.Scheduled = status
 		case "Unschedulable":
-			if item["status"] == "True" {
+			status, ok := item["status"].(string)
+			if !ok || (status != "True" && status != "False" && status != "Unknown") {
+				result.Scheduled = "Unknown"
+				result.Reason = "MalformedVolcanoSchedulerCondition"
+				return result
+			}
+			if status == "True" {
 				unschedulableTrue = true
 			}
 		}
