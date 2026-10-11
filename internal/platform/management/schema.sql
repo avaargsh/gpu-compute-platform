@@ -27,6 +27,16 @@ CREATE TABLE IF NOT EXISTS management_operation_audit (
  prior_spec_sha256 TEXT NOT NULL,
  resulting_spec_sha256 TEXT NOT NULL
 );
+-- Existing pilot audit receipts predate client idempotency keys; keep them
+-- immutable, explicitly non-replayable (all-zero digest), and require a
+-- matching fingerprint for every new operation.
+ALTER TABLE management_operation_audit
+ ADD COLUMN IF NOT EXISTS request_digest TEXT;
+UPDATE management_operation_audit
+ SET request_digest = repeat('0',64) WHERE request_digest IS NULL;
+ALTER TABLE management_operation_audit
+ ALTER COLUMN request_digest SET NOT NULL;
+
 CREATE INDEX IF NOT EXISTS management_audit_project_time_idx
  ON management_operation_audit (project_id, created_at DESC);
 ),
