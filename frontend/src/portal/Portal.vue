@@ -25,6 +25,7 @@
         <label class="context-label" for="operator-token">本机操作员凭证</label>
         <el-input id="operator-token" v-model="operatorToken" type="password" show-password autocomplete="off" placeholder="本机只读访问凭证（不存储）" class="cluster-input" @keyup.enter="refresh" />
         <el-button type="primary" :loading="loading" :disabled="!clusterId || operatorToken.length < 32 || loading" @click="refresh">授权读取</el-button>
+        <el-button type="danger" plain :disabled="!operatorToken && !snapshot" @click="lockPortal">锁定</el-button>
         <span v-if="snapshot" class="last-sync">读取时间：{{ formatTime(snapshot.refreshedAt) }}</span>
       </section>
       <el-alert v-if="error" :title="error" type="error" :closable="true" @close="error = ''" show-icon class="error-banner" />
@@ -180,7 +181,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { loadSnapshot, type PortalSnapshot, type ResourceRow } from './api'
 import { findingsFor, projectIdOf, projectSummaries, triageFindings, type Finding } from './project-model'
 
@@ -197,6 +198,26 @@ const kindFilter = ref('all')
 const projectFilter = ref('all')
 const selected = ref<ResourceRow | null>(null)
 const drawerOpen = ref(false)
+let sessionEpoch = 0
+
+// Never retain a previous operator's project inventory after credentials or
+// cluster identity change. In-flight responses from old sessions are discarded.
+watch([clusterId, operatorToken], () => {
+  sessionEpoch++
+  snapshot.value = null
+  selected.value = null
+  drawerOpen.value = false
+  projectFilter.value = 'all'
+  error.value = ''
+}, { flush: 'sync' })
+
+function lockPortal(): void {
+  operatorToken.value = ''
+  sessionEpoch++
+  snapshot.value = null
+  selected.value = null
+  drawerOpen.value = false
+}
 
 const viewTitle = computed(() => ({
   overview: '计算平台总览', projects: '项目视图', resources: '资源与工作负载',
@@ -256,7 +277,9 @@ async function refresh(): Promise<void> {
   projectFilter.value = 'all'
   drawerOpen.value = false
   try {
-    snapshot.value = await loadSnapshot(clusterId.value, operatorToken.value)
+    const epoch = sessionEpoch
+    const next = await loadSnapshot(clusterId.value, operatorToken.value)
+    if (epoch === sessionEpoch) snapshot.value = next
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Go Control Plane 读取失败'
   } finally {
@@ -269,7 +292,9 @@ async function loadMore(): Promise<void> {
   error.value = ''
   try {
     const old = snapshot.value
+    const epoch = sessionEpoch
     const next = await loadSnapshot(clusterId.value, operatorToken.value, old.nextCursor)
+    if (epoch !== sessionEpoch) return
     if (next.agent.clusterId !== old.agent.clusterId || next.total !== old.total) {
       throw new Error('读取期间资源集合发生变化，请重新读取以避免误判。')
     }
