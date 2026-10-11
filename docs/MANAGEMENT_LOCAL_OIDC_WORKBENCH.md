@@ -16,6 +16,15 @@ not weaken the legacy Cluster Agent / Kueue security boundary.
   roles. The separate Go Management API introspects the access token
   on **every** request, checks expiry, issuer and configured audience, and
   enforces PostgreSQL project roles.
+- Browser can discover the currently authorized projects and their Cluster ID
+  using `GET /api/v1/management/projects`, which joins current PostgreSQL
+  `management_project_grants` with `project_bindings` for the introspected
+  issuer and subject. No browser-provided role is trusted; a viewer sees only
+  their own viewer scopes and mutation permissions are checked again per
+  request. The response is `{"projects":[{"projectId":"research",
+  "clusterId":"cluster-a","role":"operator"}],"truncated":false}`. The
+  first 100 authorized projects are returned in stable order and
+  `truncated:true` explicitly warns if more exist.
 - Browser can GET one scoped Desired resource, PUT a typed resource request
   with a fresh random `Idempotency-Key`, DELETE using the exact
   Generation as `If-Match`, and query a committed-operation audit receipt.
@@ -106,7 +115,10 @@ or add `Access-Control-Allow-Origin: *`.
 
 1. Sign in using the provider redirect. The local browser page never
    accepts a password and does not ask for an operator preview secret.
-2. Supply a pre-provisioned Cluster ID and authorized Project ID.
+2. Click **查询当前账号的项目** and select a currently authorized
+   Project/Cluster entry. This selection invalidates any previously loaded
+   resource Generation and operation ID. Manual entry remains supported if
+   the capped project list is incomplete; it never grants server access.
 3. Create a ComputePool by specifying JSON including
    `expectedGeneration: 0` and the provider-compatible Kueue binding spec.
    The API creates only Desired resource state, not an executed job.
