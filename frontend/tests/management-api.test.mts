@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readResource, writeResource, deleteResource, readReceipt, ManagementHTTPError, desiredMatchesScope } from '../src/management/api.ts'
+import { readResource, writeResource, deleteResource, readReceipt, ManagementHTTPError, desiredMatchesScope, listProjects } from '../src/management/api.ts'
 
 const scope = { cluster: 'gpu-cluster', project: 'research', kind: 'ComputePool', resource: 'pool-a' }
 const token = 'valid-test-oidc-access-token'
@@ -80,4 +80,30 @@ test('resource selection changes cannot reuse an unrelated Generation for deleti
   assert.equal(desiredMatchesScope(desired, { ...scope, project: 'other-project' }), false)
   assert.equal(desiredMatchesScope(desired, { ...scope, kind: 'Workload' }), false)
   assert.equal(desiredMatchesScope(desired, { ...scope, resource: 'other-pool' }), false)
+})
+
+test('project discovery uses bearer only and a fixed same-origin path', async () => {
+  const original = globalThis.fetch
+  const calls = []
+  try {
+    globalThis.fetch = async (url, opts) => {
+      calls.push({ url, opts })
+      return Response.json({
+        projects: [{ projectId: 'research', clusterId: 'gpu-cluster', role: 'viewer' }],
+        truncated: false,
+      })
+    }
+    const result = await listProjects(token)
+    assert.equal(result.status, 200)
+    assert.equal(result.value.projects[0].projectId, 'research')
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].url, '/api/v1/management/projects')
+    assert.equal(calls[0].opts.headers.Authorization, 'Bearer ' + token)
+    assert.equal(calls[0].opts.credentials, 'omit')
+    assert.equal(calls[0].opts.redirect, 'error')
+    await assert.rejects(listProjects(''), /Token/)
+    assert.equal(calls.length, 1)
+    globalThis.fetch = async () => new Response('', { status: 503 })
+    await assert.rejects(listProjects(token), e => e instanceof ManagementHTTPError && e.status === 503)
+  } finally { globalThis.fetch = original }
 })
