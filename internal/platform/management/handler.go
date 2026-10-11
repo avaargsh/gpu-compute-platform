@@ -210,20 +210,22 @@ func specHash(data []byte) string {
 // exact expected Generation. It intentionally does not include token text.
 func mutationFingerprint(cluster, project, kind, resourceID string, in mutationInput, method string) (string, error) {
 	payload, err := json.Marshal(struct {
-		Method string `json:"method"`
-		Cluster string `json:"cluster"`
-		Project string `json:"project"`
-		Kind string `json:"kind"`
-		ResourceID string `json:"resourceId"`
-		ExpectedGeneration int64 `json:"expectedGeneration"`
-		PoolID string `json:"poolId"`
-		Spec json.RawMessage `json:"spec,omitempty"`
+		Method             string          `json:"method"`
+		Cluster            string          `json:"cluster"`
+		Project            string          `json:"project"`
+		Kind               string          `json:"kind"`
+		ResourceID         string          `json:"resourceId"`
+		ExpectedGeneration int64           `json:"expectedGeneration"`
+		PoolID             string          `json:"poolId"`
+		Spec               json.RawMessage `json:"spec,omitempty"`
 	}{
 		Method: method, Cluster: cluster, Project: project, Kind: kind,
 		ResourceID: resourceID, ExpectedGeneration: *in.ExpectedGeneration,
 		PoolID: in.PoolID, Spec: in.Spec,
 	})
-	if err != nil {return "", err}
+	if err != nil {
+		return "", err
+	}
 	return specHash(payload), nil
 }
 
