@@ -123,12 +123,12 @@ func inventoryFingerprint(items []agent.DesiredResource) (string, error) {
 
 func (a *operatorAPI) cursorSignature(after, fingerprint string) []byte {
 	mac := hmac.New(sha256.New, a.tokenSHA[:])
-	_, _ = mac.Write([]byte("operator-preview-v2\\n" + string(a.cluster) + "\\n" + after + "\\n" + fingerprint))
+	_, _ = mac.Write([]byte("operator-preview-v2\n" + string(a.cluster) + "\n" + after + "\n" + fingerprint))
 	return mac.Sum(nil)
 }
 
 func (a *operatorAPI) nextCursor(after, fingerprint string) string {
-	payload := after + "\\n" + fingerprint + "\\n" + base64.RawURLEncoding.EncodeToString(a.cursorSignature(after, fingerprint))
+	payload := after + "\n" + fingerprint + "\n" + base64.RawURLEncoding.EncodeToString(a.cursorSignature(after, fingerprint))
 	return base64.RawURLEncoding.EncodeToString([]byte(payload))
 }
 
@@ -145,7 +145,7 @@ func (a *operatorAPI) parseCursor(value, fingerprint string) (string, int) {
 	if err != nil {
 		return "", http.StatusBadRequest
 	}
-	parts := strings.Split(string(raw), "\\n")
+	parts := strings.Split(string(raw), "\n")
 	if len(parts) != 3 || parts[0] == "" || len(parts[1]) != 64 {
 		return "", http.StatusBadRequest
 	}
