@@ -220,6 +220,62 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	if status, _ := issueWithKey("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID); status != 204 {
 		t.Fatalf("create pool: %d", status)
 	}
+	// Audit receipt is a separate, authenticated *committed Desired* lookup.
+	// It must never imply provider admission or execution ownership.
+	receiptURL := server.URL + "/api/v1/management/clusters/" + cluster + "/projects/" + project + "/operations/" + poolOperationID
+	lookupReceipt := func(target, token string) (int, http.Header, OperationReceipt) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, target, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var receipt OperationReceipt
+		if resp.StatusCode == http.StatusOK {
+			if err := json.NewDecoder(resp.Body).Decode(&receipt); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return resp.StatusCode, resp.Header, receipt
+	}
+	if status, _, _ := lookupReceipt(receiptURL, ""); status != http.StatusUnauthorized {
+		t.Fatalf("anonymous receipt disclosed: %d", status)
+	}
+	if status, _, _ := lookupReceipt(receiptURL, "bob-token"); status != http.StatusNotFound {
+		t.Fatalf("viewer could read another operator receipt: %d", status)
+	}
+	if status, _, _ := lookupReceipt(strings.Replace(receiptURL, "/projects/"+project+"/", "/projects/foreign-project/", 1), "good-access-token"); status != http.StatusNotFound {
+		t.Fatalf("cross-project receipt disclosed: %d", status)
+	}
+	if status, _, _ := lookupReceipt(strings.Replace(receiptURL, "/clusters/"+cluster+"/", "/clusters/foreign-cluster/", 1), "good-access-token"); status != http.StatusNotFound {
+		t.Fatalf("cross-cluster receipt disclosed: %d", status)
+	}
+	if status, _, _ := lookupReceipt(strings.TrimSuffix(receiptURL, poolOperationID)+"invalid!", "good-access-token"); status != http.StatusBadRequest {
+		t.Fatalf("invalid operation ID was accepted: %d", status)
+	}
+	unknownID, err := createRequestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _, _ := lookupReceipt(strings.TrimSuffix(receiptURL, poolOperationID)+unknownID, "good-access-token"); status != http.StatusNotFound {
+		t.Fatalf("uncommitted operation reported success: %d", status)
+	}
+	status, headers, receipt := lookupReceipt(receiptURL, "good-access-token")
+	if status != http.StatusOK || headers.Get("Cache-Control") != "no-store" ||
+		headers.Get("ETag") != `"1"` || headers.Get("X-Request-ID") != poolOperationID ||
+		receipt.Status != "desired-committed" || receipt.RequestID != poolOperationID ||
+		receipt.Kind != "ComputePool" || receipt.ResourceID != pool ||
+		receipt.Action != "create" || receipt.ExpectedGeneration != 0 ||
+		receipt.ResultingGeneration != 1 || receipt.RequestDigest == "" {
+		t.Fatalf("unexpected scoped receipt: status=%d headers=%v payload=%+v", status, headers, receipt)
+	}
 	// A lost HTTP response may be retried with the exact same operation ID:
 	// it must replay the original result rather than mutate or audit again.
 	if status, header := issueWithKey("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID); status != 204 || header.Get("ETag") != `"1"` {
@@ -286,6 +342,9 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	if status, _ := issue("DELETE", base+"Workload/"+job, "", "good-access-token", `"1"`); status != 403 {
 		t.Fatalf("downgraded operator still allowed to delete: %d", status)
 	}
+	if status, _, _ := lookupReceipt(receiptURL, "good-access-token"); status != http.StatusNotFound {
+		t.Fatalf("viewer retained access to operator receipt: %d", status)
+	}
 	if status, _ := issue("GET", base+"ComputePool/"+pool, "", "good-access-token", ""); status != 200 {
 		t.Fatalf("viewer should retain scoped read: %d", status)
 	}
@@ -294,6 +353,9 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	}
 	if status, _ := issue("GET", base+"ComputePool/"+pool, "", "good-access-token", ""); status != 403 {
 		t.Fatalf("revoked membership still granted read: %d", status)
+	}
+	if status, _, _ := lookupReceipt(receiptURL, "good-access-token"); status != http.StatusNotFound {
+		t.Fatalf("revoked membership still reads past receipt: %d", status)
 	}
 }
 
