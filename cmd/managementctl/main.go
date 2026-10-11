@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -33,9 +34,29 @@ type options struct {
 	OperationID string
 	File        string
 	Generation  int64
+	APIURL     string
+}
+
+func localAPIURL(raw string) (string, error) {
+	if raw == "" {
+		return baseURL, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" ||
+		u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New("management API must be a bare http://127.0.0.1:<port> loopback URL")
+	}
+	port, err := strconv.Atoi(u.Port())
+	if err != nil || port < 1 || port > 65535 {
+		return "", errors.New("management API requires an explicit valid loopback port")
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", port), nil
 }
 
 func validate(o options) error {
+	if _, err := localAPIURL(o.APIURL); err != nil {
+		return err
+	}
 	if o.Action == "new-key" {
 		return nil
 	}
@@ -78,7 +99,8 @@ func newOperationKey() (string, error) {
 }
 
 func endpoint(o options) string {
-	prefix := baseURL + "/api/v1/management/clusters/" + o.Cluster + "/projects/" + o.Project
+	base, _ := localAPIURL(o.APIURL) // run() validates all options before use
+	prefix := base + "/api/v1/management/clusters/" + o.Cluster + "/projects/" + o.Project
 	if o.Action == "receipt" {
 		return prefix + "/operations/" + o.OperationID
 	}
@@ -178,6 +200,7 @@ func run(o options, out, stderr io.Writer) error {
 func main() {
 	var o options
 	flag.StringVar(&o.Action, "action", "", "new-key | get | put | delete | receipt")
+	flag.StringVar(&o.APIURL, "api", "", "optional localhost URL http://127.0.0.1:<port> (no remote access allowed)")
 	flag.StringVar(&o.Cluster, "cluster", "", "cluster ID")
 	flag.StringVar(&o.Project, "project", "", "project ID")
 	flag.StringVar(&o.Kind, "kind", "", "ComputePool or Workload")
