@@ -22,11 +22,13 @@ or a stable signal for the currently desired ComputePool generation.
 | Observed PodGroup | Internal classification | Production effect |
 |---|---|---|
 | UID/RV absent, deleting, no conditions | Unknown | None |
+| Wrong PodGroup API version/kind, missing name/namespace | Unknown | None |
 | Phase Running, no Scheduled condition | Unknown | None |
 | Scheduled=True without conflicting Unschedulable=True | Scheduled True observed | None |
 | Scheduled=True and Unschedulable=True | Unknown conflict | None |
 | Scheduled=False | False observed | None |
 | Duplicate/malformed Scheduled conditions | Unknown | None |
+| Malformed Unschedulable status alongside Scheduled=True | Unknown | None |
 | Unknown or unsupported phase | Unknown | None |
 
 ## Evidence still needed before wiring it into the provider
