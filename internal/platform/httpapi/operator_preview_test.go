@@ -187,3 +187,54 @@ func TestOperatorPreviewRequiresExplicitCompleteScope(t *testing.T) {
 		}
 	}
 }
+
+func TestOperatorPreviewRejectsCrossOriginAndFormAgentWrites(t *testing.T) {
+	server, store := fixtureOperatorPreview(t)
+	defer server.Close()
+
+	const forged = `{"clusterId":"injected","agentVersion":"forged","kubernetesVersion":"v0"}`
+	tests := []struct {
+		name        string
+		origin      string
+		contentType string
+		fetchSite   string
+		wantStatus  int
+	}{
+		{name: "cross origin JSON", origin: "https://attacker.example", contentType: "application/json", wantStatus: http.StatusForbidden},
+		{name: "cross site fetch metadata", contentType: "application/json", fetchSite: "cross-site", wantStatus: http.StatusForbidden},
+		{name: "simple browser form", contentType: "text/plain", wantStatus: http.StatusUnsupportedMediaType},
+		{name: "HTML form", contentType: "application/x-www-form-urlencoded", wantStatus: http.StatusUnsupportedMediaType},
+		{name: "missing media type", wantStatus: http.StatusUnsupportedMediaType},
+		{name: "machine JSON still supported", contentType: "application/json", wantStatus: http.StatusNoContent},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/agent/register", strings.NewReader(forged))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.fetchSite != "" {
+				req.Header.Set("Sec-Fetch-Site", tc.fetchSite)
+			}
+			if tc.contentType != "" {
+				req.Header.Set("Content-Type", tc.contentType)
+			}
+			resp, err := server.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != tc.wantStatus {
+				t.Fatalf("status=%d, want=%d", resp.StatusCode, tc.wantStatus)
+			}
+			if tc.wantStatus != http.StatusNoContent {
+				if _, found, err := store.GetAgentStatus(context.Background(), "injected"); err != nil || found {
+					t.Fatalf("blocked mutation changed Agent store: found=%t err=%v", found, err)
+				}
+			}
+		})
+	}
+}
