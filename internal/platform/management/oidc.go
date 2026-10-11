@@ -25,6 +25,10 @@ type Introspector struct {
 	AllowHTTPForTests bool
 }
 
+// ErrIntrospectionUnavailable distinguishes IdP/network/server failure from
+// a provider-confirmed invalid/expired/revoked access token.
+var ErrIntrospectionUnavailable = errors.New("identity provider unavailable")
+
 type Identity struct{ Issuer, Subject string }
 type introspectionResult struct {
 	Active    bool            `json:"active"`
@@ -52,7 +56,7 @@ func (i Introspector) ValidateConfig() error {
 
 func (i Introspector) Verify(ctx context.Context, token string) (Identity, error) {
 	if err := i.ValidateConfig(); err != nil {
-		return Identity{}, err
+		return Identity{}, fmt.Errorf("%w: invalid identity provider configuration", ErrIntrospectionUnavailable)
 	}
 	if len(token) < 8 || len(token) > 8192 || strings.ContainsAny(token, " \r\n\t") {
 		return Identity{}, errors.New("invalid access token")
@@ -60,7 +64,7 @@ func (i Introspector) Verify(ctx context.Context, token string) (Identity, error
 	form := url.Values{"token": {token}, "token_type_hint": {"access_token"}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, i.URL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return Identity{}, err
+		return Identity{}, fmt.Errorf("%w: create introspection request", ErrIntrospectionUnavailable)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -71,16 +75,16 @@ func (i Introspector) Verify(ctx context.Context, token string) (Identity, error
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return Identity{}, fmt.Errorf("identity provider unavailable: %w", err)
+		return Identity{}, fmt.Errorf("%w: introspection transport", ErrIntrospectionUnavailable)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Identity{}, errors.New("identity provider did not validate token")
+		return Identity{}, fmt.Errorf("%w: introspection returned HTTP %d", ErrIntrospectionUnavailable, resp.StatusCode)
 	}
 	var result introspectionResult
 	dec := json.NewDecoder(io.LimitReader(resp.Body, 8193))
 	if err := dec.Decode(&result); err != nil {
-		return Identity{}, errors.New("invalid identity provider response")
+		return Identity{}, fmt.Errorf("%w: malformed introspection response", ErrIntrospectionUnavailable)
 	}
 	if !result.Active || result.Issuer != i.Issuer || result.Subject == "" || len(result.Subject) > 512 || result.ExpiresAt <= time.Now().Unix() || !strings.EqualFold(result.TokenType, "Bearer") {
 		return Identity{}, errors.New("inactive, expired, or untrusted identity")
