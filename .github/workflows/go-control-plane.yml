@@ -63,6 +63,7 @@ jobs:
           go build ./cmd/control-plane
           go build ./cmd/cluster-agent
           go build ./cmd/management-api
+          go build ./cmd/managementctl
       - name: Build canonical container entrypoints
         run: |
           docker build -f Dockerfile -t gpu-control-plane:test .
