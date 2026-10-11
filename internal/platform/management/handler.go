@@ -19,7 +19,50 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 )
 
-var safeID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
+var safeID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}package management
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
+)
+
+)
+var operationID = regexp.MustCompile(`^[0-9a-f]{32}package management
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
+)
+
+)
 
 type Service struct {
 	DB   *sql.DB
@@ -96,9 +139,16 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 		problem(w, 415)
 		return
 	}
-	requestID, err := createRequestID()
-	if err != nil {
-		problem(w, 500)
+	// A caller-chosen cryptographically random 128-bit operation ID enables
+	// safe replay after a lost HTTP response. A duplicate ID must carry the
+	// identical operation digest, or the transaction rejects it.
+	requestID := r.Header.Get("Idempotency-Key")
+	if requestID == "" {
+		problem(w, http.StatusPreconditionRequired)
+		return
+	}
+	if !operationID.MatchString(requestID) || len(r.Header.Values("Idempotency-Key")) != 1 {
+		problem(w, http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("X-Request-ID", requestID)
