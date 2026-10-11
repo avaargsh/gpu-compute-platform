@@ -17,8 +17,8 @@ Run the existing Go server (port 8080) with a disposable local PostgreSQL DB,
 or its documented in-memory development store, and register a Cluster Agent.
 
 ```bash
-# Terminal 1, repo root: local Go API only
-go run ./cmd/control-plane
+# Terminal 1, repo root: MUST bind the unauthenticated Go API to loopback
+CONTROL_PLANE_LISTEN_ADDR=127.0.0.1:8080 go run ./cmd/control-plane
 
 # Terminal 2, repo root
 cd frontend
