@@ -190,6 +190,28 @@ The receipt only reports the initiating subject's own operation. Audit
 export to project admins and independent execution attestation are separate
 future endpoints, not implicit in this API.
 
+## Local operator readiness and identity provider failures
+
+The management CLI defaults to `http://127.0.0.1:8081`. To use a
+concurrent local test instance, pass `-api http://127.0.0.1:18081` to
+every `managementctl` command; only exact numeric `127.0.0.1` and an
+explicit valid port are accepted. It rejects remote hosts, `localhost`
+aliases, URL user information, query strings, paths and HTTPS redirection.
+The management API itself must still be started on loopback.
+
+Identity provider failures are distinct from invalid credentials: an
+inactive/expired/wrong-audience access token returns **401**; a failed
+introspection transport, provider HTTP non-200, malformed provider response
+or invalid server-side provider configuration returns **503** without
+performing any database operation. The CLI shows the status and retains
+the original operation ID for any ambiguous mutating request. No access
+tokens or IdP responses are printed in browser/client error bodies.
+
+CI runs a real `managementctl` → loopback HTTP Management handler →
+PostgreSQL acceptance, using a disposable **test-only IdP double**.
+Its success is not a substitute for a production OIDC provider
+interoperability and login review.
+
 ## Loopback management client (no browser login bypass)
 
 The CLI is a minimal operator interface for **existing, externally obtained
