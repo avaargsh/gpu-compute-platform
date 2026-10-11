@@ -72,6 +72,24 @@ jobs:
           docker build -f Dockerfile.control-plane --target control-plane -t gpu-control-plane:compat-test .
           docker build -f Dockerfile.control-plane --target cluster-agent -t gpu-cluster-agent:compat-test .
 
+  portal:
+    name: Go Portal / Vue contract build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install existing Vue dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Typecheck and build isolated Go Portal
+        working-directory: frontend
+        run: npm run portal:build
+
   golden-path:
     name: Golden Path / kind + Kueue
     runs-on: ubuntu-latest
