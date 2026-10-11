@@ -59,10 +59,18 @@ func TestVolcanoSchedulerEvidenceRequiresServerIdentity(t *testing.T) {
 	}{
 		{"missing UID", func(pg *unstructured.Unstructured) { pg.SetUID("") }},
 		{"missing RV", func(pg *unstructured.Unstructured) { pg.SetResourceVersion("") }},
+		{"wrong kind", func(pg *unstructured.Unstructured) { pg.SetKind("ConfigMap") }},
+		{"wrong API version", func(pg *unstructured.Unstructured) { pg.SetAPIVersion("v1") }},
+		{"missing name", func(pg *unstructured.Unstructured) { pg.SetName("") }},
+		{"missing namespace", func(pg *unstructured.Unstructured) { pg.SetNamespace("") }},
 	} {
 		t.Run(change.name, func(t *testing.T) {
 			pg := &unstructured.Unstructured{Object: map[string]any{
-				"metadata": map[string]any{"uid": "uid", "resourceVersion": "41"},
+				"apiVersion": "scheduling.volcano.sh/v1beta1",
+				"kind": "PodGroup",
+				"metadata": map[string]any{
+					"name": "group-a", "namespace": "jobs", "uid": "uid", "resourceVersion": "41",
+				},
 				"status": map[string]any{
 					"phase":      "Running",
 					"conditions": []any{map[string]any{"type": "Scheduled", "status": "True"}},
@@ -74,5 +82,28 @@ func TestVolcanoSchedulerEvidenceRequiresServerIdentity(t *testing.T) {
 				t.Fatalf("unidentified object produced evidence: %#v", got)
 			}
 		})
+	}
+}
+
+func TestVolcanoSchedulerEvidenceRejectsMalformedUnschedulableCondition(t *testing.T) {
+	for _, status := range []any{"Definitely", true, 1, nil} {
+		pg := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "scheduling.volcano.sh/v1beta1",
+			"kind": "PodGroup",
+			"metadata": map[string]any{
+				"name": "group-a", "namespace": "jobs", "uid": "uid", "resourceVersion": "41",
+			},
+			"status": map[string]any{
+				"phase": "Running",
+				"conditions": []any{
+					map[string]any{"type": "Scheduled", "status": "True"},
+					map[string]any{"type": "Unschedulable", "status": status},
+				},
+			},
+		}}
+		got := inspectPodGroupSchedulerEvidence(pg)
+		if got.Scheduled != "Unknown" || got.Reason != "MalformedVolcanoSchedulerCondition" {
+			t.Fatalf("status=%v produced %#v; expected fail-closed result", status, got)
+		}
 	}
 }
