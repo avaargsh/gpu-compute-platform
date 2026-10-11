@@ -78,3 +78,23 @@ test('session switching immediately hides existing data and stale responses', as
   await page.locator('#operator-token').fill('different-token-at-least-thirty-two-chars')
   await expect(page.getByText('secret-foreign')).toHaveCount(0)
 })
+
+test('pagination fails closed when a Desired generation changes without changing total', async ({ page, request }) => {
+  await unlock(page)
+  await expect(page.getByText('资源状态预览')).toBeVisible()
+  await page.getByRole('button', { name: /资源与工作负载/ }).click()
+  await expect(page.getByRole('button', { name: '继续加载下一页' })).toBeVisible()
+
+  // Independent machine API call changes a later-page resource in the real
+  // Go store. The browser itself can ONLY reach /api/v1/operator via Vite.
+  const mutation = await request.put(
+    'http://127.0.0.1:8080/api/v1/internal/clusters/portal-ci/desired/Workload/work-124',
+    { data: { generation: 3, spec: { projectID: 'research', image: 'example.invalid/e2e:updated' } } },
+  )
+  expect(mutation.status()).toBe(204)
+
+  await page.getByRole('button', { name: '继续加载下一页' }).click()
+  await expect(page.getByText('资源清单在翻页期间发生变化，请重新执行授权读取')).toBeVisible()
+  await expect(page.getByText('连接你的计算集群')).toBeVisible()
+  await expect(page.getByText('资源状态预览')).toHaveCount(0)
+})
