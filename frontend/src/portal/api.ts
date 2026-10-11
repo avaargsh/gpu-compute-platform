@@ -51,65 +51,48 @@ export interface PortalSnapshot {
   rows: ResourceRow[]
   total: number
   truncated: boolean
+  nextCursor?: string
   refreshedAt: string
 }
 
+// The production legacy Agent and Python endpoints are never called by this
+// operator preview. Credential is provided by the operator and kept only in
+// the current component memory; no cookies/localStorage or shared session.
 const MAX_ROWS = 120
-const MAX_CONCURRENT = 6
 const SEGMENT = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
 
 export function isSafeSegment(value: string): boolean {
   return SEGMENT.test(value)
 }
 
-async function getJSON<T>(path: string): Promise<T> {
-  const response = await fetch(path, {
-    method: 'GET',
-    credentials: 'omit',
-    headers: { Accept: 'application/json' },
-    cache: 'no-store',
-  })
-  if (!response.ok) throw new Error('Go Control Plane returned HTTP ' + response.status)
-  return response.json() as Promise<T>
-}
-
-export async function loadSnapshot(clusterId: string): Promise<PortalSnapshot> {
+export async function loadSnapshot(clusterId: string, operatorToken: string, cursor = ''): Promise<PortalSnapshot> {
   if (!isSafeSegment(clusterId)) {
     throw new Error('Cluster ID 只能使用字母、数字、点、下划线和连字符')
   }
-  const cluster = encodeURIComponent(clusterId)
-  const [agent, resources] = await Promise.all([
-    getJSON<AgentStatus>('/api/v1/clusters/' + cluster + '/status'),
-    getJSON<DesiredResource[]>('/api/v1/agent/desired?clusterId=' + cluster),
-  ])
-  if (!Array.isArray(resources)) throw new Error('Go API 返回的 Desired 列表格式错误')
-  const supported = resources.filter(item => item.kind === 'ComputePool' || item.kind === 'Workload')
-  const toLoad = supported.slice(0, MAX_ROWS)
-  const rows: ResourceRow[] = toLoad.map(desired => ({ desired, state: null, error: null }))
-  let cursor = 0
-
-  async function worker() {
-    while (cursor < rows.length) {
-      const index = cursor++
-      const row = rows[index]
-      const { kind, id } = row.desired
-      if (!isSafeSegment(id)) {
-        row.error = '资源 ID 不能安全地用于 HTTP 路径'
-        continue
-      }
-      try {
-        row.state = await getJSON<ResourceState>(
-          '/api/v1/internal/clusters/' + cluster +
-          '/state/' + encodeURIComponent(kind) + '/' + encodeURIComponent(id),
-        )
-      } catch (error) {
-        row.error = error instanceof Error ? error.message : '读取状态失败'
-      }
-    }
+  if (operatorToken.length < 32) {
+    throw new Error('必须提供至少 32 字符的本机操作员凭证')
   }
-  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT, rows.length) }, () => worker()))
-  return {
-    agent, rows, total: supported.length, truncated: supported.length > MAX_ROWS,
-    refreshedAt: new Date().toISOString(),
+  const params = new URLSearchParams({ limit: String(MAX_ROWS) })
+  if (cursor) params.set('cursor', cursor)
+  const url = '/api/v1/operator/clusters/' + encodeURIComponent(clusterId) + '/snapshot?' + params.toString()
+  const response = await fetch(url, {
+    method: 'GET',
+    credentials: 'omit',
+    headers: {
+      Accept: 'application/json',
+      Authorization: 'Bearer ' + operatorToken,
+    },
+    cache: 'no-store',
+    redirect: 'error',
+  })
+  if (!response.ok) {
+    if (response.status === 401) throw new Error('凭证无效或服务端未启用操作员预览')
+    if (response.status === 404) throw new Error('当前凭证不能访问该集群，或该集群尚未注册')
+    throw new Error('受保护管理 API 返回 HTTP ' + response.status)
   }
+  const snapshot = await response.json() as PortalSnapshot
+  if (!snapshot || !snapshot.agent || !Array.isArray(snapshot.rows) || typeof snapshot.total !== 'number') {
+    throw new Error('受保护管理 API 返回了无效数据')
+  }
+  return snapshot
 }
