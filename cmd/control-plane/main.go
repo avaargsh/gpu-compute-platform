@@ -20,7 +20,7 @@ func main() {
 	defer cleanup()
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    listenAddress(),
 		Handler: httpapi.NewRouterWithDependencies(store, placement),
 	}
 
@@ -52,3 +52,12 @@ func buildStore() (agentstore.Store, httpapi.BindingStore, func()) {
 		_ = db.Close()
 	}
 }
+
+ // listenAddress keeps the existing production default, while allowing a
+ // loopback-only listener for the unauthenticated local Portal preview.
+ func listenAddress() string {
+ 	if addr := os.Getenv("CONTROL_PLANE_LISTEN_ADDR"); addr != "" {
+ 		return addr
+ 	}
+ 	return ":8080"
+ }
