@@ -13,17 +13,17 @@ import (
 // The subject and project are checked against live project grants at query
 // time; a prior authorization can never bypass membership revocation.
 type OperationReceipt struct {
-	RequestID          string    `json:"requestId"`
-	Status             string    `json:"status"`
-	ClusterID          string    `json:"clusterId"`
-	ProjectID          string    `json:"projectId"`
-	Kind               string    `json:"kind"`
-	ResourceID         string    `json:"resourceId"`
-	Action             string    `json:"action"`
-	ExpectedGeneration int64     `json:"expectedGeneration"`
-	ResultingGeneration int64    `json:"resultingGeneration"`
-	RequestDigest      string    `json:"requestDigest"`
-	CommittedAt        time.Time `json:"committedAt"`
+	RequestID           string    `json:"requestId"`
+	Status              string    `json:"status"`
+	ClusterID           string    `json:"clusterId"`
+	ProjectID           string    `json:"projectId"`
+	Kind                string    `json:"kind"`
+	ResourceID          string    `json:"resourceId"`
+	Action              string    `json:"action"`
+	ExpectedGeneration  int64     `json:"expectedGeneration"`
+	ResultingGeneration int64     `json:"resultingGeneration"`
+	RequestDigest       string    `json:"requestDigest"`
+	CommittedAt         time.Time `json:"committedAt"`
 }
 
 func (s *Service) receipt(w http.ResponseWriter, r *http.Request) {
