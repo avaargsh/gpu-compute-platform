@@ -65,7 +65,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { beginLogin, clearPendingLogin, discover, finishLogin, secureRandom, type OAuthConfig, type AccessSession } from './auth'
+import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
 import { readResource, writeResource, deleteResource, readReceipt, type Kind, type DesiredView, type Receipt, desiredMatchesScope } from './api'
 
 const issuer = import.meta.env.VITE_MANAGEMENT_OIDC_ISSUER || ''
