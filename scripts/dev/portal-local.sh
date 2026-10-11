@@ -15,6 +15,7 @@ CLUSTER="${PORTAL_OPERATOR_CLUSTER_ID:-}"
 PROJECTS="${PORTAL_OPERATOR_PROJECT_IDS:-}"
 [[ -n "$CLUSTER" ]] || die "set PORTAL_OPERATOR_CLUSTER_ID to an already-registered cluster"
 [[ -n "$PROJECTS" ]] || die "set PORTAL_OPERATOR_PROJECT_IDS to explicit comma-separated project IDs"
+[[ "$PROJECTS" != ,* && "$PROJECTS" != *, && "$PROJECTS" != *,,* ]] || die "invalid empty project ID in comma-separated scope"
 [[ "$CLUSTER" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$ ]] || die "invalid cluster ID"
 IFS=',' read -ra SCOPES <<< "$PROJECTS"
 for project in "${SCOPES[@]}"; do
@@ -80,7 +81,9 @@ done
 
 (
   cd frontend
-  exec node node_modules/vite/bin/vite.js --config vite.portal.config.ts --host 127.0.0.1
+  # Vite does not need operator or database credentials; do not expose
+  # them to its plugin/config process.
+  exec env -u PORTAL_OPERATOR_TOKEN -u PORTAL_OPERATOR_PROJECT_IDS -u PORTAL_OPERATOR_CLUSTER_ID -u DATABASE_URL node node_modules/vite/bin/vite.js --config vite.portal.config.ts --host 127.0.0.1
 ) >"$WORK_DIR/vite.log" 2>&1 &
 VITE_PID=$!
 for attempt in $(seq 1 45); do
