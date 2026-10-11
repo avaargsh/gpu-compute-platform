@@ -84,6 +84,7 @@ export async function loadSnapshot(clusterId: string, operatorToken: string, cur
     },
     cache: 'no-store',
     redirect: 'error',
+    signal: AbortSignal.timeout(15000),
   })
   if (!response.ok) {
     if (response.status === 401) throw new Error('凭证无效或服务端未启用操作员预览')
