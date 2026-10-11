@@ -53,7 +53,7 @@ test('unsafe resource IDs, invalid Generation and invalid receipt key never reac
     globalThis.fetch = async () => { count++; return Response.json({}) }
     await assert.rejects(readResource({ ...scope, project: '../foreign' }, token), /无效/)
     await assert.rejects(readResource({ ...scope, resource: 'pool/a' }, token), /无效/)
-    await assert.rejects(writeResource(scope, token, '{}', 'short'), /操作 ID/)
+    await assert.rejects(writeResource(scope, token, '{}', 'short'), /Idempotency-Key/)
     await assert.rejects(deleteResource(scope, token, 0, key), /Generation/)
     await assert.rejects(readReceipt(scope.cluster, scope.project, 'wrong', token), /原始/)
     assert.equal(count, 0)
