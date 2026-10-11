@@ -53,11 +53,11 @@ func buildStore() (agentstore.Store, httpapi.BindingStore, func()) {
 	}
 }
 
- // listenAddress keeps the existing production default, while allowing a
- // loopback-only listener for the unauthenticated local Portal preview.
- func listenAddress() string {
- 	if addr := os.Getenv("CONTROL_PLANE_LISTEN_ADDR"); addr != "" {
- 		return addr
- 	}
- 	return ":8080"
- }
+// listenAddress keeps the existing production default, while allowing a
+// loopback-only listener for the unauthenticated local Portal preview.
+func listenAddress() string {
+	if addr := os.Getenv("CONTROL_PLANE_LISTEN_ADDR"); addr != "" {
+		return addr
+	}
+	return ":8080"
+}
