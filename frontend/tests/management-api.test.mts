@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readResource, writeResource, deleteResource, readReceipt, ManagementHTTPError } from '../src/management/api.ts'
+import { readResource, writeResource, deleteResource, readReceipt, ManagementHTTPError, desiredMatchesScope } from '../src/management/api.ts'
 
 const scope = { cluster: 'gpu-cluster', project: 'research', kind: 'ComputePool', resource: 'pool-a' }
 const token = 'valid-test-oidc-access-token'
@@ -71,4 +71,13 @@ test('negative responses fail closed and preserve exact HTTP class for operator 
       )
     }
   } finally { globalThis.fetch = original }
+})
+
+test('resource selection changes cannot reuse an unrelated Generation for deletion', () => {
+  const desired = { clusterId: 'gpu-cluster', projectId: 'research', kind: 'ComputePool', id: 'pool-a', generation: 3, deleting: false, spec: {} }
+  assert.equal(desiredMatchesScope(desired, scope), true)
+  assert.equal(desiredMatchesScope(desired, { ...scope, cluster: 'other-cluster' }), false)
+  assert.equal(desiredMatchesScope(desired, { ...scope, project: 'other-project' }), false)
+  assert.equal(desiredMatchesScope(desired, { ...scope, kind: 'Workload' }), false)
+  assert.equal(desiredMatchesScope(desired, { ...scope, resource: 'other-pool' }), false)
 })
