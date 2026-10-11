@@ -89,6 +89,7 @@ export async function loadSnapshot(clusterId: string, operatorToken: string, cur
   if (!response.ok) {
     if (response.status === 401) throw new Error('凭证无效或服务端未启用操作员预览')
     if (response.status === 404) throw new Error('当前凭证不能访问该集群，或该集群尚未注册')
+    if (response.status === 409) throw new Error('资源清单在翻页期间发生变化，请重新执行授权读取')
     throw new Error('受保护管理 API 返回 HTTP ' + response.status)
   }
   const snapshot = await response.json() as PortalSnapshot
