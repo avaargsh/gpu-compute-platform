@@ -81,7 +81,7 @@ WHERE a.request_id=$1 AND a.cluster_id=$2 AND a.project_id=$3
 	out.ClusterID = cluster
 	out.ProjectID = project
 	w.Header().Set("X-Request-ID", key)
-	w.Header().Set("ETag", fmt.Sprintf("%q", out.ResultingGeneration))
+	w.Header().Set("ETag", fmt.Sprintf("\"%d\"", out.ResultingGeneration))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
 }
