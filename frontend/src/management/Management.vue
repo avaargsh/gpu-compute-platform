@@ -166,7 +166,7 @@ async function remove() {
   clearResult()
   try {
     const current = desired.value
-    if (!current) throw new Error('请先读取当前资源和 Generation')
+    if (!current || !desiredMatchesScope(current, scope())) throw new Error('资源范围已切换，请先重新读取当前资源和 Generation')
     token()
     if (!window.confirm('确认发起删除 ' + current.kind + '/' + current.id + '（Generation ' + current.generation + '）？此操作不会立即删除真实 GPU 资源。')) return
     const original = secureRandom()
