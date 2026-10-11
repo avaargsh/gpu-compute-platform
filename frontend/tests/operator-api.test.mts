@@ -81,9 +81,9 @@ test('no unauthorized request for missing token or unsafe cluster path', async (
 test('401/404/500 and malformed snapshots are rejected, never treated as empty successful inventory', async () => {
   const original = globalThis.fetch
   try {
-    for (const status of [401, 404, 500]) {
+    for (const status of [401, 404, 409, 500]) {
       globalThis.fetch = async () => new Response('', { status })
-      await assert.rejects(loadSnapshot(clusterID, token), status === 500 ? /HTTP 500/ : /凭证|不能访问/)
+      await assert.rejects(loadSnapshot(clusterID, token), status === 500 ? /HTTP 500/ : status === 409 ? /清单在翻页期间发生变化/ : /凭证|不能访问/)
     }
     globalThis.fetch = async () => Response.json({ agent: page.agent, rows: 'not-an-array', total: 1 })
     await assert.rejects(loadSnapshot(clusterID, token), /无效数据/)
