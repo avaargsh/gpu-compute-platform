@@ -54,7 +54,9 @@ func main() {
 		ClientID:     os.Getenv("OIDC_CLIENT_ID"),
 		ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
 	}
-	handler, err := management.NewHandler(db, auth)
+	// Only the explicitly configured loopback browser Origin may issue
+	// authenticated mutations through the local Vite proxy.
+	handler, err := management.NewHandlerWithBrowserOrigin(db, auth, os.Getenv("MANAGEMENT_BROWSER_ORIGIN"))
 	if err != nil {
 		log.Fatal(err)
 	}
