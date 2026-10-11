@@ -79,6 +79,17 @@ and all network policies.
 - `GET`: requires Viewer+, returns one scoped Desired resource and
   strong Generation ETag. Not readiness, workload admission, or independent
   observation.
+- **All PUT and DELETE requests require `Idempotency-Key`**, exactly 32
+  lowercase hex digits generated from 16 bytes of cryptographically secure
+  randomness by the client (missing key: HTTP 428; malformed: HTTP 400).
+  The first successful operation atomically stores the ID, exact request
+  fingerprint and verified caller in its audit row. Retrying the **same**
+  operation with the same key returns the original ETag/result without
+  another resource mutation or audit event. Reusing the key with another
+  payload, caller, scope, resource, Generation or method returns 409.
+  A request whose outcome is uncertain because of a network failure should
+  be retried **only with the original key and identical body**, not a new
+  one. This does not assert Kubernetes reconciliation/execution success.
 - `PUT`: requires Operator+, JSON `expectedGeneration` integer. To
   create, supply 0; to update an existing **ComputePool**, supply its exact
   current Generation. The new Generation increments by one under a PostgreSQL
@@ -99,6 +110,16 @@ and all network policies.
   secrets or entire workload specs. The audit insert and desired mutation
   commit in **one database transaction**. Audit failures roll back Desired
   changes. 403/409 do not produce a successful-write audit event.
+
+```bash
+OPERATION_ID="$(openssl rand -hex 16)"    # retain for retries
+curl -sS -X PUT \
+  -H "Authorization: Bearer $OIDC_ACCESS_TOKEN" \
+  -H "Idempotency-Key: $OPERATION_ID" \
+  -H "Content-Type: application/json" \
+  --data-binary @compute-pool-request.json \
+  http://127.0.0.1:8081/api/v1/management/clusters/cluster-a/projects/research/resources/ComputePool/pool-a
+```
 
 ```json
 {
@@ -122,8 +143,12 @@ Workload `spec` with `image`, `command`, and
 - IdP interoperability: issuer discovery, documented provider setup,
   revocation/regrant, token rotation, MFA and login (Authorization Code +
   PKCE).
-- PostgreSQL negative matrix: concurrent CAS, grant revocation,
-  audit failure rollback, deletion Finalizer and no cross-project mutation.
+- PostgreSQL negative matrix: concurrent creation + update CAS, grant
+  revocation, audit failure rollback, deletion Finalizer and no cross-project
+  mutation. Concurrent attempts must yield exactly one committed write and
+  one append-only audit receipt per Generation. Replay after ambiguous
+  transport commit must be independently chaos-verified against PostgreSQL
+  (the token-introspection tests use a local IdP double).
 - Operation ownership and ambiguous database commit outcomes; no
   exactly-once / retry guarantees are claimed from HTTP 204 alone.
 - Project resource policy/quota/admission: model `quota` is user intent,
