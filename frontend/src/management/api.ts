@@ -1,6 +1,14 @@
 // Browser-facing client for the *isolated* Go Management API.
 // Relative same-origin paths only; no legacy Agent route, no user-supplied URL.
 export type Kind = 'ComputePool' | 'Workload'
+
+// The Management API's operation key is exactly 128 bits / 32 hex chars.
+// PKCE state/verifier use 256 bits and MUST NOT be reused as operation IDs.
+export function createOperationId(): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+}
 export type Method = 'GET' | 'PUT' | 'DELETE'
 
 const SEGMENT = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
