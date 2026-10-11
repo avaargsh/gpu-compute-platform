@@ -82,8 +82,12 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	identity, err := s.Auth.Verify(r.Context(), token)
 	if err != nil {
+		if errors.Is(err, ErrIntrospectionUnavailable) {
+			problem(w, http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("WWW-Authenticate", "Bearer")
-		problem(w, 401)
+		problem(w, http.StatusUnauthorized)
 		return
 	}
 	if r.Method == http.MethodGet {
