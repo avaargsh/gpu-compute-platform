@@ -118,13 +118,52 @@ test('browser completes one-use S256 PKCE and sends audited CRUD without legacy 
   expect(mgmtCalls.every(c => c.auth === 'Bearer e2e-test-access-token')).toBe(true)
 })
 
-test('changing project/resource after read cannot reuse stale CAS Generation to delete', async ({ page }) => {
-  // Browser-level guard is tested without a token-producing IdP: a forged
-  // test session cannot be supplied via storage, URL, or local preview token.
+test('authenticated browser cannot delete a different resource using stale read Generation', async ({ page }) => {
+  let deleteCalls = 0
+  await page.route('https://idp.example.test/**', async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/.well-known/openid-configuration')) {
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        headers: { 'Access-Control-Allow-Origin': base }, body: JSON.stringify(metadata) })
+    } else if (url.pathname.endsWith('/protocol/openid-connect/auth')) {
+      await route.fulfill({ status: 302, headers: {
+        location: base + '/management.html?code=one-use&state=' + url.searchParams.get('state'),
+      }, body: '' })
+    } else if (url.pathname.endsWith('/protocol/openid-connect/token')) {
+      await route.fulfill({ status: 200, contentType: 'application/json',
+        headers: { 'Access-Control-Allow-Origin': base },
+        body: JSON.stringify({ access_token: 'e2e-second-token', token_type: 'Bearer', expires_in: 300 }) })
+    } else {
+      throw Error('unexpected IdP request')
+    }
+  })
+  await page.route('**/api/v1/management/**', async route => {
+    if (route.request().method() === 'DELETE') {
+      deleteCalls++
+      await route.fulfill({ status: 202, body: '' })
+      return
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json',
+      body: JSON.stringify({ clusterId: 'gpu-test', projectId: 'research',
+        kind: 'ComputePool', id: 'pool-a', generation: 7, deleting: false, spec: {} }) })
+  })
   await page.goto('/management.html')
-  await expect(page.getByRole('button', { name: '确认并发起删除请求' })).toBeDisabled()
-  await page.getByPlaceholder('cluster-a').fill('another-cluster')
+  await page.getByRole('button', { name: '通过 OIDC 登录' }).click()
+  await expect(page.getByText(/已取得短期访问令牌/)).toBeVisible()
+  await page.getByPlaceholder('cluster-a').fill('gpu-test')
+  await page.getByPlaceholder('research').fill('research')
+  await page.getByPlaceholder('pool-a').fill('pool-a')
+  await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
+  await expect(page.getByText('Generation:', { exact: false })).toBeVisible()
+
+  await page.getByPlaceholder('pool-a').fill('another-resource')
+  await page.getByRole('button', { name: '确认并发起删除请求' }).click()
+  await expect(page.getByRole('alert')).toContainText('资源范围已切换')
+  expect(deleteCalls).toBe(0)
+
+  await page.getByPlaceholder('pool-a').fill('pool-a')
   await page.getByPlaceholder('research').fill('other-project')
-  await expect(page.getByRole('button', { name: '确认并提交 PUT' })).toBeDisabled()
-  await expect(page.getByText('尚未登录')).toBeVisible()
+  await page.getByRole('button', { name: '确认并发起删除请求' }).click()
+  await expect(page.getByRole('alert')).toContainText('资源范围已切换')
+  expect(deleteCalls).toBe(0)
 })
