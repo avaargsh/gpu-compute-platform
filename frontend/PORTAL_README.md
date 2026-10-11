@@ -1,6 +1,6 @@
 # Go Control Plane Portal (local, read-only)
 
-**Status: developer-only integration slice. NOT authenticated, NOT production-ready.**
+**Status: loopback-only preview protected by a single operator token; NOT OIDC/RBAC or production-ready.**
 
 This is a second entry point inside the repository's **existing** Vue 3 /
 Element Plus frontend. It does not create another frontend repository, copy
@@ -15,8 +15,23 @@ For an up-to-date runnable local setup and its strict limits, read
 
 ## Start locally
 
-Run the existing Go server (port 8080) with a disposable local PostgreSQL DB,
-or its documented in-memory development store, and register a Cluster Agent.
+Recommended local launch: set the known Cluster ID and allowed projects in a
+trusted terminal and run the new one-command launcher. It generates an
+interactive-only credential, starts Go + Vite, and cleans up on Ctrl-C.
+
+```bash
+PORTAL_OPERATOR_CLUSTER_ID=cluster-a PORTAL_OPERATOR_PROJECT_IDS=research,serving \
+  bash scripts/dev/portal-local.sh
+# Open http://127.0.0.1:3001/portal.html
+```
+
+The launcher does not create fake resources. Register a real Cluster Agent, or
+use an existing trusted local PostgreSQL store through `DATABASE_URL`.
+Without `DATABASE_URL`, the in-memory Go store starts empty and is wiped on
+shutdown. See `docs/PORTAL_OPERATOR_PREVIEW.md` for safety limits and
+non-interactive use.
+
+Manual two-terminal alternative:
 
 ```bash
 # Terminal 1: strong ephemeral preview token, exact cluster/project scope
@@ -78,7 +93,7 @@ port 8080 to a public or untrusted network.**
 This is a **read-only inventory and evidence slice**, not a finished GPU
 management product. It does not implement resource create/delete, billing,
 actual GPU telemetry, llm-d Serving deployment, automatic GPU provisioning,
-tenant RBAC, server-side list pagination, or production HA.
+tenant RBAC, snapshot-isolated list pagination, or production HA.
 
 ## Promotion gates
 
