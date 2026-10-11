@@ -227,17 +227,27 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM management_operation_audit WHERE project_id=$1", project).Scan(&audits); err != nil || audits != 3 {
 		t.Fatalf("audit count=%d err=%v", audits, err)
 	}
-	// A DB audit failure must rollback an otherwise successful generation update.
-	if _, err := db.ExecContext(ctx, "ALTER TABLE management_operation_audit ADD CONSTRAINT management_audit_test_check_"+pool+" CHECK (false) NOT VALID"); err == nil {
-		defer db.ExecContext(ctx, "ALTER TABLE management_operation_audit DROP CONSTRAINT management_audit_test_check_"+pool)
-		poolUpdate := `{"expectedGeneration":1,"spec":{"accelerators":[{"class":"h100","quota":3}],"acceleratorBindings":[{"class":"h100","resourceName":"nvidia.com/gpu","flavor":"h100"}],"scheduling":{"mode":"kueue"}}}`
-		if status, _ := issue("PUT", base+"ComputePool/"+pool, poolUpdate, "good-access-token", ""); status != 503 {
-			t.Fatalf("audit failure status=%d", status)
-		}
-		var generation int64
-		if err := db.QueryRowContext(ctx, "SELECT generation FROM desired_resources WHERE cluster_id=$1 AND kind='ComputePool' AND resource_id=$2", cluster, pool).Scan(&generation); err != nil || generation != 1 {
-			t.Fatalf("audit failure changed generation=%d err=%v", generation, err)
-		}
+	// Force an audit insert failure for this test project only. The Desired
+	// INSERT must rollback as part of the same SQL transaction, so no
+	// apparently successful resource can exist without its audit evidence.
+	auditPool := fmtID("audit", suffix)
+	if _, err := db.ExecContext(ctx, "INSERT INTO cluster_bindings(pool_id,cluster_id,provider) VALUES($1,$2,'kueue')", auditPool, cluster); err != nil {
+		t.Fatal(err)
+	}
+	constraint := "management_test_block_" + strings.ReplaceAll(project, "-", "_")
+	if _, err := db.ExecContext(ctx, "ALTER TABLE management_operation_audit ADD CONSTRAINT "+constraint+" CHECK (project_id <> '"+project+"') NOT VALID"); err != nil {
+		t.Fatalf("failed to install audit failure injector: %v", err)
+	}
+	defer db.ExecContext(ctx, "ALTER TABLE management_operation_audit DROP CONSTRAINT "+constraint)
+	if status, _ := issue("PUT", base+"ComputePool/"+auditPool, poolBody, "good-access-token", ""); status != 503 {
+		t.Fatalf("audit failure status=%d, want 503", status)
+	}
+	var created int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM desired_resources WHERE cluster_id=$1 AND kind='ComputePool' AND resource_id=$2", cluster, auditPool).Scan(&created); err != nil || created != 0 {
+		t.Fatalf("audit insertion failure left undesired resource count=%d err=%v", created, err)
+	}
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM management_operation_audit WHERE project_id=$1", project).Scan(&audits); err != nil || audits != 3 {
+		t.Fatalf("audit failed write count=%d err=%v", audits, err)
 	}
 }
 
