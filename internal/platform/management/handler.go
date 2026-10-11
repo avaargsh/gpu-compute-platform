@@ -255,6 +255,31 @@ func (s *Service) mutate(ctx context.Context, id Identity, cluster, project, kin
 	if method == http.MethodDelete && !exists {
 		return 404, 0
 	}
+	if method == http.MethodPut && kind == "Workload" {
+		// The existing Agent Store treats Workload IDs as globally canonical.
+		// Hold the same Workload/<id> advisory key and reject a cross-cluster
+		// incarnation before creating another Desired resource.
+		var crossCluster int
+		err := tx.QueryRowContext(ctx, `SELECT count(*) FROM desired_resources WHERE kind='Workload' AND resource_id=$1 AND cluster_id<>$2`, resourceID, cluster).Scan(&crossCluster)
+		if err != nil {
+			return 503, 0
+		}
+		if crossCluster != 0 {
+			return 409, 0
+		}
+	}
+	if method == http.MethodPut && kind == "ComputePool" && exists {
+		// Active children rely on immutable parent accelerator bindings;
+		// do not change the pool's provider/bindings underneath them.
+		var children int
+		err := tx.QueryRowContext(ctx, `SELECT count(*) FROM desired_resources WHERE cluster_id=$1 AND kind='Workload' AND spec->>'poolID'=$2`, cluster, resourceID).Scan(&children)
+		if err != nil {
+			return 503, 0
+		}
+		if children != 0 {
+			return 409, 0
+		}
+	}
 	if method == http.MethodPut && kind == "Workload" && exists {
 		return 409, 0
 	} // immutable Workload: delete/recreate only
