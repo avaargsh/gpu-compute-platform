@@ -14,6 +14,17 @@ export type Method = 'GET' | 'PUT' | 'DELETE'
 const SEGMENT = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
 const KEY = /^[0-9a-f]{32}$/
 
+export interface ProjectAccess {
+  projectId: string
+  clusterId: string
+  role: 'viewer' | 'operator' | 'admin'
+}
+
+export interface ProjectList {
+  projects: ProjectAccess[]
+  truncated: boolean
+}
+
 export interface Scope {
   cluster: string
   project: string
@@ -119,6 +130,12 @@ async function request<T>(path: string, method: Method, token: string, payload?:
   }
   const value = resp.status === 204 || resp.status === 202 ? null : await resp.json() as T
   return { status: resp.status, value }
+}
+
+// No project or role is sent as a claim: only the provider-verified bearer
+// and a fixed same-origin path are used. DB grants remain authoritative.
+export async function listProjects(token: string): Promise<{ status: number; value: ProjectList | null }> {
+  return request<ProjectList>('/api/v1/management/projects', 'GET', token)
 }
 
 export async function readResource(scope: Scope, token: string): Promise<{ status: number; value: DesiredView | null }> {
