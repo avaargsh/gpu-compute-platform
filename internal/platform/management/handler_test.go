@@ -169,7 +169,7 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	}
 	verifier, idp := oidcFixture(t)
 	defer idp.Close()
-	handler, err := NewHandler(db, verifier)
+	handler, err := NewHandlerWithBrowserOrigin(db, verifier, "http://127.0.0.1:3002")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +193,35 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 		}
 		if ifMatch != "" {
 			r.Header.Set("If-Match", ifMatch)
+		}
+		resp, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode, resp.Header
+	}
+	// Real-browser header behavior traverses Go -> verified OIDC -> DB.
+	// The local Vite proxy forwards the browser's Origin unchanged.
+	issueBrowser := func(method, url, body, token, ifMatch, key, origin, fetchSite string) (int, http.Header) {
+		t.Helper()
+		r, err := http.NewRequest(method, url, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Idempotency-Key", key)
+		if method == http.MethodPut {
+			r.Header.Set("Content-Type", "application/json")
+		}
+		if ifMatch != "" {
+			r.Header.Set("If-Match", ifMatch)
+		}
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		if fetchSite != "" {
+			r.Header.Set("Sec-Fetch-Site", fetchSite)
 		}
 		resp, err := server.Client().Do(r)
 		if err != nil {
@@ -227,8 +256,27 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status, _ := issueWithKey("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID); status != 204 {
-		t.Fatalf("create pool: %d", status)
+	// A valid bearer token alone must not bypass the browser Origin gate.
+	// Reuse the same never-committed ID; denied attempts must create no audit.
+	for _, attempt := range []struct {
+		origin string
+		site   string
+	}{
+		{"http://evil.example:3002", "cross-site"},
+		{"null", "same-origin"},
+		{"http://127.0.0.1:3003", "same-origin"},
+		{"http://127.0.0.1:3002", "cross-site"},
+	} {
+		if status, _ := issueBrowser("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID, attempt.origin, attempt.site); status != 403 {
+			t.Fatalf("untrusted origin=%q site=%q wrote Desired: %d", attempt.origin, attempt.site, status)
+		}
+	}
+	var deniedCount int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM desired_resources WHERE cluster_id=$1 AND kind='ComputePool' AND resource_id=$2", cluster, pool).Scan(&deniedCount); err != nil || deniedCount != 0 {
+		t.Fatalf("denied browser writes changed Desired: count=%d err=%v", deniedCount, err)
+	}
+	if status, _ := issueBrowser("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID, "http://127.0.0.1:3002", "same-origin"); status != 204 {
+		t.Fatalf("same-origin authenticated browser create pool: %d", status)
 	}
 	// Audit receipt is a separate, authenticated *committed Desired* lookup.
 	// It must never imply provider admission or execution ownership.
@@ -311,8 +359,12 @@ func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
 	if status, _ := issue("DELETE", base+"Workload/"+job, "", "good-access-token", `"2"`); status != 409 {
 		t.Fatalf("stale generation delete: %d", status)
 	}
-	if status, _ := issue("DELETE", base+"Workload/"+job, "", "good-access-token", `"1"`); status != 202 {
-		t.Fatalf("delete work: %d", status)
+	deleteID, err := createRequestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := issueBrowser("DELETE", base+"Workload/"+job, "", "good-access-token", `"1"`, deleteID, "http://127.0.0.1:3002", "same-origin"); status != 202 {
+		t.Fatalf("same-origin authenticated browser delete work: %d", status)
 	}
 	var deleting bool
 	if err := db.QueryRowContext(ctx, "SELECT deletion_timestamp IS NOT NULL FROM desired_resources WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2", cluster, job).Scan(&deleting); err != nil || !deleting {
