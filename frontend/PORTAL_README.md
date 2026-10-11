@@ -35,7 +35,9 @@ npm run portal:dev
 Enter the **configured** Cluster ID and its in-memory operator token.
 The Go snapshot endpoint applies project scoping and signed pagination
 server-side; there are no synthetic resource fixtures. Vite proxies only
-`/api/v1` to `http://127.0.0.1:8080` and binds to loopback.
+`/api/v1/operator` to `http://127.0.0.1:8080` and binds to loopback.
+The Portal also clears a previously loaded inventory when the operator token
+or cluster changes, and offers a Lock control.
 
 ```bash
 cd frontend
