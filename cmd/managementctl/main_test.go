@@ -80,3 +80,31 @@ func TestManagementCtlNewKeyWorksWithoutOIDCToken(t *testing.T) {
 		t.Fatal("receipt unexpectedly worked without access token")
 	}
 }
+
+func TestManagementCtlAPIURLNeverAllowsRemoteOrCredentialBearingAddresses(t *testing.T) {
+	for _, url := range []string{
+		"https://127.0.0.1:8081",
+		"http://localhost:8081",
+		"http://0.0.0.0:8081",
+		"http://127.0.0.2:8081",
+		"http://127.0.0.1:8081/agent",
+		"http://127.0.0.1:8081?token=secret",
+		"http://127.0.0.1:8081#fragment",
+		"http://alice:secret@127.0.0.1:8081",
+		"http://127.0.0.1:0",
+		"http://127.0.0.1:65536",
+		"http://127.0.0.1:invalid",
+		"http://169.254.169.254:8081",
+		"//127.0.0.1:8081",
+	} {
+		if _, err := localAPIURL(url); err == nil {
+			t.Fatalf("unsafe remote or malformed URL accepted: %q", url)
+		}
+	}
+	if got, err := localAPIURL("http://127.0.0.1:18081"); err != nil || got != "http://127.0.0.1:18081" {
+		t.Fatalf("valid loopback URL rejected: url=%q err=%v", got, err)
+	}
+	if got, err := localAPIURL(""); err != nil || got != baseURL {
+		t.Fatalf("default port changed: url=%q err=%v", got, err)
+	}
+}
