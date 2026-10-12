@@ -31,8 +31,9 @@ not weaken the legacy Cluster Agent / Kueue security boundary.
 - No automatic retries for mutations. Before a PUT/DELETE leaves the
   browser, its 128-bit operation ID and resource scope are written to
   **tab-local sessionStorage**, with 24-hour expiry and **only one record**.
-  A browser reload discards the access token, but the operator may sign in
-  again, choose **恢复操作范围与 ID**, and query the original audit receipt.
+  A browser reload discards the access token; even the saved resource
+  metadata remains **hidden until fresh OIDC sign-in**. The operator can
+  then choose **恢复操作范围与 ID** and query the original audit receipt.
   No Token, request JSON/spec, password, PKCE verifier or secret is persisted
   with the operation pointer. If sessionStorage cannot be written, the
   browser **refuses to issue the mutation**.
