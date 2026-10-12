@@ -28,9 +28,22 @@ not weaken the legacy Cluster Agent / Kueue security boundary.
 - Browser can GET one scoped Desired resource, PUT a typed resource request
   with a fresh random `Idempotency-Key`, DELETE using the exact
   Generation as `If-Match`, and query a committed-operation audit receipt.
-- No automatic retries for mutations; a fresh operation ID is shown before
-  transmission and can be copied. Ambiguous outcomes require first querying
-  the previous operation ID.
+- No automatic retries for mutations. Before a PUT/DELETE leaves the
+  browser, its 128-bit operation ID and resource scope are written to
+  **tab-local sessionStorage**, with 24-hour expiry and **only one record**.
+  A browser reload discards the access token, but the operator may sign in
+  again, choose **恢复操作范围与 ID**, and query the original audit receipt.
+  No Token, request JSON/spec, password, PKCE verifier or secret is persisted
+  with the operation pointer. If sessionStorage cannot be written, the
+  browser **refuses to issue the mutation**.
+- A receipt still requires current server-side OIDC identity and project
+  RBAC; the sessionStorage pointer is **NOT** proof of a committed Desired
+  write and grants no authority. Missing/expired pointers, closing the tab,
+  explicit sign-out, clearing browser data and issuing a new operation
+  may lose the previous ID. Keep an independent trusted operator journal
+  for important tasks. A 404 receipt does NOT prove there is no in-flight
+  commit. Never reuse an ID with a different request body and do not mint
+  a new ID to retry an ambiguous outcome.
 - Same-origin Vite dev proxy allows ONLY the separate authenticated
   `/api/v1/management` prefix to `127.0.0.1:8081`, **not** legacy
   `/api/v1/agent` or `/api/v1/internal`.
@@ -145,9 +158,13 @@ or add `Access-Control-Allow-Origin: *`.
   token introspection, **not a completed production OIDC session system**.
 - No refresh token or persistent browser session. Reloading requires a new
   sign-in. Clearing browser memory does NOT revoke the provider SSO session.
-- The operation ID is displayed before the write and is not durably
-  journaled. A browser crash can lose that in-memory ID; operators must
-  copy it before acting. No exactly-once client guarantee across crashes.
+- The single most-recent operation pointer survives **same-tab reload**
+  within 24 hours but is **not a durable journal**: tab close, browser
+  eviction, logout or the next operation may remove it. Request specs
+  and tokens are deliberately never stored. For 404/ambiguous outcomes,
+  the browser cannot safely replay a mutation automatically; operators
+  need the separately saved original request body and CAS inputs.
+  No exactly-once client guarantee across browser or device crashes.
 - No server-side CSRF cookie because bearer credentials are sent explicitly
   with `credentials: omit`; a full public deployment needs reviewed TLS,
   CSP, proxy authentication boundary, CORS, network policies and independent
