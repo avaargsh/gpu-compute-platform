@@ -61,7 +61,7 @@
 
     <section class="management-card">
       <h2>4. 操作回执与恢复</h2>
-      <div v-if="recentOperation" class="management-status">
+      <div v-if="recentOperation && authenticated" class="management-status">
         最近一次操作（仅当前浏览器标签）：
         <code>{{ recentOperation.method }} {{ recentOperation.project }}/{{ recentOperation.kind }}/{{ recentOperation.resource }}</code>
         · <code>{{ recentOperation.operationId }}</code>
