@@ -71,6 +71,30 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await expect(page.getByRole('status')).toContainText('Desired 事务已提交')
   const poolRequestID = await page.getByPlaceholder('原始 Idempotency-Key').inputValue()
   expect(poolRequestID).toMatch(/^[0-9a-f]{32}$/)
+  // Real browser reload discards the bearer, but the one-tab recovery
+  // pointer survives. It must contain NO token, PKCE verifier or JSON spec.
+  const persisted = await page.evaluate(() => {
+    const entries = Object.fromEntries(Object.entries(sessionStorage))
+    return entries
+  })
+  expect(JSON.stringify(persisted)).toContain(poolRequestID)
+  expect(JSON.stringify(persisted)).not.toContain('e2e-access-token')
+  expect(JSON.stringify(persisted)).not.toContain('code_verifier')
+  expect(JSON.stringify(persisted)).not.toContain('acceleratorBindings')
+  await page.reload()
+  await expect(page.getByText('尚未登录')).toBeVisible()
+  await expect(page.getByRole('button', { name: '恢复操作范围与 ID' })).toBeVisible()
+  // The receipt may only be queried after a NEW OIDC login; the pointer
+  // itself never grants auth or restores a resource Generation.
+  await expect(page.getByRole('button', { name: '查询已提交回执' })).toBeDisabled()
+  await page.getByRole('button', { name: '通过 OIDC 登录' }).click()
+  await expect(page.getByText(/已取得短期访问令牌/)).toBeVisible()
+  await page.getByRole('button', { name: '恢复操作范围与 ID' }).click()
+  await expect(page.getByPlaceholder('cluster-a')).toHaveValue('browser-ci')
+  await expect(page.getByPlaceholder('research')).toHaveValue('research')
+  await expect(page.getByPlaceholder('pool-a')).toHaveValue('pool-a')
+  await expect(page.getByPlaceholder('原始 Idempotency-Key')).toHaveValue(poolRequestID)
+  await expect(page.getByRole('button', { name: '确认并发起删除请求' })).toBeDisabled()
   await page.getByRole('button', { name: '查询已提交回执' }).click()
   await expect(page.getByRole('status')).toContainText('仅证明 Desired 写入和操作审计已提交')
   await expect(page.locator('pre').last()).toContainText(poolRequestID)
