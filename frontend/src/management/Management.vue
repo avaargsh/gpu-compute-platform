@@ -61,12 +61,22 @@
 
     <section class="management-card">
       <h2>4. 操作回执与恢复</h2>
+      <div v-if="recentOperation" class="management-status">
+        最近一次操作（仅当前浏览器标签）：
+        <code>{{ recentOperation.method }} {{ recentOperation.project }}/{{ recentOperation.kind }}/{{ recentOperation.resource }}</code>
+        · <code>{{ recentOperation.operationId }}</code>
+        <div class="management-actions">
+          <button type="button" :disabled="busy" @click="restoreOperation">恢复操作范围与 ID</button>
+          <button type="button" :disabled="busy" @click="discardOperation">清除此操作记录</button>
+        </div>
+      </div>
       <label>操作 ID（128 位随机十六进制；断连时必须使用原 ID）<input v-model.trim="operationId" autocomplete="off" spellcheck="false" placeholder="原始 Idempotency-Key" /></label>
       <div class="management-actions">
         <button type="button" :disabled="!authenticated || busy" @click="receipt">查询已提交回执</button>
         <button type="button" :disabled="!operationId" @click="copyOperationId">复制操作 ID</button>
       </div>
-      <p>操作 ID 会在发出写请求前显示，不会自动重试；网络断开或 HTTP 503 后先查询回执。HTTP 404 不一定证明尚未存在正在提交的事务。若需重新提交，必须使用完全相同的原请求内容与操作 ID。</p>
+      <p>发送写请求前会将最近一次操作 ID 与项目/资源范围保存到本标签 sessionStorage，最多保留 24 小时，绝不保存 Token、JSON 请求体或密码。刷新后重新登录，再恢复操作范围查询回执。仅保留最近一条，关闭标签、退出登录、存储失效或新操作都可能使其丢失；请另外安全保存关键操作 ID。</p>
+      <p>不会自动重试；断网或 HTTP 503 后先查询回执。HTTP 404 不能证明不存在正在提交的事务。只有能恢复完全相同的原请求体、操作 ID 和 CAS 条件时，才能人工重发；不要利用新的 ID 猜测提交结果。</p>
       <pre v-if="receiptData">{{ JSON.stringify(receiptData, null, 2) }}</pre>
     </section>
     <div v-if="message" class="management-feedback" role="status">{{ message }}</div>
@@ -78,6 +88,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
 import { readResource, writeResource, deleteResource, readReceipt, listProjects, type Kind, type DesiredView, type Receipt, type ProjectAccess, desiredMatchesScope, createOperationId } from './api'
+import { rememberOperation, recoverOperation, forgetOperation, type OperationPointer } from './recovery'
 
 const issuer = import.meta.env.VITE_MANAGEMENT_OIDC_ISSUER || ''
 const clientId = import.meta.env.VITE_MANAGEMENT_OIDC_CLIENT_ID || ''
@@ -102,6 +113,7 @@ const availableProjects = ref<ProjectAccess[]>([])
 const projectListTruncated = ref(false)
 const receiptData = ref<Receipt | null>(null)
 const operationId = ref('')
+const recentOperation = ref<OperationPointer | null>(null)
 const busy = ref(false)
 const message = ref('')
 const error = ref('')
@@ -116,6 +128,9 @@ function clearResult() { error.value = ''; message.value = ''; receiptData.value
 function describeError(e: unknown) { error.value = e instanceof Error ? e.message : '未知请求失败' }
 
 onMounted(async () => {
+  // Recovery pointer is metadata only; a browser reload always discards
+  // the bearer and demands a new OIDC sign-in for receipt queries.
+  recentOperation.value = recoverOperation(sessionStorage)
   const params = new URLSearchParams(window.location.search)
   if (!params.has('code') && !params.has('error')) return
   // Strip authorization code from location *before any exchange*.
@@ -146,6 +161,9 @@ async function signIn() {
 function signOut() {
   session.value = null
   clearPendingLogin(sessionStorage)
+  forgetOperation(sessionStorage)
+  recentOperation.value = null
+  operationId.value = ''
   desired.value = null
   receiptData.value = null
   availableProjects.value = []
@@ -181,6 +199,32 @@ function selectProject(item: ProjectAccess) {
   error.value = ''
 }
 
+function restoreOperation() {
+  const pointer = recoverOperation(sessionStorage)
+  if (!pointer) {
+    recentOperation.value = null
+    error.value = '操作记录已过期，请使用外部保存的原始操作 ID'
+    return
+  }
+  cluster.value = pointer.cluster
+  project.value = pointer.project
+  kind.value = pointer.kind
+  resource.value = pointer.resource
+  operationId.value = pointer.operationId
+  desired.value = null
+  receiptData.value = null
+  recentOperation.value = pointer
+  message.value = '已恢复操作范围和 ID；请重新登录后查询服务端回执'
+  error.value = ''
+}
+
+function discardOperation() {
+  forgetOperation(sessionStorage)
+  recentOperation.value = null
+  operationId.value = ''
+  message.value = '本页操作记录已清除，服务端审计不受影响'
+}
+
 async function read() {
   clearResult(); busy.value = true
   try {
@@ -197,10 +241,14 @@ async function write() {
     token()
     if (!window.confirm('确认向项目 ' + project.value + ' 提交 ' + kind.value + '/' + resource.value + ' Desired 变更？')) return
     const original = createOperationId()
+    const target = scope()
+    // If tab-local persistence is unavailable, DO NOT send an operation
+    // whose outcome would be unknowable after a network disconnect.
+    recentOperation.value = rememberOperation(sessionStorage, target, 'PUT', original)
     operationId.value = original
     busy.value = true
     // Never reuse an earlier operation ID for a *different* write.
-    const result = await writeResource(scope(), token(), requestJSON.value, original)
+    const result = await writeResource(target, token(), requestJSON.value, original)
     desired.value = null
     message.value = 'Desired 事务已提交（HTTP ' + result.status + '）。操作 ID: ' + original + '；可查询回执，但尚无执行成功证明'
   } catch (e) { describeError(e) }
@@ -214,9 +262,11 @@ async function remove() {
     token()
     if (!window.confirm('确认发起删除 ' + current.kind + '/' + current.id + '（Generation ' + current.generation + '）？此操作不会立即删除真实 GPU 资源。')) return
     const original = createOperationId()
+    const target = scope()
+    recentOperation.value = rememberOperation(sessionStorage, target, 'DELETE', original)
     operationId.value = original
     busy.value = true
-    const result = await deleteResource(scope(), token(), current.generation, original)
+    const result = await deleteResource(target, token(), current.generation, original)
     desired.value = null
     message.value = '删除请求已提交（HTTP ' + result.status + '）。请查询操作回执及后续 Agent 观察'
   } catch (e) { describeError(e) }
