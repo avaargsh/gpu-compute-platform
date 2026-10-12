@@ -83,12 +83,14 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   expect(JSON.stringify(persisted)).not.toContain('acceleratorBindings')
   await page.reload()
   await expect(page.getByText('尚未登录')).toBeVisible()
-  await expect(page.getByRole('button', { name: '恢复操作范围与 ID' })).toBeVisible()
+  // Even scope and resource ID metadata remain hidden while signed out.
+  await expect(page.getByRole('button', { name: '恢复操作范围与 ID' })).toHaveCount(0)
   // The receipt may only be queried after a NEW OIDC login; the pointer
   // itself never grants auth or restores a resource Generation.
   await expect(page.getByRole('button', { name: '查询已提交回执' })).toBeDisabled()
   await page.getByRole('button', { name: '通过 OIDC 登录' }).click()
   await expect(page.getByText(/已取得短期访问令牌/)).toBeVisible()
+  await expect(page.getByRole('button', { name: '恢复操作范围与 ID' })).toBeVisible()
   await page.getByRole('button', { name: '恢复操作范围与 ID' }).click()
   await expect(page.getByPlaceholder('cluster-a')).toHaveValue('browser-ci')
   await expect(page.getByPlaceholder('research')).toHaveValue('research')
