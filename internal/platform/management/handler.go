@@ -239,8 +239,21 @@ func (s *Service) read(w http.ResponseWriter, r *http.Request, id Identity, clus
 	var spec []byte
 	var gen int64
 	var deletion sql.NullTime
-	err = s.DB.QueryRowContext(r.Context(), `SELECT generation,spec,deletion_timestamp FROM desired_resources
- WHERE cluster_id=$1 AND kind=$2 AND resource_id=$3 AND spec->>'projectID'=$4`, cluster, kind, resourceID, project).Scan(&gen, &spec, &deletion)
+	// Re-check binding AND live grant in the *same snapshot* as the resource
+	// read. The preliminary role check above preserves the 403 contract,
+	// but cannot alone prevent rebind/revoke TOCTOU between two statements.
+	err = s.DB.QueryRowContext(r.Context(), `
+SELECT d.generation, d.spec, d.deletion_timestamp
+FROM desired_resources AS d
+JOIN project_bindings AS b
+  ON b.project_id=$4 AND b.cluster_id=d.cluster_id
+JOIN management_project_grants AS g
+  ON g.project_id=b.project_id
+WHERE d.cluster_id=$1 AND d.kind=$2 AND d.resource_id=$3
+  AND d.spec->>'projectID'=$4
+  AND g.issuer=$5 AND g.subject=$6
+  AND g.role IN ('viewer', 'operator', 'admin')
+`, cluster, kind, resourceID, project, id.Issuer, id.Subject).Scan(&gen, &spec, &deletion)
 	if err == sql.ErrNoRows {
 		problem(w, 404)
 		return
