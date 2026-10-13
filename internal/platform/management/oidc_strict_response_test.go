@@ -21,6 +21,11 @@ func TestIntrospectorRejectsTrailingAndOversizedResponse(t *testing.T) {
 	}{
 		{name: "valid bounded response", body: valid, wantValid: true},
 		{name: "valid bounded whitespace", body: valid + " \n", wantValid: true},
+		{name: "conflicting active false then true", body: strings.Replace(valid, `"active":true`, `"active":false,"active":true`, 1)},
+		{name: "conflicting subject duplicate", body: strings.Replace(valid, `"sub":"alice"`, `"sub":"mallory","sub":"alice"`, 1)},
+		{name: "case-insensitive active duplicate", body: strings.Replace(valid, `"active":true`, `"ACTIVE":false,"active":true`, 1)},
+		{name: "duplicate unknown JSON key", body: strings.Replace(valid, `"sub":"alice"`, `"sub":"alice","vendor_hint":"one","vendor_hint":"two"`, 1)},
+		{name: "nested extra unknown object allowed", body: strings.Replace(valid, `"sub":"alice"`, `"sub":"alice","vendor_extra":{"one":"a","two":"b"}`, 1), wantValid: true},
 		{name: "trailing JSON object", body: valid + `{"active":false}`},
 		{name: "trailing non-JSON bytes", body: valid + "not-json"},
 		{name: "oversized valid prefix", body: valid + strings.Repeat(" ", 8193)},
