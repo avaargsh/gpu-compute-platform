@@ -203,20 +203,27 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Authorization requires both the CURRENT project grant and the CURRENT
+// project-to-cluster binding. A grant for a migrated project must not allow
+// stale resource reads or DELETEs in its previous cluster.
 func (s *Service) role(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, id Identity, project string, lock bool) (string, error) {
-	query := `SELECT role FROM management_project_grants WHERE issuer=$1 AND subject=$2 AND project_id=$3`
+}, id Identity, cluster, project string, lock bool) (string, error) {
+	query := `SELECT g.role FROM management_project_grants AS g
+JOIN project_bindings AS b ON b.project_id=g.project_id AND b.cluster_id=$4
+WHERE g.issuer=$1 AND g.subject=$2 AND g.project_id=$3`
 	if lock {
-		query += " FOR SHARE"
+		// Lock both the project role and its cluster binding through COMMIT.
+		// This prevents concurrent rebind/revoke from crossing the mutation.
+		query += " FOR SHARE OF g, b"
 	}
 	var role string
-	err := q.QueryRowContext(ctx, query, id.Issuer, id.Subject, project).Scan(&role)
+	err := q.QueryRowContext(ctx, query, id.Issuer, id.Subject, project, cluster).Scan(&role)
 	return role, err
 }
 
 func (s *Service) read(w http.ResponseWriter, r *http.Request, id Identity, cluster, project, kind, resourceID string) {
-	role, err := s.role(r.Context(), s.DB, id, project, false)
+	role, err := s.role(r.Context(), s.DB, id, cluster, project, false)
 	if err == sql.ErrNoRows {
 		problem(w, 403)
 		return
@@ -232,8 +239,21 @@ func (s *Service) read(w http.ResponseWriter, r *http.Request, id Identity, clus
 	var spec []byte
 	var gen int64
 	var deletion sql.NullTime
-	err = s.DB.QueryRowContext(r.Context(), `SELECT generation,spec,deletion_timestamp FROM desired_resources
- WHERE cluster_id=$1 AND kind=$2 AND resource_id=$3 AND spec->>'projectID'=$4`, cluster, kind, resourceID, project).Scan(&gen, &spec, &deletion)
+	// Re-check binding AND live grant in the *same snapshot* as the resource
+	// read. The preliminary role check above preserves the 403 contract,
+	// but cannot alone prevent rebind/revoke TOCTOU between two statements.
+	err = s.DB.QueryRowContext(r.Context(), `
+SELECT d.generation, d.spec, d.deletion_timestamp
+FROM desired_resources AS d
+JOIN project_bindings AS b
+  ON b.project_id=$4 AND b.cluster_id=d.cluster_id
+JOIN management_project_grants AS g
+  ON g.project_id=b.project_id
+WHERE d.cluster_id=$1 AND d.kind=$2 AND d.resource_id=$3
+  AND d.spec->>'projectID'=$4
+  AND g.issuer=$5 AND g.subject=$6
+  AND g.role IN ('viewer', 'operator', 'admin')
+`, cluster, kind, resourceID, project, id.Issuer, id.Subject).Scan(&gen, &spec, &deletion)
 	if err == sql.ErrNoRows {
 		problem(w, 404)
 		return
@@ -284,7 +304,7 @@ func (s *Service) mutate(ctx context.Context, id Identity, cluster, project, kin
 		return 503, 0
 	}
 	defer tx.Rollback()
-	role, err := s.role(ctx, tx, id, project, true)
+	role, err := s.role(ctx, tx, id, cluster, project, true)
 	if err == sql.ErrNoRows {
 		return 403, 0
 	}
