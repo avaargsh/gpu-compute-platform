@@ -65,6 +65,8 @@ SELECT a.kind, a.resource_id, a.action, a.expected_generation,
 FROM management_operation_audit AS a
 JOIN management_project_grants AS g
   ON g.issuer=a.issuer AND g.subject=a.subject AND g.project_id=a.project_id
+JOIN project_bindings AS b
+  ON b.project_id=a.project_id AND b.cluster_id=a.cluster_id
 WHERE a.request_id=$1 AND a.cluster_id=$2 AND a.project_id=$3
   AND a.issuer=$4 AND a.subject=$5
   AND g.role IN ('operator','admin')
