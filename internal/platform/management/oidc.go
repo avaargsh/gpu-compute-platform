@@ -81,9 +81,15 @@ func (i Introspector) Verify(ctx context.Context, token string) (Identity, error
 	if resp.StatusCode != http.StatusOK {
 		return Identity{}, fmt.Errorf("%w: introspection returned HTTP %d", ErrIntrospectionUnavailable, resp.StatusCode)
 	}
+	// Decode the entire bounded response, not only its first JSON value.
+	// A streaming decoder may otherwise accept a valid identity followed by
+	// arbitrary trailing JSON or an oversized body that starts with valid JSON.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8193))
+	if err != nil || len(body) > 8192 {
+		return Identity{}, fmt.Errorf("%w: introspection response read or size limit", ErrIntrospectionUnavailable)
+	}
 	var result introspectionResult
-	dec := json.NewDecoder(io.LimitReader(resp.Body, 8193))
-	if err := dec.Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return Identity{}, fmt.Errorf("%w: malformed introspection response", ErrIntrospectionUnavailable)
 	}
 	if !result.Active || result.Issuer != i.Issuer || result.Subject == "" || len(result.Subject) > 512 || result.ExpiresAt <= time.Now().Unix() || !strings.EqualFold(result.TokenType, "Bearer") {
