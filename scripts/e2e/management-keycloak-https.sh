@@ -27,7 +27,7 @@ docker run -d --rm --name "$CONTAINER" --memory 1536m \
   -v "$ROOT/scripts/e2e/keycloak-management-realm.json:/opt/keycloak/data/import/gpu-management-e2e-realm.json:ro" \
   -v "$TMP_DIR/cert.pem:/opt/keycloak/conf/e2e-cert.pem:ro" \
   -v "$TMP_DIR/key.pem:/opt/keycloak/conf/e2e-key.pem:ro" \
-  quay.io/keycloak/keycloak:26.8.0 start-dev --import-realm \
+  quay.io/keycloak/keycloak:26.8.0@sha256:27b3230fbabb8c9ff3c66c864cf09dcd8a41aca82e5100679d109ef0eeb05741 start-dev --import-realm \
   --hostname=https://127.0.0.1:8443 \
   --https-port=8443 --http-enabled=false \
   --https-certificate-file=/opt/keycloak/conf/e2e-cert.pem \
