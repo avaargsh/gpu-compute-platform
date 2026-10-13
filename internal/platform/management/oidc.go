@@ -1,6 +1,7 @@
 package management
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -88,9 +89,9 @@ func (i Introspector) Verify(ctx context.Context, token string) (Identity, error
 	if err != nil || len(body) > 8192 {
 		return Identity{}, fmt.Errorf("%w: introspection response read or size limit", ErrIntrospectionUnavailable)
 	}
-	var result introspectionResult
-	if err := json.Unmarshal(body, &result); err != nil {
-		return Identity{}, fmt.Errorf("%w: malformed introspection response", ErrIntrospectionUnavailable)
+	result, err := decodeUniqueIntrospection(body)
+	if err != nil {
+		return Identity{}, fmt.Errorf("%w: malformed or ambiguous introspection response", ErrIntrospectionUnavailable)
 	}
 	if !result.Active || result.Issuer != i.Issuer || result.Subject == "" || len(result.Subject) > 512 || result.ExpiresAt <= time.Now().Unix() || !strings.EqualFold(result.TokenType, "Bearer") {
 		return Identity{}, errors.New("inactive, expired, or untrusted identity")
@@ -116,6 +117,53 @@ func (i Introspector) Verify(ctx context.Context, token string) (Identity, error
 		}
 	}
 	return Identity{Issuer: i.Issuer, Subject: result.Subject}, nil
+}
+
+// decodeUniqueIntrospection rejects conflicting duplicate JSON object keys
+// before struct decoding. encoding/json.Unmarshal otherwise silently uses
+// the last value, including for identity-critical active/iss/sub/aud/exp.
+// The response was already bounded to 8192 bytes by Verify.
+func decodeUniqueIntrospection(body []byte) (introspectionResult, error) {
+	var result introspectionResult
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	first, err := decoder.Token()
+	if err != nil || first != json.Delim('{') {
+		return result, errors.New("introspection JSON must be an object")
+	}
+	seen := make(map[string]struct{})
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return result, err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return result, errors.New("invalid introspection key")
+		}
+		// Unmarshal matches struct keys case-insensitively, so treat ASCII
+		// case variants as duplicates too.
+		key = strings.ToLower(key)
+		if _, exists := seen[key]; exists {
+			return result, errors.New("duplicate introspection key")
+		}
+		seen[key] = struct{}{}
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return result, err
+		}
+	}
+	last, err := decoder.Token()
+	if err != nil || last != json.Delim('}') {
+		return result, errors.New("unterminated introspection JSON")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return result, errors.New("trailing introspection JSON")
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func bearerToken(r *http.Request) string {
