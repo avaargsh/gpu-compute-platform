@@ -177,6 +177,52 @@ kind get clusters | grep -qx "$CLUSTER_ID" || kind create cluster --name "$CLUST
 kubectl apply --server-side -f "https://github.com/kubernetes-sigs/kueue/releases/download/${KUEUE_VERSION}/manifests.yaml"
 kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout="${TIMEOUT_SECONDS}s"
 
+# Deployment Available does not guarantee that the API server can already
+# reach Kueue's mutating admission webhook. An immediate fake GPU Helm install
+# has failed with kueue-webhook-service:443 connection refused.
+# Probe the same apps/v1 Deployment admission path with a zero-replica,
+# server-dry-run object: no workload is created and admission is not bypassed.
+kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace gpu-operator pod-security.kubernetes.io/enforce=privileged --overwrite
+wait_kueue_admission() {
+  local deadline=$((SECONDS + TIMEOUT_SECONDS)) last_error
+  last_error="$(mktemp)"
+  while (( SECONDS < deadline )); do
+    if kubectl create --dry-run=server --request-timeout=12s -f - >/dev/null 2>"$last_error" <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-admission-readiness-probe
+  namespace: gpu-operator
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: gpu-admission-readiness-probe
+  template:
+    metadata:
+      labels:
+        app: gpu-admission-readiness-probe
+    spec:
+      containers:
+        - name: probe
+          image: busybox:1.36
+YAML
+    then
+      rm -f "$last_error"
+      echo "Kueue Deployment admission webhook reachable via server dry-run"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Kueue Deployment admission did not become reachable" >&2
+  cat "$last_error" >&2 || true
+  rm -f "$last_error"
+  kubectl get pods,services,endpoints -n kueue-system -o wide >&2 || true
+  return 1
+}
+wait_kueue_admission
+
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
 kubectl label node "$node" topology.kubernetes.io/zone=gpu-zone-a ai.compute/rack=rack-a01 "ai.compute/accelerator-class=$ACCELERATOR_CLASS" --overwrite
 bash scripts/e2e/install-fake-gpu.sh
