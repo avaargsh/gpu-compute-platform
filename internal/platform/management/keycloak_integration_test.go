@@ -37,9 +37,9 @@ func TestKeycloakRealHTTPSIntrospectionAndRevocation(t *testing.T) {
 		t.Fatal("invalid Keycloak integration CA")
 	}
 	client := &http.Client{
-		Timeout: 8 * time.Second,
+		Timeout:       8 * time.Second,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}},
+		Transport:     &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}},
 	}
 	endpoint := issuer + "/protocol/openid-connect/token"
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -57,15 +57,28 @@ func TestKeycloakRealHTTPSIntrospectionAndRevocation(t *testing.T) {
 	tokenResp, err := call(endpoint, "gpu-e2e-direct", "e2e-direct-secret-not-for-production", url.Values{
 		"grant_type": {"password"}, "username": {"ci-operator"},
 		"password": {"ci-disposable-password-not-for-production"},
-		"scope": {"openid"},
+		"scope":    {"openid"},
 	})
 	if err != nil {
 		t.Fatal("Keycloak test-token exchange transport:", err)
 	}
 	defer tokenResp.Body.Close()
 	if tokenResp.StatusCode != http.StatusOK {
-		// Never dump the body: provider responses may contain credentials.
-		t.Fatalf("Keycloak test token exchange HTTP %d", tokenResp.StatusCode)
+		// Surface ONLY a bounded OAuth protocol error code/description;
+		// never dump the raw token endpoint response or bearer content.
+		var oauthError struct {
+			Code        string `json:"error"`
+			Description string `json:"error_description"`
+		}
+		_ = json.NewDecoder(io.LimitReader(tokenResp.Body, 4096)).Decode(&oauthError)
+		if len(oauthError.Code) > 80 {
+			oauthError.Code = "unrecognized"
+		}
+		if len(oauthError.Description) > 180 {
+			oauthError.Description = oauthError.Description[:180]
+		}
+		t.Fatalf("Keycloak test token exchange HTTP %d: OAuth code=%q reason=%q",
+			tokenResp.StatusCode, oauthError.Code, oauthError.Description)
 	}
 	var tokenResult struct {
 		AccessToken string `json:"access_token"`
@@ -78,11 +91,11 @@ func TestKeycloakRealHTTPSIntrospectionAndRevocation(t *testing.T) {
 		t.Fatal("Keycloak failed to issue a genuine bearer access token")
 	}
 	introspector := Introspector{
-		URL: issuer + "/protocol/openid-connect/token/introspect",
+		URL:    issuer + "/protocol/openid-connect/token/introspect",
 		Issuer: issuer, Audience: "gpu-management-api",
-		ClientID: "gpu-e2e-introspection",
+		ClientID:     "gpu-e2e-introspection",
 		ClientSecret: "e2e-introspect-secret-not-for-production",
-		Client: client,
+		Client:       client,
 	}
 	identity, err := introspector.Verify(ctx, tokenResult.AccessToken)
 	if err != nil {
