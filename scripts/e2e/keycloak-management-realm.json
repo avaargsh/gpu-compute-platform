@@ -1,0 +1,85 @@
+{
+  "realm": "gpu-management-e2e",
+  "enabled": true,
+  "displayName": "GPU Management Keycloak CI Only",
+  "registrationAllowed": false,
+  "rememberMe": false,
+  "resetPasswordAllowed": false,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": false,
+  "sslRequired": "external",
+  "clients": [
+    {
+      "clientId": "gpu-e2e-direct",
+      "name": "TEST ONLY password-grant issuer for server integration",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "e2e-direct-secret-not-for-production",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "management-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "gpu-management-api",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "keycloak-introspector-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "gpu-e2e-introspection",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "gpu-e2e-introspection",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "e2e-introspect-secret-not-for-production",
+      "directAccessGrantsEnabled": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "redirectUris": [],
+      "webOrigins": []
+    }
+  ],
+  "users": [
+    {
+      "username": "ci-operator",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "CI",
+      "lastName": "Operator",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ci-disposable-password-not-for-production",
+          "temporary": false
+        }
+      ],
+      "requiredActions": []
+    }
+  ]
+}
