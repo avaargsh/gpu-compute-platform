@@ -79,7 +79,8 @@
           "temporary": false
         }
       ],
-      "requiredActions": []
+      "requiredActions": [],
+      "email": "ci-operator@example.invalid"
     }
   ]
 }
