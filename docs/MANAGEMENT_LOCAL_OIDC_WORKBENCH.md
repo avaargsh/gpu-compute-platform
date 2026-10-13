@@ -150,6 +150,40 @@ or add `Access-Control-Allow-Origin: *`.
 9. Test a stale Generation / conflicting operation ID: must return 409
    and produce no additional successful audit row.
 
+## Real Keycloak HTTPS interoperability CI (server token path only)
+
+The Go CI adds a **separate disposable Keycloak 26.8.0** container, with a
+self-signed HTTPS certificate trusted ONLY by the integration test. Start and
+tear down is automated through:
+
+```bash
+bash scripts/e2e/management-keycloak-https.sh
+```
+
+The process is bound to `127.0.0.1:8443`; its realm import lives at
+`scripts/e2e/keycloak-management-realm.json`. Import credentials and
+`grant_type=password` are **explicitly disposable test fixtures** for obtaining
+a REAL issued Keycloak access token. Password grants are NOT enabled for the
+production browser, which continues to use Authorization Code + S256 PKCE.
+Do not deploy or reuse the disposable realm/password/secret values.
+
+`TestKeycloakRealHTTPSIntrospectionAndRevocation` exercises the existing
+`Introspector.Verify` against the real confidential-client HTTPS endpoint,
+not an httptest HTTP double. The issuing test client has an explicit audience
+mapper for `gpu-management-api` and `gpu-e2e-introspection`; both are needed
+to respect modern Keycloak introspection audience restrictions. Check:
+successful exact issuer + subject + API audience, reject another API audience,
+reject a non-issued token, and reject a token following test-only revocation.
+Token bodies and access-token secrets must never be printed in CI logs.
+
+The test client injects a temporary CA into its dedicated Go HTTP transport.
+**Production** `management-api` still requires a trusted HTTPS identity
+provider and does NOT enable `AllowHTTPForTests` or skip TLS verification.
+
+A green result here means real Keycloak **server-side token introspection
+interoperability only**. It does NOT prove full real browser-based SSO, MFA,
+ID-token nonce validation, public TLS ingress or production network policy.
+
 ## Hard release blockers
 
 - This slice has **not** yet been exercised with a real Keycloak / Dex /
