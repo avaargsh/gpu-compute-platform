@@ -53,4 +53,12 @@ GRANT EXECUTE ON FUNCTION public.management_locked_project_role(
   text, text, text, text
 ) TO gpu_management_runtime;
 
+
+-- The second fixed-query function locks an individual pool binding without
+-- giving the runtime UPDATE privileges on cluster_bindings.
+REVOKE ALL ON FUNCTION public.management_locked_pool_binding(text)
+  FROM gpu_management_runtime;
+GRANT EXECUTE ON FUNCTION public.management_locked_pool_binding(text)
+  TO gpu_management_runtime;
+
 COMMIT;
