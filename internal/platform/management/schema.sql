@@ -38,3 +38,31 @@ ALTER TABLE management_operation_audit
 
 CREATE INDEX IF NOT EXISTS management_audit_project_time_idx
  ON management_operation_audit (project_id, created_at DESC);
+
+
+-- Read-only Management API login must not receive UPDATE on authorization
+-- tables. PostgreSQL SELECT ... FOR SHARE does require UPDATE privilege, so
+-- a narrowly scoped DBA-owned SECURITY DEFINER function takes the row locks.
+-- Only fixed identity and binding parameters are accepted: no dynamic SQL.
+-- pg_temp is excluded from object resolution and every table is qualified.
+CREATE OR REPLACE FUNCTION public.management_locked_project_role(
+  p_issuer text, p_subject text, p_project_id text, p_cluster_id text
+) RETURNS SETOF text
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $management_role$
+  SELECT g.role
+  FROM public.management_project_grants AS g
+  JOIN public.project_bindings AS b
+    ON b.project_id = g.project_id AND b.cluster_id = p_cluster_id
+  WHERE g.issuer = p_issuer AND g.subject = p_subject
+    AND g.project_id = p_project_id
+  FOR SHARE OF g, b;
+$management_role$;
+
+-- Functions are executable by PUBLIC by default: explicitly revoke this
+-- narrow privileged function, then grant only to Management's runtime role.
+REVOKE ALL ON FUNCTION public.management_locked_project_role(
+  text, text, text, text
+) FROM PUBLIC;
