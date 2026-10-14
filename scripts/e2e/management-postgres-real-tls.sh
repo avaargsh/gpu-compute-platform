@@ -64,7 +64,12 @@ docker run -d --rm --name "$PG_CONTAINER" \
 
 PG_READY=0
 for attempt in $(seq 1 90); do
-  if docker exec "$PG_CONTAINER" pg_isready -q -U gpu -d gpu_management_tls_ci >/dev/null 2>&1; then
+  # pg_isready reports accepting connections even while the named DB
+  # has not been created (or while initdb uses a Unix-only temp server).
+  # Require a successful SQL read of the EXACT fixture DB over TCP.
+  if [[ "$(docker exec -e PGPASSWORD=ci-only-admin "$PG_CONTAINER" \
+      psql -X -qAt -h 127.0.0.1 -U gpu -d gpu_management_tls_ci \
+      -c 'SELECT 1' 2>/dev/null || true)" == "1" ]]; then
     PG_READY=1
     break
   fi
