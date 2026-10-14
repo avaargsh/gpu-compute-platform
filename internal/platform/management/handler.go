@@ -24,9 +24,10 @@ var safeID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 var operationID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
 type Service struct {
-	DB                   *sql.DB
-	Auth                 Introspector
-	AllowedBrowserOrigin string
+	DB                        *sql.DB
+	Auth                      Introspector
+	AllowedBrowserOrigin      string
+	RequireRuntimeDBAuthority bool
 }
 
 type mutationInput struct {
@@ -44,6 +45,17 @@ func NewHandler(db *sql.DB, auth Introspector) (http.Handler, error) {
 // The Origin is a CSRF/browser boundary only, NOT identity or project auth:
 // each request still requires a verified bearer and DB-owned RBAC.
 func NewHandlerWithBrowserOrigin(db *sql.DB, auth Introspector, origin string) (http.Handler, error) {
+	return newHandlerWithAuthorityCheck(db, auth, origin, false)
+}
+
+// NewGuardedHandlerWithBrowserOrigin is the production management entrypoint.
+// Unlike the test-only and legacy handler constructors it requires a fresh
+// runtime Postgres authority check before EVERY desired-state mutation.
+func NewGuardedHandlerWithBrowserOrigin(db *sql.DB, auth Introspector, origin string) (http.Handler, error) {
+	return newHandlerWithAuthorityCheck(db, auth, origin, true)
+}
+
+func newHandlerWithAuthorityCheck(db *sql.DB, auth Introspector, origin string, guard bool) (http.Handler, error) {
 	if err := validateBrowserOrigin(origin); err != nil {
 		return nil, err
 	}
@@ -53,7 +65,7 @@ func NewHandlerWithBrowserOrigin(db *sql.DB, auth Introspector, origin string) (
 	if err := auth.ValidateConfig(); err != nil {
 		return nil, err
 	}
-	svc := &Service{DB: db, Auth: auth, AllowedBrowserOrigin: origin}
+	svc := &Service{DB: db, Auth: auth, AllowedBrowserOrigin: origin, RequireRuntimeDBAuthority: guard}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/management/projects", svc.projects)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -299,6 +311,14 @@ func mutationFingerprint(cluster, project, kind, resourceID string, in mutationI
 }
 
 func (s *Service) mutate(ctx context.Context, id Identity, cluster, project, kind, resourceID string, in mutationInput, method, requestID string) (int, int64) {
+	// Do not rely only on the startup-time privilege snapshot. Re-read the
+	// actual configured LOGIN authority for every authorized write, including
+	// idempotency replays. Fail closed before opening a write transaction.
+	if s.RequireRuntimeDBAuthority {
+		if err := VerifyRuntimeDBPrivileges(ctx, s.DB); err != nil {
+			return http.StatusServiceUnavailable, 0
+		}
+	}
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return 503, 0
