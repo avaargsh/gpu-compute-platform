@@ -408,3 +408,20 @@ workflows.
   identity) before any network exposure.
 - Retain existing golden path (Kueue only) and all Stage B contracts.
 - **No training-dataset publishing in this milestone.**
+
+
+## Shared PostgreSQL test fixture isolation
+
+In the current CI, multiple Go packages use the **same**
+`TEST_POSTGRES_DSN`; `internal/store/postgres/lease_test.go` runs
+`TRUNCATE desired_resources` during package fixture setup. Plain
+`go test ./...` executes packages in parallel and can erase live Desired
+rows in another package's management E2E assertions. This was observed
+as two misleading `sql: no rows in result set` failures in
+[Actions #38497574228](https://github.com/avaargsh/gpu-compute-platform/actions/runs/38497574228).
+The canonical `make test` now uses `go test -p 1 ./...`, and CI calls
+`make test`, serializing **packages**, not the internal goroutines used
+by existing concurrency tests. This is a fixture-scoping workaround,
+not a performance feature or a substitute for eventual per-package
+ephemeral databases/schemas. The auth-row-lock function and runtime
+LOGIN tests must still pass at the exact head.
