@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/platform/bootstrap"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	postgresstore "github.com/avaargsh/gpu-compute-platform/internal/store/postgres"
@@ -16,11 +17,15 @@ import (
 )
 
 func main() {
-	store, placement, cleanup := buildStore()
+	cfg, err := bootstrap.Load(os.Getenv)
+	if err != nil {
+		log.Fatalf("unsafe control-plane startup configuration: %v", err)
+	}
+	store, placement, cleanup := buildStore(cfg.DatabaseURL)
 	defer cleanup()
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    cfg.ListenAddr,
 		Handler: httpapi.NewRouterWithDependencies(store, placement),
 	}
 
@@ -30,8 +35,7 @@ func main() {
 	}
 }
 
-func buildStore() (agentstore.Store, httpapi.BindingStore, func()) {
-	dsn := os.Getenv("DATABASE_URL")
+func buildStore(dsn string) (agentstore.Store, httpapi.BindingStore, func()) {
 	if dsn == "" {
 		log.Print("DATABASE_URL is empty; using in-memory agent store")
 		return agentstore.NewMemory(), httpapi.NewMemoryPlacementResolver(), func() {}
