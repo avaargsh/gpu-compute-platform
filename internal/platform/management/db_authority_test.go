@@ -144,6 +144,17 @@ func TestManagementActualLoginAuthorityAdmission(t *testing.T) {
 	}
 
 	accept("legitimate inherited narrow group grants")
+	// Revoke the exact DBA-owned lock function while retaining read-only
+	// table grants. A production write must fail BEFORE any transaction.
+	const lockFunction = "public.management_locked_project_role(text,text,text,text)"
+	if _, err := admin.ExecContext(ctx, "REVOKE EXECUTE ON FUNCTION "+lockFunction+" FROM "+group); err != nil {
+		t.Fatal(err)
+	}
+	reject("row-lock function EXECUTE revoked")
+	if _, err := admin.ExecContext(ctx, "GRANT EXECUTE ON FUNCTION "+lockFunction+" TO "+group); err != nil {
+		t.Fatal(err)
+	}
+	accept("row-lock function EXECUTE restored")
 	// PostgreSQL >=16 can grant SET TRUE and INHERIT FALSE independently.
 	// This secondary role is not effective in the LOGIN's current session,
 	// but the LOGIN can still SET ROLE to it and mutate grants or audit.
