@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // VerifyRuntimeDBPrivileges checks the effective PostgreSQL login authority
@@ -59,16 +60,9 @@ FROM pg_catalog.pg_roles AS r WHERE r.rolname = current_user
 		"management_operation_audit": "SELECT, INSERT",
 	}
 	for table, privileges := range required {
-		var ok bool
-		err = conn.QueryRowContext(ctx, `
-SELECT pg_catalog.has_table_privilege(current_user, $1::regclass, $2)
-`, "public."+table, privileges).Scan(&ok)
-		if err != nil {
-			return fmt.Errorf("management DB required grant probe failed (%s): %w", table, err)
-		}
-		// PostgreSQL has_table_privilege with a comma-list means ANY;
-		// verify each required right individually instead.
-		for _, right := range splitRequiredPrivileges(privileges) {
+		// PostgreSQL comma-lists test ANY right; require EACH explicitly.
+		for _, right := range strings.Split(privileges, ",") {
+			var ok bool
 			err = conn.QueryRowContext(ctx, `
 SELECT pg_catalog.has_table_privilege(current_user, $1::regclass, $2)
 `, "public."+table, right).Scan(&ok)
@@ -93,11 +87,10 @@ SELECT pg_catalog.has_table_privilege(current_user, $1::regclass, $2)
 		"cluster_agents": "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
 	}
 	for table, privileges := range forbidden {
-		var tableGrant, columnGrant bool
+		var tableGrant bool
 		err = conn.QueryRowContext(ctx, `
-SELECT pg_catalog.has_table_privilege(current_user, $1::regclass, $2),
-       pg_catalog.has_any_column_privilege(current_user, $1::regclass, 'SELECT,INSERT,UPDATE,REFERENCES')
-`, "public."+table, privileges).Scan(&tableGrant, &columnGrant)
+SELECT pg_catalog.has_table_privilege(current_user, $1::regclass, $2)
+`, "public."+table, privileges).Scan(&tableGrant)
 		if err != nil {
 			return fmt.Errorf("management DB forbidden grant probe failed (%s): %w", table, err)
 		}
@@ -107,7 +100,7 @@ SELECT pg_catalog.has_table_privilege(current_user, $1::regclass, $2),
 			return fmt.Errorf("management DB forbidden table authority on %s", table)
 		}
 		for _, right := range []string{"SELECT", "INSERT", "UPDATE", "REFERENCES"} {
-			if containsRequiredPrivilege(privileges, right) {
+			if strings.Contains(","+privileges+",", ","+right+",") {
 				var present bool
 				err = conn.QueryRowContext(ctx, `
 SELECT pg_catalog.has_any_column_privilege(current_user, $1::regclass, $2)
@@ -117,41 +110,7 @@ SELECT pg_catalog.has_any_column_privilege(current_user, $1::regclass, $2)
 				}
 			}
 		}
-		_ = columnGrant
 	}
 	return nil
 }
 
-func splitRequiredPrivileges(value string) []string {
-	var rights []string
-	for _, right := range []string{"SELECT", "INSERT", "UPDATE"} {
-		if containsRequiredPrivilege(value, right) {
-			rights = append(rights, right)
-		}
-	}
-	return rights
-}
-
-func containsRequiredPrivilege(value, target string) bool {
-	for _, s := range splitCommaRights(value) {
-		if s == target {
-			return true
-		}
-	}
-	return false
-}
-
-func splitCommaRights(value string) []string {
-	var out []string
-	for _, s := range []string{"SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"} {
-		for i := 0; i+len(s) <= len(value); i++ {
-			if value[i:i+len(s)] == s &&
-				(i == 0 || value[i-1] == ',') &&
-				(i+len(s) == len(value) || value[i+len(s)] == ',') {
-				out = append(out, s)
-				break
-			}
-		}
-	}
-	return out
-}
