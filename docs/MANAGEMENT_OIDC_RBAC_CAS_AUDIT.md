@@ -258,6 +258,20 @@ CI-local PostgreSQL, not proof of a specific organization's
 certificate rollout, renewal procedure, K8s secret mount, network
 policy or production ingress isolation.
 
+The same test now proves a **planned restart-based CA rotation and rollback**
+using one persistent disposable PostgreSQL database/role identity:
+initial signing CA A -> replacement CA B -> rollback to CA A. Each
+cutover stops PostgreSQL before replacing the mounted certificate and
+private-key bytes, restarts it, and confirms the named database answers SQL.
+For both directions, a client trusting the **previous** CA must fail
+server verification; a newly started production Management API trusting the
+**current** CA must reach loopback health and retain a real TLS session.
+This is deliberately a **disruptive restart cutover** in CI, not a
+zero-downtime procedure or certificate-reload guarantee. Production
+rollout requires pre-approved CA overlap, managed secret delivery,
+connection draining, failure rollback and availability SLO validation
+on the organization's actual deployment.
+
 ### Browser Origin gate
 
 The management API denies **all Origin-bearing write requests by default**.
