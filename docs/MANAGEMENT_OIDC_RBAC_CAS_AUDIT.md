@@ -184,7 +184,9 @@ and independent security review remain release prerequisites.
 Mandatory configuration:
 
 ```bash
-export MANAGEMENT_DATABASE_URL='postgres://...'
+# Example only: mount the CA certificate read-only using deployment secret
+# management; provision the least-privilege LOGIN separately from the DBA.
+export MANAGEMENT_DATABASE_URL='postgres://management-login:<injected-password>@postgres.internal:5432/gpu?sslmode=verify-full&sslrootcert=/run/secrets/postgres/root-ca.pem'
 export OIDC_ISSUER='https://idp.example.com/realms/compute'
 export OIDC_INTROSPECTION_URL='https://idp.example.com/realms/compute/protocol/openid-connect/token/introspect'
 export OIDC_CLIENT_ID='management-api'
@@ -198,6 +200,35 @@ go run ./cmd/management-api
 Secrets never belong in the frontend or in committed configuration.
 Production must also restrict the Postgres management DB role, TLS upstream,
 and all network policies.
+
+### Verified PostgreSQL transport admission
+
+`cmd/management-api` is the production binary and now rejects weak
+PostgreSQL transport **before connecting or opening an HTTP listener**.
+`MANAGEMENT_DATABASE_URL` must be an explicit `postgres://` or
+`postgresql://` URI with hostname, database, named login, exactly one
+`sslmode=verify-full` and exactly one absolute `sslrootcert` file path.
+The CA trust file must already be mounted and accessible to the runtime
+user. Both TLS encryption and **server hostname verification** are
+mandatory; `sslmode=disable`, `prefer`, `require`, `verify-ca`,
+omitted CA, duplicate SSL parameters, alternate `host`/`hostaddr`/
+`service` overrides, Unix-domain socket URIs and multi-host failover
+URIs are rejected, rather than silently reducing protection.
+
+Mount the database CA certificate as a read-only secret and provision
+the actual DB LOGIN credentials with an approved secret mechanism.
+Do not put the password or certificate material in Git, frontend
+environment variables, images, or command-line flags. This transport
+gate is **independent from** the PostgreSQL least-privilege admission:
+TLS does not prove authorization, and least-privilege grants do not
+authenticate the server. Certificate chain, DNS SAN, expiration,
+and actual connectivity are checked by the PostgreSQL driver on
+connection, so the integration environment must supply a real valid CA
+and server certificate. This rollout intentionally breaks insecure
+local usage of `cmd/management-api`; use the separate gated,
+loopback-only `cmd/management-e2e-fixture` for disposable CI/browser
+tests. Production still requires TLS reverse proxy and Agent machine
+identity review; database TLS alone does **not** enable public ingress.
 
 ### Browser Origin gate
 
