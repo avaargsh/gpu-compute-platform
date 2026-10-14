@@ -53,7 +53,7 @@ chmod 600 "$TMP_DIR/server.key"
 sudo chown "$PG_UID:$PG_GID" "$TMP_DIR/server.key"
 chmod 644 "$TMP_DIR/server.crt" "$TMP_DIR/ca.pem" "$TMP_DIR/untrusted-ca.pem"
 
-docker run -d --rm --name "$PG_CONTAINER" \
+docker run -d --name "$PG_CONTAINER" \
   -p 127.0.0.1:55433:5432 \
   -e POSTGRES_USER=gpu -e POSTGRES_PASSWORD=ci-only-admin \
   -e POSTGRES_DB=gpu_management_tls_ci \
@@ -109,35 +109,41 @@ export MANAGEMENT_LISTEN_ADDR=127.0.0.1:18081
 DSN_PREFIX="postgres://management_tls_login:$TEST_PASSWORD@localhost:55433/gpu_management_tls_ci"
 VERIFIED_DSN="$DSN_PREFIX?sslmode=verify-full&sslrootcert=$TMP_DIR/ca.pem"
 
-MANAGEMENT_DATABASE_URL="$VERIFIED_DSN" "$TMP_DIR/management-api" > "$TMP_DIR/positive.log" 2>&1 &
-API_PID=$!
-READY=0
-for attempt in $(seq 1 100); do
-  if curl -fsS --max-time 1 http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
-    READY=1
-    break
-  fi
-  if ! kill -0 "$API_PID" 2>/dev/null; then
-    echo "production management-api rejected genuine TLS and narrow DB login" >&2
+# The same real production process must be able to re-establish a new,
+# independently verified TLS session after certificate rotation/rollback.
+# Check the HTTPS-independent local health endpoint AND pg_stat_ssl.
+expect_verified_login() {
+  local case_name="$1" candidate="$2" ready=0
+  MANAGEMENT_DATABASE_URL="$candidate" "$TMP_DIR/management-api" > "$TMP_DIR/positive.log" 2>&1 &
+  API_PID=$!
+  for attempt in $(seq 1 100); do
+    if curl -fsS --max-time 1 http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "$API_PID" 2>/dev/null; then
+      echo "FAIL $case_name: production API did not start with narrow LOGIN" >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+  if [[ "$ready" != 1 ]]; then
+    echo "FAIL $case_name: loopback API did not become healthy" >&2
     exit 1
   fi
-  sleep 0.1
-done
-if [[ "$READY" != 1 ]]; then
-  echo "production management-api did not reach loopback healthz with verified TLS" >&2
-  exit 1
-fi
-# Prove the connection really negotiated TLS from PostgreSQL server state.
-SSL_CONNECTIONS="$(docker exec "$PG_CONTAINER" psql -X -tA -U gpu -d gpu_management_tls_ci \
-  -c "SELECT count(*) FROM pg_stat_activity a JOIN pg_stat_ssl s USING(pid) WHERE a.usename='management_tls_login' AND s.ssl IS TRUE")"
-if [[ ! "$SSL_CONNECTIONS" =~ ^[0-9]+$ ]] || (( SSL_CONNECTIONS < 1 )); then
-  echo "production management-api had no real TLS-authenticated DB session" >&2
-  exit 1
-fi
-kill "$API_PID" >/dev/null 2>&1 || true
-wait "$API_PID" >/dev/null 2>&1 || true
-API_PID=""
-echo "PASS real verified-TLS startup, least-privilege LOGIN, server pg_stat_ssl"
+  local ssl_connections
+  ssl_connections="$(docker exec "$PG_CONTAINER" psql -X -tA -U gpu -d gpu_management_tls_ci \
+    -c "SELECT count(*) FROM pg_stat_activity a JOIN pg_stat_ssl s USING(pid) WHERE a.usename='management_tls_login' AND s.ssl IS TRUE")"
+  if [[ ! "$ssl_connections" =~ ^[0-9]+$ ]] || (( ssl_connections < 1 )); then
+    echo "FAIL $case_name: management API had no real TLS DB session" >&2
+    exit 1
+  fi
+  kill "$API_PID" >/dev/null 2>&1 || true
+  wait "$API_PID" >/dev/null 2>&1 || true
+  API_PID=""
+  echo "PASS $case_name"
+}
+expect_verified_login "real verified-TLS startup, least-privilege LOGIN, server pg_stat_ssl" "$VERIFIED_DSN"
 
 # A negative control must fail at the EXPECTED boundary, never bind the API
 # and never return a success exit code. Do not print connection error logs
@@ -186,3 +192,61 @@ expect_failure "missing CA rejected before DB" "management postgres transport re
 expect_failure "DBA login rejected even with trusted TLS" "management postgres runtime authority rejected" \
   "postgres://gpu:ci-only-admin@localhost:55433/gpu_management_tls_ci?sslmode=verify-full&sslrootcert=$TMP_DIR/ca.pem"
 echo "PASS all management-api real PostgreSQL TLS startup security controls"
+
+# Prove the documented planned RESTART cutover, not zero-downtime hot reload:
+# CA A -> CA B -> CA A. Postgres data/DB roles remain in the SAME persistent
+# disposable container; switching the cert must not bypass the narrow LOGIN.
+# Stop the DB before modifying any server private-key or certificate bytes.
+cp "$TMP_DIR/server.crt" "$TMP_DIR/server-initial.crt"
+sudo cp "$TMP_DIR/server.key" "$TMP_DIR/server-initial.key"
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+  -keyout "$TMP_DIR/ca-rotated.key" -out "$TMP_DIR/ca-rotated.pem" \
+  -subj "/CN=management-postgres-rotated-root" \
+  -addext "basicConstraints=critical,CA:TRUE" >/dev/null 2>&1
+openssl req -new -newkey rsa:2048 -sha256 -nodes \
+  -keyout "$TMP_DIR/server-rotated.key" -out "$TMP_DIR/server-rotated.csr" \
+  -subj "/CN=localhost" >/dev/null 2>&1
+openssl x509 -req -days 1 -sha256 -in "$TMP_DIR/server-rotated.csr" \
+  -CA "$TMP_DIR/ca-rotated.pem" -CAkey "$TMP_DIR/ca-rotated.key" \
+  -CAcreateserial -out "$TMP_DIR/server-rotated.crt" \
+  -extfile "$TMP_DIR/server.ext" >/dev/null 2>&1
+
+# Writable original bind-mount INODES are retained across stop/start.
+# tee (not mv) preserves PostgreSQL's owner-only key mode and bind mapping.
+restart_with_server_cert() {
+  local replacement_cert="$1" replacement_key="$2"
+  docker stop "$PG_CONTAINER" >/dev/null
+  cat "$replacement_cert" > "$TMP_DIR/server.crt"
+  sudo tee "$TMP_DIR/server.key" < "$replacement_key" >/dev/null
+  docker start "$PG_CONTAINER" >/dev/null
+  local ready=0
+  for attempt in $(seq 1 90); do
+    if [[ "$(docker exec -e PGPASSWORD=ci-only-admin "$PG_CONTAINER" \
+        psql -X -qAt -h 127.0.0.1 -U gpu -d gpu_management_tls_ci \
+        -c 'SELECT 1' 2>/dev/null || true)" == 1 ]]; then
+      ready=1
+      break
+    fi
+    if ! docker inspect -f '{{.State.Running}}' "$PG_CONTAINER" 2>/dev/null | grep -qx true; then
+      echo "FAIL restarted PostgreSQL TLS fixture stopped" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+  if [[ "$ready" != 1 ]]; then
+    echo "FAIL target database unavailable after TLS certificate replacement" >&2
+    exit 1
+  fi
+}
+ROTATED_DSN="$DSN_PREFIX?sslmode=verify-full&sslrootcert=$TMP_DIR/ca-rotated.pem"
+restart_with_server_cert "$TMP_DIR/server-rotated.crt" "$TMP_DIR/server-rotated.key"
+expect_failure "stale CA A rejected after CA B rotation" "management postgres unavailable" "$VERIFIED_DSN"
+expect_verified_login "new CA B accepted after server certificate rotation" "$ROTATED_DSN"
+
+# Recovery is also strict: after rollback, the no-longer-trusted CA B must
+# fail and the original verified CA A must work with the unchanged LOGIN.
+restart_with_server_cert "$TMP_DIR/server-initial.crt" "$TMP_DIR/server-initial.key"
+expect_failure "stale CA B rejected after CA A rollback" "management postgres unavailable" "$ROTATED_DSN"
+expect_verified_login "original CA A works after certificate rollback" "$VERIFIED_DSN"
+echo "PASS PostgreSQL TLS CA rotation and rollback acceptance (restart cutover; not zero downtime)"
+
