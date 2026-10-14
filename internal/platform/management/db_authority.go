@@ -28,6 +28,17 @@ func VerifyRuntimeDBPrivileges(ctx context.Context, db *sql.DB) error {
 	if err := verifyRuntimeDBLoginIdentity(ctx, conn); err != nil {
 		return err
 	}
+	// The authorization row locks are taken inside this fixed-query,
+	// DBA-owned SECURITY DEFINER function. PostgreSQL FOR SHARE itself
+	// requires UPDATE; runtime must have EXECUTE, never RBAC-table UPDATE.
+	var canLockAuthorization bool
+	err = conn.QueryRowContext(ctx, `
+SELECT pg_catalog.has_function_privilege(current_user,
+ 'public.management_locked_project_role(text,text,text,text)'::regprocedure, 'EXECUTE')
+`).Scan(&canLockAuthorization)
+	if err != nil || !canLockAuthorization {
+		return errors.New("management DB missing scoped authorization row-lock function access")
+	}
 
 	// Check the actual login, including all effective PUBLIC, inherited and
 	// column-level grants. A GRANT template alone cannot prove these.
