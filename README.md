@@ -61,6 +61,15 @@ The current CPU-only acceptance environment uses Run:ai Fake GPU Operator with a
 - Shared cluster-scoped resources such as Kueue ResourceFlavor are not garbage-collected by a single ComputePool without explicit ownership/reference tracking.
 - DRA, HAMi, MIG, multi-provider expansion, and advanced placement are intentionally deferred until the current Golden Path is frozen.
 
+## Security foundation (proposal; not deployed)
+
+The canonical Go API is **alpha and not yet suitable for multi-tenant production exposure**: authN/authZ of user and Agent routes, and CNPG/OpenBao HA/backup are not implemented. The existing PostgreSQL lifecycle/fencing contracts remain authoritative.
+
+- [CNPG + OpenBao security/persistence architecture](docs/architecture/security-persistence-foundation.md) — trust boundaries, certificate-authenticated PostgreSQL, bootstrap, recovery and Secret consumption.
+- [Negative-first acceptance matrix](docs/SECURITY_FOUNDATION_ACCEPTANCE.md) — S0 authorization gates before S1 database migration and S2 secret-store POC. **No security gate is claimed green.**
+
+Local Docker Compose, in-memory fallback, and development credentials are **not** production deployment recipes.
+
 ## Development
 
 Requires Go 1.24+, Docker, kind, kubectl, and Helm for the full Golden Path.
