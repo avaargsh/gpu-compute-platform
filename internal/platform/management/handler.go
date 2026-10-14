@@ -225,9 +225,11 @@ func (s *Service) role(ctx context.Context, q interface {
 JOIN project_bindings AS b ON b.project_id=g.project_id AND b.cluster_id=$4
 WHERE g.issuer=$1 AND g.subject=$2 AND g.project_id=$3`
 	if lock {
-		// Lock both the project role and its cluster binding through COMMIT.
-		// This prevents concurrent rebind/revoke from crossing the mutation.
-		query += " FOR SHARE OF g, b"
+		// PostgreSQL requires UPDATE privilege for SELECT ... FOR SHARE.
+		// Keep the API LOGIN's grants read-only on authorization tables:
+		// the DBA-owned, fixed-query SECURITY DEFINER function alone takes
+		// shared row locks on the verified grant and project binding.
+		query = "SELECT role FROM public.management_locked_project_role($1,$2,$3,$4) AS locked(role)"
 	}
 	var role string
 	err := q.QueryRowContext(ctx, query, id.Issuer, id.Subject, project, cluster).Scan(&role)
