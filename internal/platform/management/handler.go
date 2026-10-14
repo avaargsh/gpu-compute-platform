@@ -545,7 +545,11 @@ var errBinding = errors.New("invalid resource binding")
 
 func (s *Service) buildSpec(ctx context.Context, tx *sql.Tx, cluster, project, kind, resourceID string, in mutationInput) ([]byte, error) {
 	var projectCluster, namespace string
-	err := tx.QueryRowContext(ctx, `SELECT cluster_id,namespace FROM project_bindings WHERE project_id=$1 FOR SHARE`, project).Scan(&projectCluster, &namespace)
+	// mutate() already called the DBA-owned locked_project_role function
+	// in this SAME serializable transaction, holding FOR SHARE on this
+	// project's binding row through COMMIT. This ordinary SELECT avoids
+	// granting UPDATE authority to the Management API login.
+	err := tx.QueryRowContext(ctx, `SELECT cluster_id,namespace FROM project_bindings WHERE project_id=$1`, project).Scan(&projectCluster, &namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -574,7 +578,7 @@ func (s *Service) buildSpec(ctx context.Context, tx *sql.Tx, cluster, project, k
 			}
 		}
 		var poolCluster, provider string
-		e := tx.QueryRowContext(ctx, `SELECT cluster_id,provider FROM cluster_bindings WHERE pool_id=$1 FOR SHARE`, resourceID).Scan(&poolCluster, &provider)
+		e := tx.QueryRowContext(ctx, `SELECT cluster_id,provider FROM public.management_locked_pool_binding($1)`, resourceID).Scan(&poolCluster, &provider)
 		if e != nil {
 			return nil, e
 		}
@@ -591,7 +595,7 @@ func (s *Service) buildSpec(ctx context.Context, tx *sql.Tx, cluster, project, k
 			return nil, errInvalidSpec
 		}
 		var poolCluster, provider string
-		e := tx.QueryRowContext(ctx, `SELECT cluster_id,provider FROM cluster_bindings WHERE pool_id=$1 FOR SHARE`, in.PoolID).Scan(&poolCluster, &provider)
+		e := tx.QueryRowContext(ctx, `SELECT cluster_id,provider FROM public.management_locked_pool_binding($1)`, in.PoolID).Scan(&poolCluster, &provider)
 		if e != nil {
 			return nil, e
 		}
