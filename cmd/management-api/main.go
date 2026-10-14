@@ -62,7 +62,7 @@ func main() {
 	}
 	// Only the explicitly configured loopback browser Origin may issue
 	// authenticated mutations through the local Vite proxy.
-	handler, err := management.NewHandlerWithBrowserOrigin(db, auth, os.Getenv("MANAGEMENT_BROWSER_ORIGIN"))
+	handler, err := management.NewGuardedHandlerWithBrowserOrigin(db, auth, os.Getenv("MANAGEMENT_BROWSER_ORIGIN"))
 	if err != nil {
 		log.Fatal(err)
 	}
