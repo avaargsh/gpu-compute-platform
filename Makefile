@@ -9,7 +9,11 @@ fmt-check:
 	bash scripts/go-format.sh --check
 
 test:
-	go test ./...
+	# PostgreSQL integration packages share TEST_POSTGRES_DSN. The store
+	# fixture TRUNCATEs Desired tables; cross-package test parallelism can
+	# destroy another package's live management acceptance rows.
+	# Serialize packages until the fixture is split into per-package DBs.
+	go test -p 1 ./...
 
 vet:
 	go vet ./...
