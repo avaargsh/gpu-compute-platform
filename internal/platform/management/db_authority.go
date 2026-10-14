@@ -125,5 +125,29 @@ FROM pg_catalog.pg_roles AS r WHERE r.rolname = current_user
 		canCreateSchema || canCreateDatabase {
 		return errors.New("management DB login has administrative or DDL authority")
 	}
+	// PostgreSQL 16+ role membership has separate SET and INHERIT options.
+	// Checking only current_user privileges misses a NOINHERIT group role:
+	// this narrow LOGIN may still SET ROLE to an audit-writer/DBA identity.
+	// Allow the intended inherited least-privilege group, but fail closed
+	// if any SET-able role is not inherited, or carries administrative
+	// attributes that cannot be inferred from the login's table grants.
+	var unsafeRoleCount int
+	err = q.QueryRowContext(ctx, `
+SELECT count(*)
+FROM pg_catalog.pg_roles AS r
+WHERE r.rolname <> session_user
+  AND pg_catalog.pg_has_role(session_user, r.oid, 'SET')
+  AND (
+    NOT pg_catalog.pg_has_role(session_user, r.oid, 'USAGE')
+    OR r.rolsuper OR r.rolcreaterole OR r.rolcreatedb
+    OR r.rolbypassrls OR r.rolreplication
+  )
+`).Scan(&unsafeRoleCount)
+	if err != nil {
+		return fmt.Errorf("management DB SET ROLE membership probe failed: %w", err)
+	}
+	if unsafeRoleCount != 0 {
+		return errors.New("management DB login can switch to an untrusted or administrative role")
+	}
 	return nil
 }
