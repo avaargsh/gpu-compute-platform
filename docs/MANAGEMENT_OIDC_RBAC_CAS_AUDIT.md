@@ -72,6 +72,7 @@ runtime permissions:
 | --- | --- |
 | `management_project_grants`, `project_bindings`, `cluster_bindings`, `deletion_tombstones` | SELECT |
 | `management_locked_project_role(text,text,text,text)` | EXECUTE only; fixed-query DBA-owned `SECURITY DEFINER`, locks current grant + project binding |
+| `management_locked_pool_binding(text)` | EXECUTE only; fixed-query DBA-owned `SECURITY DEFINER`, locks the current pool-to-cluster/provider binding |
 | `desired_resources` | SELECT, INSERT, UPDATE (Generation CAS and deletion finalizer) |
 | `management_operation_audit` | SELECT, INSERT (append-only; no UPDATE/DELETE/TRUNCATE) |
 | Cluster Agent records, observations, placement migrations, leases and other tables | No privileges |
@@ -98,6 +99,18 @@ the grant and project-binding rows; it cannot mutate either table. Default
 granted EXECUTE through `runtime_role.sql`. Missing function/grant causes
 startup **and per-mutation** permission verification to fail closed. No
 runtime UPDATE permission on the grant/binding tables is added.
+
+The same PostgreSQL privilege requirement applies to the pool binding in
+ComputePool and Workload creation. The **existing transaction-scoped**
+`management_locked_project_role` function already holds the project's
+binding row through COMMIT, so `buildSpec` can use a plain project-binding
+SELECT. For the independently mutable pool binding, the second audited
+function `management_locked_pool_binding(text)` performs a fixed-query
+`FOR SHARE` under DBA ownership. Both functions are schema-qualified and
+deny PUBLIC EXECUTE; runtime login receives only EXECUTE, not table UPDATE.
+Actual narrow-LOGIN HTTP acceptance now proves a real ComputePool create,
+idempotent replay, denied privileged-DB drift with zero Desired/audit change,
+then an allowed CAS update after DBA privilege revocation.
 
 Deployment ordering: migrate trusted schema/function as DBA first, then
 apply `runtime_role.sql` and connect the dedicated limited LOGIN. A
