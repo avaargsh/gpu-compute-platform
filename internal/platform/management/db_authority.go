@@ -25,28 +25,8 @@ func VerifyRuntimeDBPrivileges(ctx context.Context, db *sql.DB) error {
 	}
 	defer conn.Close()
 
-	var sessionUser, effectiveUser, schema string
-	var superuser, createRole, createDB, bypassRLS, replication bool
-	var canCreateSchema, canCreateDatabase bool
-	err = conn.QueryRowContext(ctx, `
-SELECT session_user, current_user, current_schema(),
-       r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolbypassrls,
-       r.rolreplication,
-       has_schema_privilege(current_user, 'public', 'CREATE'),
-       has_database_privilege(current_user, current_database(), 'CREATE')
-FROM pg_catalog.pg_roles AS r WHERE r.rolname = current_user
-`).Scan(&sessionUser, &effectiveUser, &schema,
-		&superuser, &createRole, &createDB, &bypassRLS, &replication,
-		&canCreateSchema, &canCreateDatabase)
-	if err != nil {
-		return fmt.Errorf("management DB login authority probe failed: %w", err)
-	}
-	if sessionUser != effectiveUser || schema != "public" {
-		return errors.New("management DB must use its direct login in the public schema")
-	}
-	if superuser || createRole || createDB || bypassRLS || replication ||
-		canCreateSchema || canCreateDatabase {
-		return errors.New("management DB login has administrative or DDL authority")
+	if err := verifyRuntimeDBLoginIdentity(ctx, conn); err != nil {
+		return err
 	}
 
 	// Check the actual login, including all effective PUBLIC, inherited and
@@ -114,3 +94,36 @@ SELECT pg_catalog.has_any_column_privilege(current_user, $1::regclass, $2)
 	return nil
 }
 
+
+// runtimeLoginQuerier is satisfied by both a pinned live connection and a
+// transaction; the latter is used to reject privileged SET ROLE sessions.
+type runtimeLoginQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func verifyRuntimeDBLoginIdentity(ctx context.Context, q runtimeLoginQuerier) error {
+	var sessionUser, effectiveUser, schema string
+	var superuser, createRole, createDB, bypassRLS, replication bool
+	var canCreateSchema, canCreateDatabase bool
+	err := q.QueryRowContext(ctx, `
+SELECT session_user, current_user, current_schema(),
+       r.rolsuper, r.rolcreaterole, r.rolcreatedb, r.rolbypassrls,
+       r.rolreplication,
+       has_schema_privilege(current_user, 'public', 'CREATE'),
+       has_database_privilege(current_user, current_database(), 'CREATE')
+FROM pg_catalog.pg_roles AS r WHERE r.rolname = current_user
+`).Scan(&sessionUser, &effectiveUser, &schema,
+		&superuser, &createRole, &createDB, &bypassRLS, &replication,
+		&canCreateSchema, &canCreateDatabase)
+	if err != nil {
+		return fmt.Errorf("management DB login authority probe failed: %w", err)
+	}
+	if sessionUser != effectiveUser || schema != "public" {
+		return errors.New("management DB must use its direct login in the public schema")
+	}
+	if superuser || createRole || createDB || bypassRLS || replication ||
+		canCreateSchema || canCreateDatabase {
+		return errors.New("management DB login has administrative or DDL authority")
+	}
+	return nil
+}
