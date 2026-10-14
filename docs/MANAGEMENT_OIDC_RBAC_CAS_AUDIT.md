@@ -52,6 +52,45 @@ token can never self-assert membership or change role. Use append-only DB
 permissions for `management_operation_audit` (SELECT/INSERT, no
 UPDATE/DELETE/TRUNCATE), separate DBA role for grants and schema.
 
+### Reproducible PostgreSQL least-privilege admission
+
+After applying both schemas as DBA, provision a dedicated NOLOGIN group
+role and a **separate credential-managed LOGIN** principal; do not embed
+passwords or a superuser DSN in the repository. A trusted DBA may apply the
+checked-in grant template:
+
+```sql
+CREATE ROLE gpu_management_runtime NOLOGIN;
+-- Apply internal/platform/management/runtime_role.sql as a trusted DBA.
+-- Grant that role only to the separately provisioned Management API login.
+```
+
+`internal/platform/management/runtime_role.sql` grants only the following
+runtime permissions:
+
+| Object | Application role privileges |
+| --- | --- |
+| `management_project_grants`, `project_bindings`, `cluster_bindings`, `deletion_tombstones` | SELECT |
+| `desired_resources` | SELECT, INSERT, UPDATE (Generation CAS and deletion finalizer) |
+| `management_operation_audit` | SELECT, INSERT (append-only; no UPDATE/DELETE/TRUNCATE) |
+| Cluster Agent records, observations, placement migrations, leases and other tables | No privileges |
+
+Do not grant the Management API login table ownership, superuser,
+`BYPASSRLS`, role membership inherited from the schema owner, or any
+additional `PUBLIC`/group grants that expand these capabilities. DBAs must
+verify **effective** grants of the actual LOGIN role; direct table grants
+are not a sufficient check if that account inherits another broad role.
+PostgreSQL role isolation constrains the Management service's SQL authority;
+issuer/project RBAC remains enforced in the application and this template
+is **not** a row-level security policy.
+
+The integration test `TestManagementRuntimeRoleLeastPrivilegeWithPostgres`
+creates a disposable NOLOGIN role in `TEST_POSTGRES_DSN`, executes the
+exact grant template and tests permitted Desired/audit SQL alongside denied
+audit updates/deletes, grant/binding edits, other service tables and schema
+creation. The test transaction rolls back its data probes and drops the
+temporary role. Never point `TEST_POSTGRES_DSN` at production.
+
 Mandatory configuration:
 
 ```bash
