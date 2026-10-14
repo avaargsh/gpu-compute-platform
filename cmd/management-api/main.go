@@ -21,6 +21,11 @@ func main() {
 	if dsn == "" {
 		log.Fatal("MANAGEMENT_DATABASE_URL is required; memory writes forbidden")
 	}
+	// Production must authenticate the PostgreSQL server. A valid database
+	// role alone does not secure credentials against a network MITM.
+	if err := validateManagementDatabaseTransport(dsn); err != nil {
+		log.Fatal("management postgres transport rejected: ", err)
+	}
 	addr := os.Getenv("MANAGEMENT_LISTEN_ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:8081"
