@@ -230,6 +230,34 @@ loopback-only `cmd/management-e2e-fixture` for disposable CI/browser
 tests. Production still requires TLS reverse proxy and Agent machine
 identity review; database TLS alone does **not** enable public ingress.
 
+#### Production-binary real PostgreSQL TLS CI
+
+The `postgres-tls-interop` Actions job runs
+`scripts/e2e/management-postgres-real-tls.sh` against a disposable
+**PostgreSQL 17 container with SSL actually enabled**, with an ephemeral
+CI-only CA, a server certificate signed for DNS `localhost` (but not
+IP `127.0.0.1`), an independent untrusted CA and a separate
+least-privileged LOGIN with the exact `runtime_role.sql` grants.
+The script runs the **real `cmd/management-api` binary**, never the
+unguarded browser fixture, and asserts both `/healthz = 204` on the
+loopback listener **and** a PostgreSQL `pg_stat_ssl.ssl=true` connection
+for that runtime account. Negative launches must exit nonzero **without
+ever opening the HTTP port**, with expected failure boundaries:
+
+- A valid but untrusted CA or a DNS SAN mismatch must fail the
+  PostgreSQL connection / certificate verification step.
+- `sslmode=prefer` or a missing `sslrootcert` must fail transport
+  admission *before* any network attempt.
+- Valid TLS with a DBA account must still fail independent SQL
+  privilege admission (TLS is not authorization).
+
+All CA keys/passwords are ephemeral, no remote production DB or
+certificates are used, and the script avoids printing raw DB driver
+errors or credentials. This is evidence of actual TLS behavior on
+CI-local PostgreSQL, not proof of a specific organization's
+certificate rollout, renewal procedure, K8s secret mount, network
+policy or production ingress isolation.
+
 ### Browser Origin gate
 
 The management API denies **all Origin-bearing write requests by default**.
