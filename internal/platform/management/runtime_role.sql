@@ -44,4 +44,13 @@ TO gpu_management_runtime;
 GRANT SELECT, INSERT ON TABLE public.management_operation_audit
 TO gpu_management_runtime;
 
+-- The only elevated operation is an owned, fixed-query authorization read
+-- with a row lock. Do not grant UPDATE on either authorization table.
+REVOKE ALL ON FUNCTION public.management_locked_project_role(
+  text, text, text, text
+) FROM gpu_management_runtime;
+GRANT EXECUTE ON FUNCTION public.management_locked_project_role(
+  text, text, text, text
+) TO gpu_management_runtime;
+
 COMMIT;
