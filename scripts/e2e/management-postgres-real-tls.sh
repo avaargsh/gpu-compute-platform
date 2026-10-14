@@ -217,7 +217,10 @@ restart_with_server_cert() {
   local replacement_cert="$1" replacement_key="$2"
   docker stop "$PG_CONTAINER" >/dev/null
   cat "$replacement_cert" > "$TMP_DIR/server.crt"
-  sudo tee "$TMP_DIR/server.key" < "$replacement_key" >/dev/null
+  # Both the saved original key and live key may be root/PG-owned 0600.
+  # Open source AND destination within the privileged process. A host
+  # shell redirection would fail reading the protected rollback backup.
+  sudo sh -c 'cat "$1" > "$2"' sh "$replacement_key" "$TMP_DIR/server.key"
   docker start "$PG_CONTAINER" >/dev/null
   local ready=0
   for attempt in $(seq 1 90); do
