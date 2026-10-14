@@ -91,6 +91,32 @@ audit updates/deletes, grant/binding edits, other service tables and schema
 creation. The test transaction rolls back its data probes and drops the
 temporary role. Never point `TEST_POSTGRES_DSN` at production.
 
+### Startup fail-closed runtime-LOGIN authority probe
+
+Before listening on loopback, `cmd/management-api` now checks the **actual
+`MANAGEMENT_DATABASE_URL` login** with
+`management.VerifyRuntimeDBPrivileges`. Startup fails if the login is a
+superuser, CREATEROLE/CREATEDB/REPLICATION/BYPASSRLS role, can create in the
+`public` schema or database, uses a switched SQL `SET ROLE` session, or
+lacks required read/Desired/audit rights. It also rejects effective
+`PUBLIC`, inherited or column-level grants that permit grant-table writes,
+audit rewrites, direct Desired DELETE, or unrelated control-plane table access.
+
+The real-login test `TestManagementActualLoginAuthorityAdmission` provisions
+a temporary PostgreSQL **LOGIN** and inherited limited group role, connects
+with those credentials and proves admission; then grants excess privileges
+and verifies admission fails, revoking each grant to prove recovery. A DBA
+connection and a DBA connection with `SET LOCAL ROLE` are negative controls.
+The test skips only when `TEST_POSTGRES_DSN` is absent or its fixture cannot
+create disposable roles. Do not use it with production DB credentials.
+
+This startup probe is a **snapshot**, not continuous privilege monitoring,
+and must not be treated as proof of revocation of an already running database
+connection after DBA changes. Separate continuous audit, production login
+provisioning, network isolation, TLS ingress, Agent mTLS and production
+negative E2E verification remain prerequisites for release.
+
+
 Mandatory configuration:
 
 ```bash
