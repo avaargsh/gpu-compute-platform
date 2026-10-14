@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -144,6 +145,101 @@ func TestManagementActualLoginAuthorityAdmission(t *testing.T) {
 	}
 
 	accept("legitimate inherited narrow group grants")
+	// Positive product golden path: the REAL narrow LOGIN must complete
+	// a ComputePool create/update and audit through the guarded HTTP handler.
+	// A fail-closed negative-only test can pass even if valid users get 503.
+	cluster, project, pool := prefix+"_cluster", prefix+"_project", prefix+"_pool"
+	defer func() {
+		for _, item := range []struct {
+			query string
+			arg   string
+		}{
+			{"DELETE FROM public.management_operation_audit WHERE project_id=$1", project},
+			{"DELETE FROM public.desired_resources WHERE cluster_id=$1", cluster},
+			{"DELETE FROM public.management_project_grants WHERE project_id=$1", project},
+			{"DELETE FROM public.cluster_bindings WHERE cluster_id=$1", cluster},
+			{"DELETE FROM public.project_bindings WHERE project_id=$1", project},
+		} {
+			if _, err := admin.ExecContext(context.Background(), item.query, item.arg); err != nil {
+				t.Errorf("clean up narrow-login E2E: %v", err)
+			}
+		}
+	}()
+	for _, item := range []struct {
+		query string
+		args  []any
+	}{
+		{"INSERT INTO public.project_bindings(project_id,cluster_id,namespace) VALUES ($1,$2,$3)", []any{project, cluster, project}},
+		{"INSERT INTO public.cluster_bindings(pool_id,cluster_id,provider) VALUES ($1,$2,'kueue')", []any{pool, cluster}},
+		{"INSERT INTO public.management_project_grants(issuer,subject,project_id,role) VALUES ('https://issuer.example','alice',$1,'operator')", []any{project}},
+	} {
+		if _, err := admin.ExecContext(ctx, item.query, item.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	idpAuth, idpServer := oidcFixture(t)
+	defer idpServer.Close()
+	handler, err := NewGuardedHandlerWithBrowserOrigin(runtimeDB, idpAuth, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := "/api/v1/management/clusters/" + cluster + "/projects/" + project + "/resources/ComputePool/" + pool
+	put := func(body, key string) int {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, endpoint, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer good-access-token")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", key)
+		resp := httptest.NewRecorder()
+		handler.ServeHTTP(resp, req)
+		return resp.Code
+	}
+	poolSpec := func(expected, quota int) string {
+		return fmt.Sprintf(`{"expectedGeneration":%d,"spec":{"accelerators":[{"class":"h100","quota":%d}],"acceleratorBindings":[{"class":"h100","resourceName":"nvidia.com/gpu","flavor":"h100"}],"scheduling":{"mode":"kueue"}}}`, expected, quota)
+	}
+	createID, updateID := "11111111111111111111111111111111", "22222222222222222222222222222222"
+	if got := put(poolSpec(0, 2), createID); got != http.StatusNoContent {
+		t.Fatalf("least-privilege production handler create returned %d, want 204", got)
+	}
+	if got := put(poolSpec(0, 2), createID); got != http.StatusNoContent {
+		t.Fatalf("least-privilege idempotent create replay returned %d, want 204", got)
+	}
+	// A new DBA UPDATE grant should immediately block both a new mutation
+	// and its requested receipt; denied writes cannot reach the audit table.
+	if _, err := admin.ExecContext(ctx, "GRANT UPDATE ON public.management_operation_audit TO "+login); err != nil {
+		t.Fatal(err)
+	}
+	if got := put(poolSpec(1, 3), updateID); got != http.StatusServiceUnavailable {
+		t.Fatalf("runtime authority drift mutation returned %d, want 503", got)
+	}
+	var generation int64
+	var auditCount int
+	readCommitted := func() {
+		t.Helper()
+		if err := admin.QueryRowContext(ctx,
+			"SELECT generation FROM public.desired_resources WHERE cluster_id=$1 AND kind='ComputePool' AND resource_id=$2",
+			cluster, pool).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		if err := admin.QueryRowContext(ctx,
+			"SELECT count(*) FROM public.management_operation_audit WHERE project_id=$1", project).Scan(&auditCount); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readCommitted()
+	if generation != 1 || auditCount != 1 {
+		t.Fatalf("denied drift mutation changed Desired/audit: gen=%d audit=%d", generation, auditCount)
+	}
+	if _, err := admin.ExecContext(ctx, "REVOKE UPDATE ON public.management_operation_audit FROM "+login); err != nil {
+		t.Fatal(err)
+	}
+	if got := put(poolSpec(1, 3), updateID); got != http.StatusNoContent {
+		t.Fatalf("revoked authority drift did not recover valid update: %d", got)
+	}
+	readCommitted()
+	if generation != 2 || auditCount != 2 {
+		t.Fatalf("legitimate update missing/duplicated: gen=%d audit=%d", generation, auditCount)
+	}
 	// Revoke the exact DBA-owned lock function while retaining read-only
 	// table grants. A production write must fail BEFORE any transaction.
 	const lockFunction = "public.management_locked_project_role(text,text,text,text)"

@@ -28,16 +28,22 @@ func VerifyRuntimeDBPrivileges(ctx context.Context, db *sql.DB) error {
 	if err := verifyRuntimeDBLoginIdentity(ctx, conn); err != nil {
 		return err
 	}
-	// The authorization row locks are taken inside this fixed-query,
-	// DBA-owned SECURITY DEFINER function. PostgreSQL FOR SHARE itself
-	// requires UPDATE; runtime must have EXECUTE, never RBAC-table UPDATE.
-	var canLockAuthorization bool
-	err = conn.QueryRowContext(ctx, `
+	// PostgreSQL FOR SHARE requires UPDATE authority, which the runtime
+	// login must NOT possess on either authorization or pool-binding tables.
+	// Verify EXECUTE on both narrowly scoped DBA-owned SECURITY DEFINER
+	// lock functions as part of startup AND per-write drift admission.
+	for _, signature := range []string{
+		"public.management_locked_project_role(text,text,text,text)",
+		"public.management_locked_pool_binding(text)",
+	} {
+		var allowed bool
+		err = conn.QueryRowContext(ctx, `
 SELECT pg_catalog.has_function_privilege(current_user,
- 'public.management_locked_project_role(text,text,text,text)'::regprocedure, 'EXECUTE')
-`).Scan(&canLockAuthorization)
-	if err != nil || !canLockAuthorization {
-		return errors.New("management DB missing scoped authorization row-lock function access")
+ $1::regprocedure, 'EXECUTE')
+`, signature).Scan(&allowed)
+		if err != nil || !allowed {
+			return fmt.Errorf("management DB missing scoped row-lock function access: %s", signature)
+		}
 	}
 
 	// Check the actual login, including all effective PUBLIC, inherited and
