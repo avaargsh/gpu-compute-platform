@@ -71,6 +71,7 @@ runtime permissions:
 | Object | Application role privileges |
 | --- | --- |
 | `management_project_grants`, `project_bindings`, `cluster_bindings`, `deletion_tombstones` | SELECT |
+| `management_locked_project_role(text,text,text,text)` | EXECUTE only; fixed-query DBA-owned `SECURITY DEFINER`, locks current grant + project binding |
 | `desired_resources` | SELECT, INSERT, UPDATE (Generation CAS and deletion finalizer) |
 | `management_operation_audit` | SELECT, INSERT (append-only; no UPDATE/DELETE/TRUNCATE) |
 | Cluster Agent records, observations, placement migrations, leases and other tables | No privileges |
@@ -83,6 +84,28 @@ are not a sufficient check if that account inherits another broad role.
 PostgreSQL role isolation constrains the Management service's SQL authority;
 issuer/project RBAC remains enforced in the application and this template
 is **not** a row-level security policy.
+
+**Row-lock privilege trap:** PostgreSQL requires UPDATE privilege on at
+least one column for `SELECT ... FOR SHARE`. Granting this directly to the
+Management LOGIN would permit edits to project RBAC/bindings and violate the
+read-only grant contract. The migration now creates
+`public.management_locked_project_role(text,text,text,text)` as a fixed SQL
+`SECURITY DEFINER` function, owned by the trusted DBA/schema owner, with
+`search_path = pg_catalog` and fully qualified table names. Its sole action
+is to return the current matching role while taking shared row locks on both
+the grant and project-binding rows; it cannot mutate either table. Default
+`PUBLIC EXECUTE` is explicitly revoked. Only the narrow runtime role is
+granted EXECUTE through `runtime_role.sql`. Missing function/grant causes
+startup **and per-mutation** permission verification to fail closed. No
+runtime UPDATE permission on the grant/binding tables is added.
+
+Deployment ordering: migrate trusted schema/function as DBA first, then
+apply `runtime_role.sql` and connect the dedicated limited LOGIN. A
+schema-owner change or an externally modified SECURITY DEFINER body must
+be treated as a new privileged-code audit. The tests assert direct
+`FOR SHARE` is forbidden for the runtime role while a scoped locked read
+through the function succeeds, and that revoking function EXECUTE blocks
+subsequent mutations.
 
 The integration test `TestManagementRuntimeRoleLeastPrivilegeWithPostgres`
 creates a disposable NOLOGIN role in `TEST_POSTGRES_DSN`, executes the
