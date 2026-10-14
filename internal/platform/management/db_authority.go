@@ -32,12 +32,12 @@ func VerifyRuntimeDBPrivileges(ctx context.Context, db *sql.DB) error {
 	// Check the actual login, including all effective PUBLIC, inherited and
 	// column-level grants. A GRANT template alone cannot prove these.
 	required := map[string]string{
-		"management_project_grants":  "SELECT"
-		"project_bindings":           "SELECT"
-		"cluster_bindings":           "SELECT"
-		"deletion_tombstones":        "SELECT"
-		"desired_resources":          "SELECT, INSERT, UPDATE"
-		"management_operation_audit": "SELECT, INSERT"
+		"management_project_grants":  "SELECT",
+		"project_bindings":           "SELECT",
+		"cluster_bindings":           "SELECT",
+		"deletion_tombstones":        "SELECT",
+		"desired_resources":          "SELECT, INSERT, UPDATE",
+		"management_operation_audit": "SELECT, INSERT",
 	}
 	for table, privileges := range required {
 		// PostgreSQL comma-lists test ANY right; require EACH explicitly.
@@ -56,16 +56,16 @@ SELECT pg_catalog.has_table_privilege(current_user, $1::regclass, $2)
 	// No column-specific grant may silently bypass a forbidden table-wide
 	// grant check. has_any_column_privilege detects either form.
 	forbidden := map[string]string{
-		"management_project_grants":  "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
-		"project_bindings":           "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
-		"cluster_bindings":           "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
-		"deletion_tombstones":        "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
-		"desired_resources":          "DELETE,TRUNCATE,REFERENCES,TRIGGER"
-		"management_operation_audit": "UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
-		"resource_observations":      "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
-		"reconcile_leases":           "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
-		"placement_migrations":       "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
-		"cluster_agents":             "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER"
+		"management_project_grants":  "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"project_bindings":           "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"cluster_bindings":           "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"deletion_tombstones":        "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"desired_resources":          "DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"management_operation_audit": "UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"resource_observations":      "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"reconcile_leases":           "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"placement_migrations":       "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"cluster_agents":             "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
 	}
 	for table, privileges := range forbidden {
 		var tableGrant bool
