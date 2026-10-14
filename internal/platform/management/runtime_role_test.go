@@ -76,8 +76,24 @@ func TestManagementRuntimeRoleLeastPrivilegeWithPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
+	// DBA seeds an authorization row inside the never-committed test tx.
+	// The least-privilege runtime role cannot create or modify these rows.
+	project := fmt.Sprintf("role-test-project-%d", time.Now().UnixNano())
+	if _, err := tx.ExecContext(ctx,
+		"INSERT INTO public.project_bindings(project_id,cluster_id,namespace) VALUES($1,'role-test-cluster','role-test')", project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"INSERT INTO public.management_project_grants(issuer,subject,project_id,role) VALUES('test-issuer','test-subject',$1,'operator')", project); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := tx.ExecContext(ctx, "SET LOCAL ROLE "+role); err != nil {
 		t.Fatal(err)
+	}
+	var lockedRole string
+	if err := tx.QueryRowContext(ctx,
+		"SELECT role FROM public.management_locked_project_role('test-issuer','test-subject',$1,'role-test-cluster') AS locked(role)", project).Scan(&lockedRole); err != nil || lockedRole != "operator" {
+		t.Fatalf("DBA-owned fixed query must lock and return current role, role=%q err=%v", lockedRole, err)
 	}
 	var effective string
 	if err := tx.QueryRowContext(ctx, "SELECT current_user").Scan(&effective); err != nil || effective != role {
@@ -115,6 +131,8 @@ VALUES ($1,$2,'test-issuer','test-subject','project',$3,'ComputePool',$3,'create
 	// Every probe runs in its own savepoint so a denied operation cannot
 	// abort the transaction and hide subsequent checks.
 	for _, query := range []string{
+		// The direct row-lock requires UPDATE and remains prohibited.
+		"SELECT role FROM public.management_project_grants FOR SHARE",
 		"UPDATE public.management_operation_audit SET action='update' WHERE false",
 		"DELETE FROM public.management_operation_audit WHERE false",
 		"UPDATE public.management_project_grants SET role='admin' WHERE false",
