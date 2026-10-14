@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,16 +100,35 @@ func TestManagementActualLoginAuthorityAdmission(t *testing.T) {
 	if err := runtimeDB.PingContext(ctx); err != nil {
 		t.Fatalf("cannot connect as disposable management LOGIN: %v", err)
 	}
+	// Exercise the exact guarded mutation entry used by the production
+	// handler. No RBAC grant exists for this synthetic identity, so an
+	// authorized DB login reaches 403; unsafe DB privileges stop earlier
+	// with 503. This test never performs a Desired/audit mutation.
+	mutationStatus := func() int {
+		zero := int64(0)
+		svc := &Service{DB: runtimeDB, RequireRuntimeDBAuthority: true}
+		status, _ := svc.mutate(ctx, Identity{Issuer: "test-issuer", Subject: "no-grant"},
+			"cluster", "project", "ComputePool", "dryrun",
+			mutationInput{ExpectedGeneration: &zero}, http.MethodPut,
+			"00000000000000000000000000000000")
+		return status
+	}
 	accept := func(label string) {
 		t.Helper()
 		if err := VerifyRuntimeDBPrivileges(ctx, runtimeDB); err != nil {
 			t.Fatalf("%s: legitimate minimal-privilege LOGIN rejected: %v", label, err)
+		}
+		if status := mutationStatus(); status != http.StatusForbidden {
+			t.Fatalf("%s: safe LOGIN should reach project RBAC (403), got %d", label, status)
 		}
 	}
 	reject := func(label string) {
 		t.Helper()
 		if err := VerifyRuntimeDBPrivileges(ctx, runtimeDB); err == nil {
 			t.Fatalf("%s: overprivileged LOGIN accepted", label)
+		}
+		if status := mutationStatus(); status != http.StatusServiceUnavailable {
+			t.Fatalf("%s: guarded mutation did not stop on DB drift (503), got %d", label, status)
 		}
 	}
 	revoke := func(grant, undo, label string) {
