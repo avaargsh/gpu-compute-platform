@@ -49,8 +49,8 @@ openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
 # actual container PostgreSQL account and readable only by that account.
 PG_UID="$(docker run --rm --entrypoint id "$PG_IMAGE" -u postgres)"
 PG_GID="$(docker run --rm --entrypoint id "$PG_IMAGE" -g postgres)"
-sudo chown "$PG_UID:$PG_GID" "$TMP_DIR/server.key"
 chmod 600 "$TMP_DIR/server.key"
+sudo chown "$PG_UID:$PG_GID" "$TMP_DIR/server.key"
 chmod 644 "$TMP_DIR/server.crt" "$TMP_DIR/ca.pem" "$TMP_DIR/untrusted-ca.pem"
 
 docker run -d --rm --name "$PG_CONTAINER" \
