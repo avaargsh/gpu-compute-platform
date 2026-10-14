@@ -120,11 +120,29 @@ CREATEDB-capable group, then verify fail-closed admission and recovery
 after revocation. Intended **inherited, least-privileged** group roles
 remain supported.
 
-This startup probe is a **snapshot**, not continuous privilege monitoring,
-and must not be treated as proof of revocation of an already running database
-connection after DBA changes. Separate continuous audit, production login
-provisioning, network isolation, TLS ingress, Agent mTLS and production
-negative E2E verification remain prerequisites for release.
+The actual `cmd/management-api` now uses
+`NewGuardedHandlerWithBrowserOrigin`: **every authenticated PUT/DELETE**
+rechecks the effective PostgreSQL LOGIN rights and all SET-able roles
+before starting its Desired-state serializable transaction, even for an
+idempotent replay. Missing privileges, overprivileged `PUBLIC`/inherited
+grants, additional administrative roles or a failed probe produce HTTP
+**503** without Desired/audit writes. This is an intentional fail-closed
+security cost, not a cached or timer-based monitor. CLI and local browser
+mutations use the same gate. The separate `NewHandlerWithBrowserOrigin`
+remains for the isolated integration-test fixture; production must use
+the guarded constructor. The opt-in real PostgreSQL test changes actual
+LOGIN grants after initial admission and asserts 503 on the guarded
+mutation, 403 on the safe-but-unassigned project RBAC path, and recovery
+after revocation.
+
+The startup probe by itself is a **snapshot**; the new guarded mutation
+path detects privilege drift on each write, but does **not** prevent a
+DBA from changing privileges between the check and transaction, replace
+external database role-change auditing, enforce TLS ingress/Agent mTLS,
+or continuously recheck read-only endpoints. It adds per-mutation SQL
+round trips; operational capacity and latency remain to be measured.
+Production login provisioning, network isolation, trusted reverse proxy
+and independent security review remain release prerequisites.
 
 
 Mandatory configuration:
