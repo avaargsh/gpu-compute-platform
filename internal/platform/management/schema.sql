@@ -66,3 +66,23 @@ $management_role$;
 REVOKE ALL ON FUNCTION public.management_locked_project_role(
   text, text, text, text
 ) FROM PUBLIC;
+
+-- Both ComputePool creation and Workload placement need the CURRENT pool
+-- binding locked through their Desired/audit commit. Direct FOR SHARE on
+-- cluster_bindings requires UPDATE and would violate runtime least privilege.
+-- The DBA owns this non-dynamic, schema-qualified function and exposes
+-- EXECUTE only to the Management runtime role.
+CREATE OR REPLACE FUNCTION public.management_locked_pool_binding(
+  p_pool_id text
+) RETURNS TABLE(cluster_id text, provider text)
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $management_pool_binding$
+  SELECT b.cluster_id, b.provider
+  FROM public.cluster_bindings AS b
+  WHERE b.pool_id = p_pool_id
+  FOR SHARE OF b;
+$management_pool_binding$;
+
+REVOKE ALL ON FUNCTION public.management_locked_pool_binding(text) FROM PUBLIC;
