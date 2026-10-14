@@ -47,6 +47,12 @@ func main() {
 	if err != nil || !ready {
 		log.Fatal("management schema missing; apply migrations with DBA before startup")
 	}
+	// Do not let a DBA/superuser, a privileged inherited login, or an
+	// accidentally writable grant/audit table serve management traffic.
+	// Run this check with the very same DB credentials as the API.
+	if err := management.VerifyRuntimeDBPrivileges(ctx, db); err != nil {
+		log.Fatal("management postgres runtime authority rejected: ", err)
+	}
 	auth := management.Introspector{
 		URL:          os.Getenv("OIDC_INTROSPECTION_URL"),
 		Issuer:       os.Getenv("OIDC_ISSUER"),
