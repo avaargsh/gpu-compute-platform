@@ -124,6 +124,43 @@ func TestManagementActualLoginAuthorityAdmission(t *testing.T) {
 	}
 
 	accept("legitimate inherited narrow group grants")
+	// PostgreSQL >=16 can grant SET TRUE and INHERIT FALSE independently.
+	// This secondary role is not effective in the LOGIN's current session,
+	// but the LOGIN can still SET ROLE to it and mutate grants or audit.
+	// A check limited to has_table_privilege(current_user, ...) misses it.
+	setOnly := prefix + "_setonly"
+	if _, err := admin.ExecContext(ctx, "CREATE ROLE "+setOnly+" NOLOGIN"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = admin.ExecContext(context.Background(), "REVOKE "+setOnly+" FROM "+login)
+		_, _ = admin.ExecContext(context.Background(), "DROP OWNED BY "+setOnly)
+		if _, err := admin.ExecContext(context.Background(), "DROP ROLE IF EXISTS "+setOnly); err != nil {
+			t.Errorf("drop SET-only test role: %v", err)
+		}
+	}()
+	if _, err := admin.ExecContext(ctx, "GRANT UPDATE ON public.management_project_grants TO "+setOnly); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.ExecContext(ctx, "GRANT "+setOnly+" TO "+login+" WITH INHERIT FALSE, SET TRUE"); err != nil {
+		t.Fatal(err)
+	}
+	reject("noninherited SET-able role with RBAC mutation authority")
+	if _, err := admin.ExecContext(ctx, "REVOKE "+setOnly+" FROM "+login); err != nil {
+		t.Fatal(err)
+	}
+	accept("SET-able privilege escalation removed")
+	// Role attributes such as CREATEDB do not have to be inherited to
+	// become available after SET ROLE. Even an inherited group must not
+	// carry administrator capabilities.
+	if _, err := admin.ExecContext(ctx, "ALTER ROLE "+group+" CREATEDB"); err != nil {
+		t.Fatal(err)
+	}
+	reject("inherited SET-able group with elevated administrative attribute")
+	if _, err := admin.ExecContext(ctx, "ALTER ROLE "+group+" NOCREATEDB"); err != nil {
+		t.Fatal(err)
+	}
+	accept("administrative group attribute removed")
 	if err := VerifyRuntimeDBPrivileges(ctx, admin); err == nil {
 		t.Fatal("a connected DBA/superuser must fail the runtime admission")
 	}
