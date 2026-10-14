@@ -66,7 +66,7 @@ func TestPocRequiresExplicitCertificateVerifiedDSN(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(getEnv(map[string]string{
-				"CONTROL_PLANE_PROFILE":     "poc", "DATABASE_URL": tc.dsn,
+				"CONTROL_PLANE_PROFILE": "poc", "DATABASE_URL": tc.dsn,
 			}))
 			if err == nil {
 				t.Fatalf("%s passed validation", tc.name)
@@ -80,7 +80,7 @@ func TestPocRequiresExplicitCertificateVerifiedDSN(t *testing.T) {
 
 func TestPocAcceptsPinnedTLSTrustAndLoopback(t *testing.T) {
 	cfg, err := Load(getEnv(map[string]string{
-		"CONTROL_PLANE_PROFILE": "poc",
+		"CONTROL_PLANE_PROFILE":     "poc",
 		"DATABASE_URL":              goodDSN,
 		"CONTROL_PLANE_LISTEN_ADDR": "[::1]:8080",
 	}))
