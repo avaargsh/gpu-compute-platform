@@ -23,8 +23,8 @@ func TestProfileDefaultsToLoopbackDevelopment(t *testing.T) {
 
 func TestLocalDevelopmentFixtureRemainsCompatible(t *testing.T) {
 	cfg, err := Load(getEnv(map[string]string{
-		"CONTROL_PLANE_PROFILE": "development",
-		"DATABASE_URL": "postgres://gpu:gpu@127.0.0.1:5432/gpu_platform?sslmode=disable",
+		"CONTROL_PLANE_PROFILE":     "development",
+		"DATABASE_URL":              "postgres://gpu:gpu@127.0.0.1:5432/gpu_platform?sslmode=disable",
 		"CONTROL_PLANE_LISTEN_ADDR": "127.0.0.1:9090",
 	}))
 	if err != nil || cfg.ListenAddr != "127.0.0.1:9090" {
@@ -45,7 +45,7 @@ func TestAllProfilesRejectNonLoopbackListener(t *testing.T) {
 func TestPocRequiresExplicitCertificateVerifiedDSN(t *testing.T) {
 	tests := []struct {
 		name string
-		dsn string
+		dsn  string
 	}{
 		{"missing", ""},
 		{"plaintext", "postgres://platform_runtime@db:5432/platform?sslmode=disable"},
@@ -66,7 +66,7 @@ func TestPocRequiresExplicitCertificateVerifiedDSN(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Load(getEnv(map[string]string{
-				"CONTROL_PLANE_PROFILE": "poc", "DATABASE_URL": tc.dsn,
+				"CONTROL_PLANE_PROFILE":     "poc", "DATABASE_URL": tc.dsn,
 			}))
 			if err == nil {
 				t.Fatalf("%s passed validation", tc.name)
@@ -81,7 +81,7 @@ func TestPocRequiresExplicitCertificateVerifiedDSN(t *testing.T) {
 func TestPocAcceptsPinnedTLSTrustAndLoopback(t *testing.T) {
 	cfg, err := Load(getEnv(map[string]string{
 		"CONTROL_PLANE_PROFILE": "poc",
-		"DATABASE_URL": goodDSN,
+		"DATABASE_URL":              goodDSN,
 		"CONTROL_PLANE_LISTEN_ADDR": "[::1]:8080",
 	}))
 	if err != nil {
