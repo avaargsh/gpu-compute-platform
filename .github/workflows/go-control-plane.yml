@@ -53,7 +53,9 @@ jobs:
       - name: Vet
         run: go vet ./...
       - name: Test
-        run: go test ./...
+        # Reuse the canonical serialized package test target: PostgreSQL
+        # store fixtures TRUNCATE shared tables in TEST_POSTGRES_DSN.
+        run: make test
       - name: Release acceptance contracts
         run: make acceptance-contract
       - name: Production supply-chain policy
