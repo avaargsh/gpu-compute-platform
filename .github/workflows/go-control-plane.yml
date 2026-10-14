@@ -94,6 +94,21 @@ jobs:
         run: bash scripts/e2e/management-keycloak-https.sh
 
 
+  postgres-tls-interop:
+    name: Management / real PostgreSQL TLS server identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - name: Check real PostgreSQL TLS acceptance script syntax
+        run: bash -n scripts/e2e/management-postgres-real-tls.sh
+      - name: Verify production management binary against genuine PostgreSQL TLS
+        run: bash scripts/e2e/management-postgres-real-tls.sh
+
   portal:
     name: Go Portal / Vue contract build
     runs-on: ubuntu-latest
