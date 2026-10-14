@@ -17,8 +17,8 @@ import (
 )
 
 type Config struct {
-	Profile    string
-	ListenAddr string
+	Profile     string
+	ListenAddr  string
 	DatabaseURL string
 }
 
