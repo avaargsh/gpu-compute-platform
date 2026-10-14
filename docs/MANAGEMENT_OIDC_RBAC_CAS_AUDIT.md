@@ -110,6 +110,16 @@ connection and a DBA connection with `SET LOCAL ROLE` are negative controls.
 The test skips only when `TEST_POSTGRES_DSN` is absent or its fixture cannot
 create disposable roles. Do not use it with production DB credentials.
 
+The startup login probe also inspects PostgreSQL 16+ role membership
+`SET` versus `INHERIT` authority. A LOGIN with `SET TRUE` but
+`INHERIT FALSE` for a secondary role is rejected, even when the
+current effective privileges look narrow; administrative attributes
+on SET-able inherited groups are rejected too. Real PostgreSQL
+negative controls create an RBAC-writable noninherited role and a
+CREATEDB-capable group, then verify fail-closed admission and recovery
+after revocation. Intended **inherited, least-privileged** group roles
+remain supported.
+
 This startup probe is a **snapshot**, not continuous privilege monitoring,
 and must not be treated as proof of revocation of an already running database
 connection after DBA changes. Separate continuous audit, production login
