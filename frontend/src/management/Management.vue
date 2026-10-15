@@ -207,7 +207,7 @@ import { classifyScopedExecution, type ScopedExecution } from './execution'
 import { verifyEvidencePair } from './evidence-check'
 import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from './readback'
 import { rememberOperation, recoverOperation, forgetOperation, type OperationPointer } from './recovery'
-import { parseAuthorizedPool, buildAuthorizedWorkloadRequest, poolForCurrentSession, type VerifiedPoolSelection } from './workload-composer'
+import { parseAuthorizedPool, buildAuthorizedWorkloadRequest, poolForCurrentSession, isSessionActive, type VerifiedPoolSelection } from './workload-composer'
 
 const issuer = import.meta.env.VITE_MANAGEMENT_OIDC_ISSUER || ''
 const clientId = import.meta.env.VITE_MANAGEMENT_OIDC_CLIENT_ID || ''
@@ -276,8 +276,8 @@ const error = ref('')
 
 function redirectUri() { return window.location.origin + '/management.html' }
 function token() {
-  if (!authenticated.value || !session.value) throw new Error('需要重新登录')
-  return session.value.accessToken
+  if (!isSessionActive(session.value)) throw new Error('需要重新登录')
+  return session.value!.accessToken
 }
 function scope() { return { cluster: cluster.value, project: project.value, kind: kind.value, resource: resource.value } }
 function clearResult() {
@@ -404,7 +404,7 @@ async function verifyWorkloadPool() {
       cluster: clusterId, project: projectId, kind: 'ComputePool', resource: poolId,
     }, token())
     if (!result.value) throw new Error('当前项目未读取到可用 ComputePool')
-    if (session.value !== originalSession || !authenticated.value) {
+    if (session.value !== originalSession || !isSessionActive(session.value)) {
       throw new Error('读取期间 OIDC 登录会话已改变或过期，请重新验证 ComputePool')
     }
     if (cluster.value !== clusterId || project.value !== projectId || workloadPoolId.value !== poolId) {
@@ -422,8 +422,11 @@ async function verifyWorkloadPool() {
 function prepareWorkloadRequest() {
   clearResult()
   try {
-    const pool = currentWorkloadPool.value
-    if (!pool) throw new Error('请先使用当前 OIDC 身份读取同一项目内的 ComputePool')
+    // The visible computed preview can be cached across wall-clock expiry.
+    // A user action must re-evaluate the session's expiration right now.
+    const pool = poolForCurrentSession(verifiedWorkloadPool.value, session.value,
+      isSessionActive(session.value), cluster.value, project.value, workloadPoolId.value)
+    if (!pool) throw new Error('请先使用当前有效 OIDC 身份读取同一项目内的 ComputePool')
     const prepared = buildAuthorizedWorkloadRequest(pool, {
       id: workloadID.value,
       image: workloadImage.value,
