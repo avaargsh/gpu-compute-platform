@@ -1,0 +1,56 @@
+name: Management Local Static TLS Acceptance
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'internal/platform/management/**'
+      - 'cmd/management-api/**'
+      - 'frontend/src/management/**'
+      - 'frontend/management.html'
+      - 'frontend/playwright.management.static-tls.config.ts'
+      - 'frontend/tests/e2e/management.static-tls.e2e.spec.ts'
+      - 'deploy/local/management/**'
+      - 'scripts/e2e/management-static-tls-acceptance.sh'
+      - 'scripts/e2e/keycloak-management-browser-tls-realm.json'
+      - '.github/workflows/management-static-tls.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: management-static-tls-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-static-tls:
+    name: HTTPS Caddy static UI / real Keycloak / Go / Postgres TLS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Lint disposable shell and browser realm
+        run: |
+          bash -n scripts/e2e/management-static-tls-acceptance.sh
+          python3 -m json.tool scripts/e2e/keycloak-management-browser-tls-realm.json >/dev/null
+      - name: Install frontend dependency lockfile
+        working-directory: frontend
+        run: npm ci
+      - name: Install isolated browser test runner
+        working-directory: frontend
+        run: npm install --no-save --package-lock=false @playwright/test@1.56.1
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Real local HTTPS ingress and fully verified dependencies
+        run: bash scripts/e2e/management-static-tls-acceptance.sh
