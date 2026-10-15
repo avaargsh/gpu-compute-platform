@@ -304,3 +304,50 @@ docker stop "$IMAGE_CONTAINER" >/dev/null
 docker rm "$IMAGE_CONTAINER" >/dev/null
 IMAGE_CONTAINER=""
 echo "PASS nonroot read-only Management image + scoped runtime role + real verify-full PostgreSQL TLS"
+
+
+# Production readiness must be stricter than process liveness. Simulate a
+# DBA-side privilege drift while the SAME genuine management process remains
+# alive: /readyz must immediately fail closed and must recover only after
+# that specific least-privilege right is restored. All changes are local to
+# this disposable CI database and are rolled back on test exit.
+MANAGEMENT_DATABASE_URL="$VERIFIED_DSN" "$TMP_DIR/management-api" >"$TMP_DIR/readiness.log" 2>&1 &
+API_PID=$!
+ready=0
+for attempt in $(seq 1 100); do
+  if curl -fsS --max-time 2 http://127.0.0.1:18081/readyz >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  if ! kill -0 "$API_PID" 2>/dev/null; then
+    echo "FAIL guarded Management API exited before readiness acceptance" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+if [[ "$ready" != 1 ]]; then
+  echo "FAIL Management API never reached scoped runtime readiness" >&2
+  exit 1
+fi
+if [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/healthz)" != 204 ]]; then
+  echo "FAIL healthy process did not report liveness" >&2
+  exit 1
+fi
+psql_fixture -c 'REVOKE INSERT ON public.management_operation_audit FROM gpu_management_runtime'
+if [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/readyz)" != 503 ]]; then
+  echo "FAIL readiness did not reject revoked audit INSERT privilege" >&2
+  exit 1
+fi
+if [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/healthz)" != 204 ]]; then
+  echo "FAIL database grant revocation incorrectly stopped process liveness" >&2
+  exit 1
+fi
+psql_fixture -c 'GRANT INSERT ON public.management_operation_audit TO gpu_management_runtime'
+if [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18081/readyz)" != 204 ]]; then
+  echo "FAIL readiness did not recover after precisely restoring audit INSERT" >&2
+  exit 1
+fi
+kill "$API_PID" >/dev/null 2>&1 || true
+wait "$API_PID" >/dev/null 2>&1 || true
+API_PID=""
+echo "PASS actual PostgreSQL runtime role drift: ready 204 -> 503 -> 204 while healthz stays 204"
