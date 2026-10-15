@@ -10,25 +10,25 @@ import (
 // HumanListener defines an isolated loopback HTTPS read API. Secrets are read
 // from a mounted file and never stored in exported configuration or logs.
 type HumanListener struct {
-	Enabled        bool
-	Endpoint       string
-	Issuer         string
-	Audience       string
-	ClientID       string
+	Enabled          bool
+	Endpoint         string
+	Issuer           string
+	Audience         string
+	ClientID         string
 	ClientSecretFile string
-	ServerCert     string
-	ServerKey      string
+	ServerCert       string
+	ServerKey        string
 }
 
 func LoadHumanListener(getenv func(string) string, profile string) (HumanListener, error) {
 	cfg := HumanListener{
-		Endpoint: strings.TrimSpace(getenv("CONTROL_PLANE_OAUTH_INTROSPECTION_URL")),
-		Issuer: strings.TrimSpace(getenv("CONTROL_PLANE_OAUTH_ISSUER")),
-		Audience: strings.TrimSpace(getenv("CONTROL_PLANE_OAUTH_AUDIENCE")),
-		ClientID: strings.TrimSpace(getenv("CONTROL_PLANE_OAUTH_CLIENT_ID")),
+		Endpoint:         strings.TrimSpace(getenv("CONTROL_PLANE_OAUTH_INTROSPECTION_URL")),
+		Issuer:           strings.TrimSpace(getenv("CONTROL_PLANE_OAUTH_ISSUER")),
+		Audience:         strings.TrimSpace(getenv("CONTROL_PLANE_OAUTH_AUDIENCE")),
+		ClientID:         strings.TrimSpace(getenv("CONTROL_PLANE_OAUTH_CLIENT_ID")),
 		ClientSecretFile: strings.TrimSpace(getenv("CONTROL_PLANE_OAUTH_CLIENT_SECRET_FILE")),
-		ServerCert: strings.TrimSpace(getenv("CONTROL_PLANE_HUMAN_TLS_CERT")),
-		ServerKey: strings.TrimSpace(getenv("CONTROL_PLANE_HUMAN_TLS_KEY")),
+		ServerCert:       strings.TrimSpace(getenv("CONTROL_PLANE_HUMAN_TLS_CERT")),
+		ServerKey:        strings.TrimSpace(getenv("CONTROL_PLANE_HUMAN_TLS_KEY")),
 	}
 	if cfg.Endpoint == "" && cfg.Issuer == "" && cfg.Audience == "" &&
 		cfg.ClientID == "" && cfg.ClientSecretFile == "" &&
