@@ -1,0 +1,20 @@
+name: KServe Developer Service
+on:
+  pull_request:
+    paths:
+      - 'scripts/dev/kserve_service.py'
+      - 'scripts/dev/test_kserve_service.py'
+      - '.github/workflows/kserve-dev.yml'
+  workflow_dispatch:
+
+jobs:
+  kserve-manifest-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify KServe manifest and kubectl write/read boundary
+        run: python3 -m unittest discover -s scripts/dev -p 'test_kserve_service.py' -v
