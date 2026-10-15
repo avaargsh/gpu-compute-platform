@@ -9,7 +9,9 @@ fmt-check:
 	bash scripts/go-format.sh --check
 
 test:
-	go test ./...
+	# Packages share TEST_POSTGRES_DSN, and postgres contract fixtures TRUNCATE shared tables.
+	# Serialize packages until each package owns an isolated disposable database.
+	go test -p 1 ./...
 
 vet:
 	go vet ./...
