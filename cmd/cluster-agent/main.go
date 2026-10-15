@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,6 +23,33 @@ func main() {
 	controlPlaneURL := os.Getenv("CONTROL_PLANE_URL")
 	if clusterID == "" || controlPlaneURL == "" {
 		log.Fatal("CLUSTER_ID and CONTROL_PLANE_URL are required")
+	}
+	endpoint, err := url.Parse(controlPlaneURL)
+	if err != nil || endpoint.User != nil || endpoint.Hostname() == "" ||
+		endpoint.RawQuery != "" || endpoint.Fragment != "" || endpoint.Path != "" {
+		log.Fatal("CONTROL_PLANE_URL must be an HTTP(S) origin without credentials, path or query")
+	}
+	caFile := os.Getenv("CLUSTER_AGENT_TLS_CA")
+	certFile := os.Getenv("CLUSTER_AGENT_TLS_CERT")
+	keyFile := os.Getenv("CLUSTER_AGENT_TLS_KEY")
+	secure := caFile != "" || certFile != "" || keyFile != ""
+	var transport *http.Client
+	if secure {
+		if endpoint.Scheme != "https" {
+			log.Fatal("Agent client certificate authentication requires CONTROL_PLANE_URL=https")
+		}
+		transport, err = httpclient.NewMTLSClient(caFile, certFile, keyFile)
+		if err != nil {
+			log.Fatalf("Agent mTLS client configuration: %v", err)
+		}
+	} else {
+		// Keep existing localhost Golden Path compatibility, never send
+		// unauthenticated Agent traffic to remote HTTP endpoints.
+		if endpoint.Scheme != "http" || (endpoint.Hostname() != "localhost" &&
+			endpoint.Hostname() != "127.0.0.1" && endpoint.Hostname() != "::1") {
+			log.Fatal("remote Cluster Agents require TLS client certificate authentication")
+		}
+		transport = &http.Client{Timeout: 10 * time.Second}
 	}
 
 	config, err := cluster.RESTConfig()
@@ -57,7 +85,7 @@ func main() {
 		capabilities.Accelerators,
 	)
 
-	control := httpclient.New(controlPlaneURL, &http.Client{Timeout: 10 * time.Second})
+	control := httpclient.New(controlPlaneURL, transport)
 
 	agentInstanceID := os.Getenv("AGENT_INSTANCE_ID")
 	runner := agent.NewRunnerWithLeaseOwner(
