@@ -36,6 +36,7 @@ type introspectionResult struct {
 	Issuer    string          `json:"iss"`
 	Subject   string          `json:"sub"`
 	ExpiresAt int64           `json:"exp"`
+	NotBefore int64           `json:"nbf"`
 	Audience  json.RawMessage `json:"aud"`
 	TokenType string          `json:"token_type"`
 }
@@ -101,8 +102,11 @@ func (i Introspector) Verify(ctx context.Context, token string) (Identity, error
 	if err != nil {
 		return Identity{}, fmt.Errorf("%w: malformed or ambiguous introspection response", ErrIntrospectionUnavailable)
 	}
-	if !result.Active || result.Issuer != i.Issuer || result.Subject == "" || len(result.Subject) > 512 || result.ExpiresAt <= time.Now().Unix() || !strings.EqualFold(result.TokenType, "Bearer") {
-		return Identity{}, errors.New("inactive, expired, or untrusted identity")
+	// RFC 7662 may supply optional nbf. When present, do not authorize a
+	// token that the identity provider says is not valid yet.
+	now := time.Now().Unix()
+	if !result.Active || result.Issuer != i.Issuer || result.Subject == "" || len(result.Subject) > 512 || result.ExpiresAt <= now || result.NotBefore > now || !strings.EqualFold(result.TokenType, "Bearer") {
+		return Identity{}, errors.New("inactive, not-yet-valid, expired, or untrusted identity")
 	}
 	var single string
 	if err := json.Unmarshal(result.Audience, &single); err == nil {
