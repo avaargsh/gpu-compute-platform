@@ -46,6 +46,28 @@ export CLUSTER_AGENT_TLS_KEY=/etc/agent-tls/agent-client.key
 
 The client verifies the server hostname and CA with standard Go TLS. No `InsecureSkipVerify` option exists. In development only, `CONTROL_PLANE_URL=http://127.0.0.1:8080` remains supported; unauthenticated remote HTTP is rejected.
 
+### Client certificate rotation (candidate; not issuance or revocation)
+
+`NewMTLSClient` validates the certificate/key at startup and reloads the pair
+from `CLUSTER_AGENT_TLS_CERT` and `CLUSTER_AGENT_TLS_KEY` **on every new TLS
+handshake**. It disables HTTP keep-alive reuse, ensuring that a successful old
+TLS connection is not reused after certificate replacement. A missing,
+mismatched or unreadable replacement certificate/key fails closed on the next
+request; it does not fall back to a cached old identity. Normal Agent retry
+behavior can resume after the files are repaired.
+
+The external certificate issuer/CSI/Secret projection must publish a *matching
+pair* together, preferably by atomically switching a versioned directory or
+symlink. Updating two live files separately creates a deliberate transient
+failure window. The trusted **server CA** is read once at process startup;
+changing the CA bundle still requires a controlled restart. No issuer,
+certificate renewal scheduler, revocation list, certificate expiry alert, or
+rollout orchestrator is included here. A freshly renewed certificate still has
+to satisfy the server's current CA trust and SPIFFE cluster scope.
+
+Each Agent request now incurs a new TLS handshake and certificate file read.
+Measure this overhead in load tests before any production promotion.
+
 ## Negative-first evidence required
 
 | Test | Required result |
@@ -58,6 +80,9 @@ The client verifies the server hostname and CA with standard Go TLS. No `Insecur
 | Correct Agent identity with matching cluster | register/pull/lease/report works |
 | HTTPS server CA/hostname mismatch on client | TLS handshake fails |
 | Agent cert expired or issued by untrusted CA | TLS handshake fails |
+| Replace a valid Agent certificate/key while the client process stays alive | Next TLS handshake presents the new certificate serial |
+| Partial/absent certificate/key during rotation | New request fails closed; previous identity not reused |
+| Restore the matching certificate/key after a failed rotation | Agent client can authenticate on the next request |
 | Existing Stage B kind + Kueue HTTP loopback Golden Path | unchanged green |
 
 Tests using a fabricated request TLS state prove the middleware policy only. A live TLS handshake test with real CA/certificates is required before promoting this PoC. Similarly, the existing Go unit/e2e suites remain mandatory.
