@@ -28,6 +28,9 @@ type OperatorPreview struct {
 	Token     string
 	ClusterID domain.ID
 	Projects  []string
+	// Only a development bootstrap may enable the independent write credential.
+	DevelopmentWriteToken string
+	DevelopmentWrites     bool
 }
 
 type operatorAPI struct {
@@ -277,6 +280,13 @@ func NewRouterWithOperatorPreview(store agentstore.Store, bindings BindingStore,
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/operator/", operator)
+	if cfg.DevelopmentWriteToken != "" {
+		writer, err := NewOperatorDevWriteHandler(store, bindings, cfg)
+		if err != nil {
+			return nil, err
+		}
+		mux.Handle("PUT /api/v1/operator/clusters/{clusterID}/projects/{projectID}/workloads/{resourceID}", writer)
+	}
 	mux.Handle("/", NewRouterWithDependencies(store, bindings))
 	return previewBrowserWriteBoundary(mux), nil
 }

@@ -58,7 +58,22 @@
         <el-button type="primary" :disabled="!draft.payload" @click="copyDraft">复制 JSON 草案</el-button>
         <span style="margin-left: 12px">{{ copyStatus }}</span>
       </div>
-      <p class="table-footnote">下一步由 OIDC + Project RBAC + CAS 审计的 Management API 提交，禁止复用只读 Operator Token 进行写入。</p>
+      <el-divider />
+      <h3>本机开发提交（可选）</h3>
+      <el-alert type="warning" :closable="false"
+        title="仅开发环境：必须在服务端设置独立 PORTAL_OPERATOR_WRITE_TOKEN，且不能与读取凭证相同。部署至 PoC/生产模式时该入口禁用。Kueue 是否准入与 Job 是否成功仍需要独立观察。" />
+      <el-form-item label="独立写入凭证（只存在当前页面内存）" style="margin-top: 12px">
+        <el-input v-model="writeToken" type="password" autocomplete="off"
+          placeholder="PORTAL_OPERATOR_WRITE_TOKEN（至少 32 字符）" show-password />
+      </el-form-item>
+      <el-button type="primary" :loading="submitting"
+        :disabled="submitting || !draft.payload || readToken.length < 32 || writeToken.length < 32"
+        @click="submitWorkload">
+        创建 Workload Desired（仅本机开发）
+      </el-button>
+      <el-alert v-if="submitError" :title="submitError" type="error"
+        :closable="false" style="margin-top: 12px" />
+      <p class="table-footnote">此处仅创建 Desired State。实际 Pod / Kueue Admission、Job 日志和训练 Checkpoint 须在下方执行监控中查看；操作员预览读取凭证单独使用不能创建资源。</p>
     </div>
   </div>
 </template>
@@ -67,8 +82,10 @@
 import { computed, ref, watch } from 'vue'
 import type { ResourceRow } from './api'
 import { buildWorkloadDraft, draftPools, type WorkloadMode } from './workload-draft'
+import { submitDevWorkload } from './dev-submit'
 
-const props = defineProps<{ rows: ResourceRow[] }>()
+const props = defineProps<{ rows: ResourceRow[]; clusterId: string; readToken: string }>()
+const emit = defineEmits<{ submitted: [] }>()
 const pools = computed(() => draftPools(props.rows))
 const mode = ref<WorkloadMode>('training')
 const poolId = ref('')
@@ -80,6 +97,9 @@ const image = ref('')
 const workspaceClaim = ref('')
 const commandJson = ref('["python","train.py"]')
 const copyStatus = ref('')
+const writeToken = ref('')
+const submitting = ref(false)
+const submitError = ref('')
 
 watch(pools, value => {
   if (!value.some(p => p.id === poolId.value)) poolId.value = value[0]?.id ?? ''
@@ -98,6 +118,26 @@ const draft = computed(() => buildWorkloadDraft({
   workspaceClaim: workspaceClaim.value,
 }, pools.value))
 const payloadText = computed(() => draft.value.payload ? JSON.stringify(draft.value.payload, null, 2) : '')
+async function submitWorkload(): Promise<void> {
+  if (!draft.value.payload || submitting.value) return
+  submitting.value = true
+  submitError.value = ''
+  try {
+    await submitDevWorkload(props.clusterId, props.readToken, writeToken.value, draft.value.payload)
+    // Server-side acceptance is only Desired creation, never GPU execution.
+    emit('submitted')
+  } catch (cause) {
+    submitError.value = cause instanceof Error ? cause.message : 'Workload 提交失败'
+  } finally {
+    submitting.value = false
+  }
+}
+
+watch(() => props.readToken, () => {
+  writeToken.value = ''
+  submitError.value = ''
+})
+
 async function copyDraft(): Promise<void> {
   if (!draft.value.payload) return
   try {

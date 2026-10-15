@@ -41,9 +41,11 @@ func main() {
 			log.Fatal("operator preview requires an explicit loopback listener")
 		}
 		handler, err = httpapi.NewRouterWithOperatorPreview(store, placement, httpapi.OperatorPreview{
-			Token:     os.Getenv("PORTAL_OPERATOR_TOKEN"),
-			ClusterID: domain.ID(os.Getenv("PORTAL_OPERATOR_CLUSTER_ID")),
-			Projects:  strings.Split(os.Getenv("PORTAL_OPERATOR_PROJECT_IDS"), ","),
+			Token:                 os.Getenv("PORTAL_OPERATOR_TOKEN"),
+			ClusterID:             domain.ID(os.Getenv("PORTAL_OPERATOR_CLUSTER_ID")),
+			Projects:              strings.Split(os.Getenv("PORTAL_OPERATOR_PROJECT_IDS"), ","),
+			DevelopmentWriteToken: os.Getenv("PORTAL_OPERATOR_WRITE_TOKEN"),
+			DevelopmentWrites:     cfg.Profile == "development",
 		})
 		if err != nil {
 			log.Fatalf("operator preview configuration invalid: %v", err)
@@ -102,7 +104,8 @@ func buildStore(dsn string) (agentstore.Store, httpapi.BindingStore, func()) {
 func operatorPreviewConfigured() bool {
 	return os.Getenv("PORTAL_OPERATOR_TOKEN") != "" ||
 		os.Getenv("PORTAL_OPERATOR_CLUSTER_ID") != "" ||
-		os.Getenv("PORTAL_OPERATOR_PROJECT_IDS") != ""
+		os.Getenv("PORTAL_OPERATOR_PROJECT_IDS") != "" ||
+		os.Getenv("PORTAL_OPERATOR_WRITE_TOKEN") != ""
 }
 
 func isLoopbackAddress(addr string) bool {
