@@ -25,6 +25,17 @@ type workloadInventoryPage struct {
 const workloadInventoryPageSize = 25
 
 func (s *Service) workloadInventory(w http.ResponseWriter, r *http.Request) {
+	s.resourceInventory(w, r, "Workload")
+}
+
+func (s *Service) computePoolInventory(w http.ResponseWriter, r *http.Request) {
+	s.resourceInventory(w, r, "ComputePool")
+}
+
+// Both lists intentionally return only generic Desired identity, not pool
+// scheduling details or full specs. Project/cluster/user scope and kind are
+// bound in the SAME SQL statement that reads Desired.
+func (s *Service) resourceInventory(w http.ResponseWriter, r *http.Request, kind string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	cluster, project := r.PathValue("clusterID"), r.PathValue("projectID")
@@ -89,10 +100,10 @@ JOIN project_bindings AS b ON b.project_id=$3 AND b.cluster_id=d.cluster_id
 JOIN management_project_grants AS g
   ON g.project_id=b.project_id AND g.issuer=$4 AND g.subject=$5
   AND g.role IN ('viewer','operator','admin')
-WHERE d.cluster_id=$1 AND d.kind='Workload'
+WHERE d.cluster_id=$1 AND d.kind=$6
   AND d.resource_id>$2 AND d.spec->>'projectID'=$3
 ORDER BY d.resource_id
-LIMIT 26`, cluster, after, project, identity.Issuer, identity.Subject)
+LIMIT 26`, cluster, after, project, identity.Issuer, identity.Subject, kind)
 	if err != nil {
 		problem(w, http.StatusServiceUnavailable)
 		return

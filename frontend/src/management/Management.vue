@@ -76,6 +76,28 @@
       <label>已授权 ComputePool ID<input v-model.trim="workloadPoolId" autocomplete="off"
         placeholder="用于训练的 ComputePool ID" /></label>
       <div class="management-actions">
+        <button type="button" :disabled="!authenticated || busy || !cluster || !project" @click="loadComputePools()">
+          查询项目 ComputePool 列表（每页 25 条）
+        </button>
+      </div>
+      <div v-if="activePoolInventory" class="management-status" role="region" aria-label="授权 ComputePool 列表">
+        <p>只列出当前项目已授权的 Pool 身份与 Generation，不包含镜像、绑定详情或 GPU 可用性保证。</p>
+        <p v-if="!activePoolInventory.items.length">此页没有可见 ComputePool；可能为空或授权已改变。</p>
+        <ul>
+          <li v-for="item in activePoolInventory.items" :key="item.id">
+            {{ item.id }} · Generation {{ item.generation }} · {{ item.deleting ? '删除中' : '未请求删除' }}
+            <button type="button" :disabled="busy || item.deleting" @click="selectInventoryPool(item)">
+              选择 ComputePool {{ item.id }}
+            </button>
+          </li>
+        </ul>
+        <button v-if="activePoolInventory.nextCursor" type="button" :disabled="busy"
+          @click="loadComputePools(activePoolInventory.nextCursor)">
+          加载下一页 ComputePool
+        </button>
+        <p v-if="activePoolInventory.hasMore">列表为非事务性分页快照；下一页仍需重新验证 OIDC 项目授权。</p>
+      </div>
+      <div class="management-actions">
         <button type="button" :disabled="!authenticated || busy" @click="verifyWorkloadPool">
           读取并验证 ComputePool
         </button>
@@ -180,7 +202,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
-import { readResource, writeResource, deleteResource, readReceipt, readExecution, listProjects, listWorkloads, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, type WorkloadInventoryItem, type WorkloadInventoryPage, desiredMatchesScope, createOperationId } from './api'
+import { readResource, writeResource, deleteResource, readReceipt, readExecution, listProjects, listWorkloads, listComputePools, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, type WorkloadInventoryItem, type WorkloadInventoryPage, desiredMatchesScope, createOperationId } from './api'
 import { classifyScopedExecution, type ScopedExecution } from './execution'
 import { verifyEvidencePair } from './evidence-check'
 import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from './readback'
@@ -222,11 +244,18 @@ const desired = ref<DesiredView | null>(null)
 const availableProjects = ref<ProjectAccess[]>([])
 const projectListTruncated = ref(false)
 const inventory = ref<{ anchor: string; session: AccessSession; page: WorkloadInventoryPage } | null>(null)
+const poolInventory = ref<{ anchor: string; session: AccessSession; page: WorkloadInventoryPage } | null>(null)
 const inventoryAnchor = computed(() => JSON.stringify([cluster.value, project.value]))
 const activeInventory = computed(() =>
   inventory.value?.anchor === inventoryAnchor.value && inventory.value.session === session.value
     ? inventory.value.page : null)
-watch(() => [cluster.value, project.value], () => { inventory.value = null })
+const activePoolInventory = computed(() =>
+  poolInventory.value?.anchor === inventoryAnchor.value && poolInventory.value.session === session.value
+    ? poolInventory.value.page : null)
+watch(() => [cluster.value, project.value], () => {
+  inventory.value = null
+  poolInventory.value = null
+})
 const receiptData = ref<Receipt | null>(null)
 const receiptAnchor = ref('')
 const receiptReadback = ref<{ anchor: string; result: DesiredReadback } | null>(null)
@@ -313,6 +342,54 @@ function selectInventoryWorkload(item: WorkloadInventoryItem) {
   desired.value = null
   clearResult()
   message.value = '已选择 Workload ' + item.id + '；请单独读取最新 Desired 与对应操作回执'
+}
+
+async function loadComputePools(after?: string) {
+  if (busy.value) return
+  error.value = ''
+  message.value = ''
+  busy.value = true
+  const selected = inventoryAnchor.value
+  const originalSession = session.value
+  const clusterId = cluster.value
+  const projectId = project.value
+  try {
+    const access = token()
+    if (after && (!activePoolInventory.value || activePoolInventory.value.nextCursor !== after)) {
+      throw new Error('Pool 分页游标已失效，请重新查询授权列表')
+    }
+    const result = await listComputePools(clusterId, projectId, access, after)
+    const page = result.value
+    if (!page || !Array.isArray(page.items) || page.items.length > 25 ||
+        typeof page.hasMore !== 'boolean' ||
+        (page.hasMore && !page.nextCursor) || (!page.hasMore && page.nextCursor !== null)) {
+      throw new Error('服务端返回的 ComputePool 列表格式异常')
+    }
+    if (selected !== inventoryAnchor.value || originalSession !== session.value) {
+      throw new Error('Pool 查询期间授权身份或项目已变化；拒绝使用缓存结果')
+    }
+    const previous = after ? activePoolInventory.value?.items ?? [] : []
+    const ids = new Set(previous.map(item => item.id))
+    for (const item of page.items) {
+      if (ids.has(item.id) || !Number.isSafeInteger(item.generation) || item.generation < 1) {
+        throw new Error('ComputePool 列表包含重复或无效资源，拒绝合并')
+      }
+      ids.add(item.id)
+    }
+    poolInventory.value = { anchor: selected, session: originalSession!, page: {
+      items: [...previous, ...page.items], nextCursor: page.nextCursor, hasMore: page.hasMore,
+    } }
+    message.value = '已读取项目授权 ComputePool 列表；请再单独验证选中的 Pool 绑定'
+  } catch (e) {
+    poolInventory.value = null
+    describeError(e)
+  } finally { busy.value = false }
+}
+function selectInventoryPool(item: WorkloadInventoryItem) {
+  if (item.deleting || !activePoolInventory.value?.items.some(p => p.id === item.id)) return
+  workloadPoolId.value = item.id
+  verifiedWorkloadPool.value = null
+  message.value = '已选择 ComputePool ' + item.id + '；必须单独点击读取并验证绑定后才能生成 Workload'
 }
 
 async function verifyWorkloadPool() {

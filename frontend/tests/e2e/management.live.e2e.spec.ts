@@ -110,7 +110,16 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
 
   // Reuse the same OIDC identity and real DB-authorized Pool read to
   // generate the typed, scoped Workload write. No dev-operator tokens.
-  await page.getByPlaceholder('用于训练的 ComputePool ID').fill('pool-a')
+  // Discover the newly created Pool by the same user's current OIDC
+  // Project grant. The list returns only metadata, never a trusted binding.
+  await page.getByRole('button', { name: '查询项目 ComputePool 列表（每页 25 条）' }).click()
+  const pools = page.getByRole('region', { name: '授权 ComputePool 列表' })
+  await expect(pools).toContainText('pool-a')
+  await expect(pools).not.toContainText('nvidia.com/gpu')
+  await pools.getByRole('button', { name: '选择 ComputePool pool-a' }).click()
+  await expect(page.getByPlaceholder('用于训练的 ComputePool ID')).toHaveValue('pool-a')
+  await expect(page.getByRole('button', { name: '生成受约束的 Workload PUT 请求' })).toHaveCount(0)
+  // Binding details must come from a SECOND authorized current Desired GET.
   await page.getByRole('button', { name: '读取并验证 ComputePool' }).click()
   await expect(page.getByText('已确认 research/pool-a', { exact: false })).toBeVisible()
   await page.getByPlaceholder('新的训练任务 ID').fill('job-a')

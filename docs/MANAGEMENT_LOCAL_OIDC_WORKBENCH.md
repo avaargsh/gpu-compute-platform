@@ -189,8 +189,15 @@ or add `Access-Control-Allow-Origin: *`.
    any execution-success claim. The reads are **not one database transaction**,
    and this button never retries PUT or DELETE. Repeat manually when needed;
    even a checked snapshot can become stale after the read.
-6. Use **训练 / 批量推理 Workload 向导** to enter a Pool ID, and click
-   **读取并验证 ComputePool**. The browser performs a real, project-scoped
+6. Use **训练 / 批量推理 Workload 向导** to click **查询项目
+   ComputePool 列表** and choose an authorized Pool ID. Discovery is a
+   25-row keyset-paged *identity list* guarded by the current OIDC grant
+   and Project/Cluster binding; it returns no full spec, accelerator binding
+   or GPU capacity claim, and is not a transactional catalog snapshot.
+   Deleted/terminating Pool rows cannot be selected from this list. After
+   selecting a Pool, explicitly click **读取并验证 ComputePool**; discovery
+   never substitutes for this second current, project-scoped Desired GET.
+   The browser performs a real, project-scoped
    Management GET with the current OIDC access token; it rejects a foreign,
    deleted, malformed or non-Kueue Pool. Choose the accelerator class, quota,
    image, command and a new Workload ID. The draft generator emits the

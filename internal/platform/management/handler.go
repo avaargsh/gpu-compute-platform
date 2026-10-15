@@ -70,6 +70,7 @@ func newHandlerWithAuthorityCheck(db *sql.DB, auth Introspector, origin string, 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/management/projects", svc.projects)
 	mux.HandleFunc("GET /api/v1/management/clusters/{clusterID}/projects/{projectID}/workloads", svc.workloadInventory)
+	mux.HandleFunc("GET /api/v1/management/clusters/{clusterID}/projects/{projectID}/pools", svc.computePoolInventory)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(204)

@@ -174,6 +174,18 @@ export async function listWorkloads(cluster: string, project: string, token: str
   return request<WorkloadInventoryPage>(path, 'GET', token)
 }
 
+// ComputePool discovery is only an identity/generation inventory. A Pool
+// row must be verified with a separate authorized GET before being used
+// to construct a Workload spec; listing grants no mutation permission.
+export async function listComputePools(cluster: string, project: string, token: string, after?: string): Promise<{ status: number; value: WorkloadInventoryPage | null }> {
+  safe(cluster); safe(project)
+  if (after !== undefined) safe(after)
+  const path = '/api/v1/management/clusters/' + cluster +
+    '/projects/' + project + '/pools' +
+    (after ? '?after=' + encodeURIComponent(after) : '')
+  return request<WorkloadInventoryPage>(path, 'GET', token)
+}
+
 export async function readResource(scope: Scope, token: string): Promise<{ status: number; value: DesiredView | null }> {
   return request<DesiredView>(resourcePath(scope), 'GET', token)
 }
