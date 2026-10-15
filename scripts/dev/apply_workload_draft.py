@@ -70,7 +70,7 @@ def load_draft(path: Path) -> dict[str, object]:
         raise InvalidDraft("invalid container image")
     cmd = spec["command"]
     if (not isinstance(cmd, list) or not 1 <= len(cmd) <= 64 or
-        not all(isinstance(a, str) and 0 < len(a) <= 4096 and "\\0" not in a for a in cmd)):
+        not all(isinstance(a, str) and 0 < len(a) <= 4096 and "\0" not in a for a in cmd)):
         raise InvalidDraft("command must be a nonempty JSON argv string array")
     accelerator = spec["accelerator"]
     if not isinstance(accelerator, dict) or set(accelerator) != {"class", "quota"}:
