@@ -93,6 +93,12 @@ jobs:
       - name: Typecheck and build isolated Go Portal
         working-directory: frontend
         run: npm run portal:build
+      - name: Management PKCE, CAS and receipt browser-contract tests
+        working-directory: frontend
+        run: npm run management:test
+      - name: Build isolated OIDC Management workbench
+        working-directory: frontend
+        run: npm run management:build
 
   portal-browser:
     name: Portal / real Chromium to Go API
