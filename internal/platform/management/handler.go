@@ -15,7 +15,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
@@ -83,27 +82,6 @@ func newHandlerWithAuthorityCheck(db *sql.DB, auth Introspector, origin string, 
 	mux.HandleFunc("DELETE /api/v1/management/clusters/{clusterID}/projects/{projectID}/resources/{kind}/{resourceID}", svc.serve)
 	mux.HandleFunc("GET /api/v1/management/clusters/{clusterID}/projects/{projectID}/operations/{operationID}", svc.receipt)
 	return mux, nil
-}
-
-// readiness deliberately exposes no DB identity, grant, SQL, tenant or
-// provider details. A failed authority check must not be mistaken for a
-// healthy management control plane by a local rollout supervisor.
-func (s *Service) readiness(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-	defer cancel()
-	var err error
-	if s.RequireRuntimeDBAuthority {
-		err = VerifyRuntimeDBPrivileges(ctx, s.DB)
-	} else {
-		err = s.DB.PingContext(ctx)
-	}
-	if err != nil {
-		problem(w, http.StatusServiceUnavailable)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func problem(w http.ResponseWriter, status int) {
