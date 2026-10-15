@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -128,6 +129,26 @@ func (s *Service) browserWriteAllowed(r *http.Request) bool {
 	return len(values) == 1 && s.AllowedBrowserOrigin != "" && values[0] == s.AllowedBrowserOrigin
 }
 
+// validJSONMutationContentType accepts one unambiguous JSON media type.
+// String-prefix checks also accept values such as application/jsonx.
+// The optional charset parameter is permitted only when it is UTF-8.
+func validJSONMutationContentType(header http.Header) bool {
+	values := header.Values("Content-Type")
+	if len(values) != 1 || strings.HasSuffix(strings.TrimSpace(values[0]), ";") {
+		return false
+	}
+	mediaType, params, err := mime.ParseMediaType(values[0])
+	if err != nil || !strings.EqualFold(mediaType, "application/json") {
+		return false
+	}
+	for name, value := range params {
+		if name != "charset" || !strings.EqualFold(value, "utf-8") {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -160,7 +181,7 @@ func (s *Service) serve(w http.ResponseWriter, r *http.Request) {
 		problem(w, 403)
 		return
 	}
-	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") && r.Method == http.MethodPut {
+	if r.Method == http.MethodPut && !validJSONMutationContentType(r.Header) {
 		problem(w, 415)
 		return
 	}
