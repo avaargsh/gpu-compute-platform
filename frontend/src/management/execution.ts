@@ -1,6 +1,6 @@
 import type { ExecutionView, Receipt } from './api'
 import type { ResourceRow } from '../portal/api'
-import { executionOf, type ExecutionSummary } from '../portal/execution-model'
+import { executionOf, type ExecutionSummary } from '../portal/execution-model.ts'
 
 export type ScopedExecution = ExecutionSummary & { observedAt: string | null; newerThanReceipt: boolean }
 
