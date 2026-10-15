@@ -52,6 +52,13 @@ class KServeServiceTests(unittest.TestCase):
                               "create", "-f", "-", "-o", "json"])
             self.assertEqual(json.loads(run.call_args.kwargs["input"]), D)
 
+    def test_fresh_create_without_controller_status_does_not_claim_ready(self):
+        result = observed()
+        result.pop("status")
+        with patch.object(k.subprocess, "run",
+                          return_value=CompletedProcess([], 0, json.dumps(result), "")):
+            self.assertEqual(k.main([self.fixture(), "--context", "kind-gpu", "--create"]), 0)
+
     def test_status_only_reads_exact_service(self):
         with patch.object(k.subprocess, "run", return_value=CompletedProcess([], 0, json.dumps(observed(ready="False")), "")) as run:
             self.assertEqual(k.main([self.fixture(), "--context", "kind-gpu", "--status"]), 0)

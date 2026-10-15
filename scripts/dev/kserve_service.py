@@ -164,12 +164,20 @@ def main(argv: list[str] | None = None) -> int:
                          else ["get", "inferenceservices.serving.kserve.io", name, "-o", "json"],
                          source if args.create else None)
         verdict = observation(actual, source)
+        # A newly created KServe object can legitimately have no status yet.
+        # A matching observed identity and predictor are enough to report
+        # CREATE acceptance, but absolutely not a ready model endpoint.
+        if args.create and verdict["status"] in {
+            "STATUS_UNKNOWN", "READY_CONDITION_UNKNOWN", "CONTROLLER_NOT_READY",
+            "CONTROLLER_REPORTED_READY_NOT_HTTP_PROVEN"
+        }:
+            verdict = {"status": "CREATED_NOT_READY_PROVEN",
+                       "reportedReady": False, "uid": actual["metadata"]["uid"]}
         print(json.dumps({"name": name, "namespace": namespace, "projectId": project,
                           "operation": "create" if args.create else "status", **verdict}))
-        # A freshly created InferenceService normally has no Ready condition.
-        # "status" success means observation not full inference readiness.
         return 0 if verdict["status"] in {
-            "CONTROLLER_REPORTED_READY_NOT_HTTP_PROVEN", "CONTROLLER_NOT_READY"
+            "CREATED_NOT_READY_PROVEN", "CONTROLLER_REPORTED_READY_NOT_HTTP_PROVEN",
+            "CONTROLLER_NOT_READY"
         } else 1
     except (InvalidServing, ValueError, UnicodeError, OSError) as exc:
         print("KServe Serving not verified: " + str(exc), file=sys.stderr)
