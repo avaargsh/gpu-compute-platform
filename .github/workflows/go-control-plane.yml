@@ -72,6 +72,59 @@ jobs:
           docker build -f Dockerfile.control-plane --target control-plane -t gpu-control-plane:compat-test .
           docker build -f Dockerfile.control-plane --target cluster-agent -t gpu-cluster-agent:compat-test .
 
+  portal:
+    name: Go Portal / Vue contract build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install existing Vue dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Project and operations-triage contract tests
+        working-directory: frontend
+        run: npm run portal:test
+      - name: Typecheck and build isolated Go Portal
+        working-directory: frontend
+        run: npm run portal:build
+
+  portal-browser:
+    name: Portal / real Chromium to Go API
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    needs: portal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install existing Vue dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install isolated browser test runner without changing lockfile
+        working-directory: frontend
+        run: npm install --no-save --package-lock=false @playwright/test@1.56.1
+      - name: Install pinned Chromium browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Validate local launch scripts syntax
+        run: bash -n scripts/dev/portal-local.sh scripts/e2e/portal-local-launch-smoke.sh scripts/e2e/portal-browser-e2e.sh
+      - name: Run real API-backed Portal Chromium acceptance
+        run: bash scripts/e2e/portal-browser-e2e.sh
+      - name: Smoke one-command local Portal startup, isolation and shutdown
+        run: bash scripts/e2e/portal-local-launch-smoke.sh
+
   golden-path:
     name: Golden Path / kind + Kueue
     runs-on: ubuntu-latest
