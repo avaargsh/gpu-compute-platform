@@ -21,6 +21,7 @@ export interface WorkloadDraftInput {
   image: string
   commandJson: string
   mode: WorkloadMode
+  workspaceClaim?: string
 }
 
 export interface WorkloadDraftPayload {
@@ -31,6 +32,7 @@ export interface WorkloadDraftPayload {
     image: string
     command: string[]
     accelerator: { class: string; quota: number }
+    workspace?: { claimName: string }
   }
 }
 
@@ -40,6 +42,11 @@ export interface WorkloadDraftResult {
 }
 
 const SAFE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/
+const PVC_SEGMENT = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/
+
+function validClaimName(name: string): boolean {
+  return name.length > 0 && name.length <= 253 && name.split('.').every(part => PVC_SEGMENT.test(part))
+}
 
 // Read-only desired-state inventory is a source of candidate pools, not
 // evidence of admitted GPU capacity. Ignore malformed / deleting pool rows.
@@ -89,6 +96,10 @@ export function buildWorkloadDraft(input: WorkloadDraftInput, pools: DraftPool[]
     errors.push('必须提供合法的容器镜像引用（建议锁定 digest）')
   }
   if (input.mode !== 'training' && input.mode !== 'batch-inference') errors.push('未知任务类型')
+  const workspaceClaim = input.workspaceClaim ?? ''
+  if (workspaceClaim !== '' && !validClaimName(workspaceClaim)) {
+    errors.push('持久工作区 PVC 名称必须符合 Kubernetes DNS 命名规则')
+  }
   let command: string[] = []
   try {
     const value: unknown = JSON.parse(input.commandJson)
@@ -112,6 +123,7 @@ export function buildWorkloadDraft(input: WorkloadDraftInput, pools: DraftPool[]
         image: input.image,
         command,
         accelerator: { class: input.acceleratorClass, quota: input.quota },
+        ...(workspaceClaim ? { workspace: { claimName: workspaceClaim } } : {}),
       },
     },
   }

@@ -15,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+PVC_SEGMENT = re.compile(r"^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$")
 MAX_FILE_BYTES = 64 * 1024
 
 
@@ -52,8 +53,18 @@ def load_draft(path: Path) -> dict[str, object]:
         value = payload[field]
         if not isinstance(value, str) or not SAFE_ID.fullmatch(value):
             raise InvalidDraft(f"invalid {field}")
-    if set(spec) != {"image", "command", "accelerator"}:
+    required = {"image", "command", "accelerator"}
+    if not required.issubset(spec) or set(spec) - required - {"workspace"}:
         raise InvalidDraft("unsupported Workload spec fields")
+    if "workspace" in spec:
+        workspace = spec["workspace"]
+        if not isinstance(workspace, dict) or set(workspace) != {"claimName"}:
+            raise InvalidDraft("invalid PVC workspace object")
+        claim = workspace["claimName"]
+        if not isinstance(claim, str) or not 1 <= len(claim) <= 253 or not all(
+            PVC_SEGMENT.fullmatch(part) for part in claim.split(".")
+        ):
+            raise InvalidDraft("invalid PVC workspace claimName")
     image = spec["image"]
     if not isinstance(image, str) or not image or len(image) > 512 or any(c.isspace() for c in image):
         raise InvalidDraft("invalid container image")
