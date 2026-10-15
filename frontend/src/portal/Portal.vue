@@ -7,6 +7,7 @@
       <button type="button" class="nav-item" :class="{ active: view === 'projects' }" @click="view = 'projects'">▦ <span>项目视图</span></button>
       <button type="button" class="nav-item" :class="{ active: view === 'resources' }" @click="view = 'resources'">▤ <span>资源与工作负载</span></button>
       <button type="button" class="nav-item" :class="{ active: view === 'jobs' }" @click="view = 'jobs'">▧ <span>训推任务</span></button>
+      <button type="button" class="nav-item" :class="{ active: view === 'serving' }" @click="view = 'serving'">◈ <span>在线推理</span></button>
       <button type="button" class="nav-item" :class="{ active: view === 'diagnostics' }" @click="view = 'diagnostics'">△ <span>异常待办</span><span v-if="findings.length" class="nav-count">{{ findings.length }}</span></button>
       <button type="button" class="nav-item" :class="{ active: view === 'integrations' }" @click="view = 'integrations'">◇ <span>生态集成</span></button>
       <div class="sidebar-bottom"><span class="local-dot"></span>开发环境 · 默认只读</div>
@@ -142,6 +143,10 @@
             :truncated="snapshot.truncated" />
         </section>
 
+        <section v-else-if="view === 'serving'" class="content-stack">
+          <KServeComposer :rows="snapshot.rows" />
+        </section>
+
         <section v-else-if="view === 'diagnostics'" class="panel">
           <div class="panel-heading"><div><h2>异常待办 / Operations Inbox</h2><p>从真实 Desired、Observation、Condition 派生，不调用 LLM 推断故障原因</p></div><el-tag :type="findings.length ? 'warning' : 'info'" effect="plain">{{ findings.length }} 条待检查</el-tag></div>
           <el-table :data="findings" stripe empty-text="在已读取的资源样本中，没有匹配的异常；不表示全平台健康">
@@ -193,10 +198,11 @@
 import { computed, ref, watch } from 'vue'
 import { loadSnapshot, type PortalSnapshot, type ResourceRow } from './api'
 import JobComposer from './JobComposer.vue'
+import KServeComposer from './KServeComposer.vue'
 import WorkloadRuns from './WorkloadRuns.vue'
 import { findingsFor, projectIdOf, projectSummaries, triageFindings, type Finding } from './project-model'
 
-type View = 'overview' | 'projects' | 'resources' | 'jobs' | 'diagnostics' | 'integrations'
+type View = 'overview' | 'projects' | 'resources' | 'jobs' | 'serving' | 'diagnostics' | 'integrations'
 const view = ref<View>('overview')
 const clusterId = ref('')
 const operatorToken = ref('')
@@ -233,7 +239,7 @@ function lockPortal(): void {
 }
 
 const viewTitle = computed(() => ({
-  overview: '计算平台总览', projects: '项目视图', resources: '资源与工作负载', jobs: '训推任务',
+  overview: '计算平台总览', projects: '项目视图', resources: '资源与工作负载', jobs: '训推任务', serving: '在线推理',
   diagnostics: '异常待办', integrations: '生态集成',
 })[view.value])
 const projects = computed(() => projectSummaries(snapshot.value?.rows ?? []))
