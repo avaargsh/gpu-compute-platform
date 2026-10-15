@@ -67,12 +67,25 @@
           placeholder="PORTAL_OPERATOR_WRITE_TOKEN（至少 32 字符）" show-password />
       </el-form-item>
       <el-button type="primary" :loading="submitting"
-        :disabled="submitting || !draft.payload || readToken.length < 32 || writeToken.length < 32"
+        :disabled="submitting || !!currentSubmission || !draft.payload || readToken.length < 32 || writeToken.length < 32"
         @click="submitWorkload">
         创建 Workload Desired（仅本机开发）
       </el-button>
+      <div v-if="currentSubmission" style="margin-top: 12px">
+        <el-alert
+          :type="currentSubmission.kind === 'accepted' ? 'success' : 'warning'"
+          :title="currentSubmission.detail" :closable="false" />
+        <el-button type="primary" plain style="margin-top: 10px"
+          @click="emit('submitted')">
+          重新读取授权快照（核对 Desired / Observation）
+        </el-button>
+      </div>
       <el-alert v-if="submitError" :title="submitError" type="error"
         :closable="false" style="margin-top: 12px" />
+      <p class="table-footnote" v-if="currentSubmission">
+        同一草案不会自动重试。要提交新的任务，请修改 Workload ID 并检查项目/资源配额；
+        结果未知时必须先刷新授权快照核对 Desired，未读到也不能证明未写入。
+      </p>
       <p class="table-footnote">此处仅创建 Desired State。实际 Pod / Kueue Admission、Job 日志和训练 Checkpoint 须在下方执行监控中查看；操作员预览读取凭证单独使用不能创建资源。</p>
     </div>
   </div>
@@ -82,7 +95,7 @@
 import { computed, ref, watch } from 'vue'
 import type { ResourceRow } from './api'
 import { buildWorkloadDraft, draftPools, type WorkloadMode } from './workload-draft'
-import { submitDevWorkload } from './dev-submit'
+import { submitDevWorkload, WorkloadSubmissionUncertainError } from './dev-submit'
 
 const props = defineProps<{ rows: ResourceRow[]; clusterId: string; readToken: string }>()
 const emit = defineEmits<{ submitted: [] }>()
@@ -100,6 +113,7 @@ const copyStatus = ref('')
 const writeToken = ref('')
 const submitting = ref(false)
 const submitError = ref('')
+const submissionState = ref<{ fingerprint: string; kind: 'accepted' | 'unknown'; detail: string } | null>(null)
 
 watch(pools, value => {
   if (!value.some(p => p.id === poolId.value)) poolId.value = value[0]?.id ?? ''
@@ -118,24 +132,47 @@ const draft = computed(() => buildWorkloadDraft({
   workspaceClaim: workspaceClaim.value,
 }, pools.value))
 const payloadText = computed(() => draft.value.payload ? JSON.stringify(draft.value.payload, null, 2) : '')
+const submissionFingerprint = computed(() => JSON.stringify({
+  clusterId: props.clusterId, payload: draft.value.payload,
+}))
+const currentSubmission = computed(() =>
+  submissionState.value?.fingerprint === submissionFingerprint.value ? submissionState.value : null)
+
 async function submitWorkload(): Promise<void> {
-  if (!draft.value.payload || submitting.value) return
+  const payload = draft.value.payload
+  if (!payload || submitting.value || currentSubmission.value) return
+  // Bind feedback to the exact intent that was sent; form fields can change
+  // while a request is in flight. An unknown outcome must not be auto-retried.
+  const cluster = props.clusterId
+  const reader = props.readToken
+  const fingerprint = submissionFingerprint.value
   submitting.value = true
   submitError.value = ''
   try {
-    await submitDevWorkload(props.clusterId, props.readToken, writeToken.value, draft.value.payload)
-    // Server-side acceptance is only Desired creation, never GPU execution.
-    emit('submitted')
+    await submitDevWorkload(cluster, reader, writeToken.value, payload)
+    submissionState.value = {
+      fingerprint, kind: 'accepted',
+      detail: 'Desired 已接收（HTTP 204）：' + payload.projectId + '/' + payload.metadata.id +
+        ' · Generation ' + payload.metadata.generation + '。请刷新并检查 Agent Observation；不代表 Kueue 准入、Pod 运行或训练成功。',
+    }
+    // Keep the confirmation on screen until the operator explicitly asks
+    // for a read-back. Auto-refresh unmounts the form and loses the outcome
+    // and no-retry guard before the operator can inspect them.
   } catch (cause) {
-    submitError.value = cause instanceof Error ? cause.message : 'Workload 提交失败'
+    if (cause instanceof WorkloadSubmissionUncertainError) {
+      submissionState.value = { fingerprint, kind: 'unknown', detail: cause.message }
+    } else {
+      submitError.value = cause instanceof Error ? cause.message : '提交被拒绝'
+    }
   } finally {
     submitting.value = false
   }
 }
 
-watch(() => props.readToken, () => {
+watch(() => [props.readToken, props.clusterId], () => {
   writeToken.value = ''
   submitError.value = ''
+  submissionState.value = null
 })
 
 async function copyDraft(): Promise<void> {

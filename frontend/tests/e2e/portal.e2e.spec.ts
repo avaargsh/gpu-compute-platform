@@ -121,6 +121,11 @@ test('developer can create actual scoped Workload Desired through Portal without
   const create = page.getByRole('button', { name: '创建 Workload Desired（仅本机开发）' })
   await expect(create).toBeEnabled()
   await create.click()
+  await expect(page.getByText('Desired 已接收（HTTP 204）', { exact: false })).toBeVisible()
+  await expect(create).toBeDisabled() // identical intent is never replayed from this form
+  // Read-back is an explicit operator action; automatic refresh would tear
+  // down the form and erase the confirmed/unknown result before it is seen.
+  await page.getByRole('button', { name: '重新读取授权快照（核对 Desired / Observation）' }).click()
   await expect(page.getByText('train-portal-real-e2e', { exact: true }).first()).toBeVisible()
 
   // Independently read the actual Go desired state. A 204 never proves that
@@ -141,6 +146,31 @@ test('developer can create actual scoped Workload Desired through Portal without
   await page.getByRole('button', { name: '锁定' }).click()
   await expect(page.getByText('连接你的计算集群')).toBeVisible()
   await expect(page.getByText('train-portal-real-e2e')).toHaveCount(0)
+})
+
+test('unknown Workload write outcome warns operator and blocks blind resubmission', async ({ page }) => {
+  const devWrite = process.env.PORTAL_OPERATOR_WRITE_TOKEN
+  if (!devWrite) throw new Error('PORTAL_OPERATOR_WRITE_TOKEN must be set by local e2e script')
+  await unlock(page)
+  await page.getByRole('button', { name: /训推任务/ }).click()
+  await page.getByPlaceholder('train-qwen-001').fill('train-unknown-outcome-e2e')
+  await page.getByPlaceholder('registry.example/team/train@sha256:...').fill('example.invalid/train:local-e2e')
+  await page.getByPlaceholder('PORTAL_OPERATOR_WRITE_TOKEN（至少 32 字符）').fill(devWrite)
+
+  let attempted = 0
+  await page.route('**/api/v1/operator/clusters/portal-ci/projects/research/workloads/train-unknown-outcome-e2e', async route => {
+    attempted++
+    await route.fulfill({ status: 503, body: '' })
+  })
+  const create = page.getByRole('button', { name: '创建 Workload Desired（仅本机开发）' })
+  await expect(create).toBeEnabled()
+  await create.click()
+  await expect(page.getByText('提交结果未知', { exact: false })).toBeVisible()
+  await expect(create).toBeDisabled()
+  expect(attempted).toBe(1)
+  // An explicit new Workload ID is a different request, not an implicit retry.
+  await page.getByPlaceholder('train-qwen-001').fill('train-different-e2e')
+  await expect(create).toBeEnabled()
 })
 
 test('read-only credential cannot create Workload and the Portal never proxies legacy write API', async ({ page, request }) => {

@@ -35,8 +35,30 @@ Security boundary:
 - This is **not** multi-tenant OIDC/RBAC, production audit, a credential vault,
   GPU reservation proof, execution success proof or persisted checkpoint proof.
 
+### Submission outcome and safe recovery
+
+- Only the canonical HTTP **204** response confirms that the local Go API accepted
+  the Desired write. The UI labels this **Desired accepted**, never Job completed,
+  GPU assigned, Kueue admitted or checkpoint persisted.
+- A timeout, network disconnect, redirect rejection, server **5xx**, HTTP 408,
+  or unexpected 2xx is an **unknown outcome**: the request may already have
+  committed. The UI does **not** automatically retry, and disables submitting
+  the same draft again until the operator deliberately changes the intent.
+- After a 204 or unknown outcome, the form deliberately keeps the result
+  visible instead of automatically refreshing (which would unmount it). The
+  operator can explicitly click **重新读取授权快照** to read back the same
+  Project / Workload ID / Generation and inspect independent Agent Observation.
+  A paginated or stale snapshot that does not show the resource is **not proof
+  of rollback**.
+- Explicit 401/403/404/409 denials remain separate actionable errors. Do not
+  elevate a local read token into a write credential or persist either token.
+- The exact request status is not an operation receipt or durable idempotency
+  guarantee. The production replacement must use Management OIDC + project
+  grants + generation CAS + operation ID and audited receipt.
+
 Next milestone: migrate to the canonical audited Management API with OIDC,
 project grants and CAS; continue using the existing Kueue executor and
 independent Agent Observations. Avoid persisting dev write tokens.
 
 Run: `cd frontend && npm ci && npm run portal:test && npm run portal:build`.
+Negative HTTP/transport cases: `frontend/tests/dev-submit-outcome.test.mts`.
