@@ -200,14 +200,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
 import { readResource, writeResource, deleteResource, readReceipt, readExecution, listProjects, listWorkloads, listComputePools, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, type WorkloadInventoryItem, type WorkloadInventoryPage, desiredMatchesScope, createOperationId } from './api'
 import { classifyScopedExecution, type ScopedExecution } from './execution'
 import { verifyEvidencePair } from './evidence-check'
 import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from './readback'
 import { rememberOperation, recoverOperation, forgetOperation, type OperationPointer } from './recovery'
-import { parseAuthorizedPool, buildAuthorizedWorkloadRequest, type AuthorizedPool } from './workload-composer'
+import { parseAuthorizedPool, buildAuthorizedWorkloadRequest, poolForCurrentSession, type VerifiedPoolSelection } from './workload-composer'
 
 const issuer = import.meta.env.VITE_MANAGEMENT_OIDC_ISSUER || ''
 const clientId = import.meta.env.VITE_MANAGEMENT_OIDC_CLIENT_ID || ''
@@ -220,18 +220,17 @@ const project = ref('')
 const resource = ref('')
 const kind = ref<Kind>('ComputePool')
 const workloadPoolId = ref('')
-const verifiedWorkloadPool = ref<AuthorizedPool | null>(null)
-const currentWorkloadPool = computed(() => {
-  const pool = verifiedWorkloadPool.value
-  return pool?.cluster === cluster.value && pool.project === project.value &&
-    pool.id === workloadPoolId.value ? pool : null
-})
+const verifiedWorkloadPool = shallowRef<VerifiedPoolSelection | null>(null)
+const currentWorkloadPool = computed(() =>
+  poolForCurrentSession(verifiedWorkloadPool.value, session.value, authenticated.value,
+    cluster.value, project.value, workloadPoolId.value))
 const workloadID = ref('')
 const workloadImage = ref('')
 const workloadAcceleratorClass = ref('')
 const workloadQuota = ref(1)
 const workloadCommandJSON = ref('["python","train.py"]')
 watch(() => [cluster.value, project.value], () => { verifiedWorkloadPool.value = null })
+watch(session, () => { verifiedWorkloadPool.value = null })
 const requestJSON = ref(JSON.stringify({
   expectedGeneration: 0,
   spec: {
@@ -399,16 +398,20 @@ async function verifyWorkloadPool() {
   const clusterId = cluster.value
   const projectId = project.value
   const poolId = workloadPoolId.value
+  const originalSession = session.value
   try {
     const result = await readResource({
       cluster: clusterId, project: projectId, kind: 'ComputePool', resource: poolId,
     }, token())
     if (!result.value) throw new Error('当前项目未读取到可用 ComputePool')
+    if (session.value !== originalSession || !authenticated.value) {
+      throw new Error('读取期间 OIDC 登录会话已改变或过期，请重新验证 ComputePool')
+    }
     if (cluster.value !== clusterId || project.value !== projectId || workloadPoolId.value !== poolId) {
       throw new Error('项目或 Pool 已变化，请重新读取')
     }
     const pool = parseAuthorizedPool(clusterId, projectId, result.value)
-    verifiedWorkloadPool.value = pool
+    verifiedWorkloadPool.value = { pool, session: originalSession! }
     workloadAcceleratorClass.value = pool.accelerators[0]?.class ?? ''
     workloadQuota.value = 1
     message.value = '已读取并验证授权 ComputePool；尚未创建 Workload'
@@ -471,7 +474,9 @@ async function signIn() {
 
 function signOut() {
   session.value = null
+  verifiedWorkloadPool.value = null
   inventory.value = null
+  poolInventory.value = null
   clearPendingLogin(sessionStorage)
   forgetOperation(sessionStorage)
   recentOperation.value = null
