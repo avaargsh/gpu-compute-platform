@@ -177,6 +177,53 @@ kind get clusters | grep -qx "$CLUSTER_ID" || kind create cluster --name "$CLUST
 kubectl apply --server-side -f "https://github.com/kubernetes-sigs/kueue/releases/download/${KUEUE_VERSION}/manifests.yaml"
 kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout="${TIMEOUT_SECONDS}s"
 
+# Controller Deployment=Available does not prove that the Kueue admission
+# webhook is reachable through the Kubernetes Service yet. A real, server-side
+# dry-run CREATE of the resource kind installed by Fake GPU (Deployment)
+# exercises API-server -> admission-webhook connectivity without creating Pods.
+# Do not skip admission or relax webhook failurePolicy to make CI green.
+wait_kueue_admission() {
+  local deadline=$((SECONDS + TIMEOUT_SECONDS)) attempt=0
+  local error_file
+  error_file="$(mktemp)"
+  while (( SECONDS < deadline )); do
+    attempt=$((attempt + 1))
+    if kubectl create --dry-run=server -n default -f - >/dev/null 2>"$error_file" <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kueue-admission-readiness-probe
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: kueue-admission-readiness-probe
+  template:
+    metadata:
+      labels:
+        app: kueue-admission-readiness-probe
+    spec:
+      containers:
+        - name: probe
+          image: busybox:1.36
+          command: ["true"]
+YAML
+    then
+      rm -f "$error_file"
+      echo "Kueue Deployment admission webhook accepted server-side dry-run (attempt=$attempt)"
+      return 0
+    fi
+    sleep 3
+  done
+  echo "Kueue admission webhook not ready within ${TIMEOUT_SECONDS}s (attempts=$attempt)" >&2
+  cat "$error_file" >&2
+  rm -f "$error_file"
+  kubectl get endpoints,endpointslices -n kueue-system -o wide >&2 || true
+  kubectl get pods -n kueue-system -o wide >&2 || true
+  return 1
+}
+wait_kueue_admission
+
 node="$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')"
 kubectl label node "$node" topology.kubernetes.io/zone=gpu-zone-a ai.compute/rack=rack-a01 "ai.compute/accelerator-class=$ACCELERATOR_CLASS" --overwrite
 bash scripts/e2e/install-fake-gpu.sh
