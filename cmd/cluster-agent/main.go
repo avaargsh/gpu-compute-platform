@@ -38,7 +38,7 @@ func main() {
 		if endpoint.Scheme != "https" {
 			log.Fatal("Agent client certificate authentication requires CONTROL_PLANE_URL=https")
 		}
-		transport, err = httpclient.NewMTLSClient(caFile, certFile, keyFile)
+		transport, err = httpclient.NewClusterMTLSClient(caFile, certFile, keyFile, string(clusterID))
 		if err != nil {
 			log.Fatalf("Agent mTLS client configuration: %v", err)
 		}
