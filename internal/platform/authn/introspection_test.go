@@ -104,7 +104,7 @@ func TestIntrospectionRejectsInsecureEndpointAndRedirect(t *testing.T) {
 func TestAudienceVariants(t *testing.T) {
 	for _, tc := range []struct {
 		raw string
-		ok bool
+		ok  bool
 	}{
 		{`"gpu-api"`, true}, {`["other","gpu-api"]`, true},
 		{`"other"`, false}, {`["other"]`, false},
