@@ -31,10 +31,10 @@ SET role = 'viewer', active = TRUE, updated_at = now()
 			principal.Issuer, principal.Subject, projectID)
 	})
 	for _, tc := range []struct {
-		name string
-		user authn.Principal
+		name    string
+		user    authn.Principal
 		project domain.ID
-		want bool
+		want    bool
 	}{
 		{"member", principal, projectID, true},
 		{"foreign-issuer", authn.Principal{Issuer: "https://another.example", Subject: principal.Subject}, projectID, false},
