@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/bootstrap"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
@@ -29,6 +32,23 @@ func main() {
 	defer cleanup()
 
 	handler := httpapi.NewRouterWithDependencies(store, placement)
+	if operatorPreviewConfigured() {
+		// A loopback browser preview cannot share the Agent-only mTLS router.
+		if agentListener.Enabled {
+			log.Fatal("operator preview cannot coexist with Agent-only mTLS listener")
+		}
+		if !isLoopbackAddress(cfg.ListenAddr) {
+			log.Fatal("operator preview requires an explicit loopback listener")
+		}
+		handler, err = httpapi.NewRouterWithOperatorPreview(store, placement, httpapi.OperatorPreview{
+			Token:     os.Getenv("PORTAL_OPERATOR_TOKEN"),
+			ClusterID: domain.ID(os.Getenv("PORTAL_OPERATOR_CLUSTER_ID")),
+			Projects:  strings.Split(os.Getenv("PORTAL_OPERATOR_PROJECT_IDS"), ","),
+		})
+		if err != nil {
+			log.Fatalf("operator preview configuration invalid: %v", err)
+		}
+	}
 	server := &http.Server{
 		Addr:    cfg.ListenAddr,
 		Handler: handler,
@@ -77,4 +97,18 @@ func buildStore(dsn string) (agentstore.Store, httpapi.BindingStore, func()) {
 	return store, store, func() {
 		_ = db.Close()
 	}
+}
+
+func operatorPreviewConfigured() bool {
+	return os.Getenv("PORTAL_OPERATOR_TOKEN") != "" ||
+		os.Getenv("PORTAL_OPERATOR_CLUSTER_ID") != "" ||
+		os.Getenv("PORTAL_OPERATOR_PROJECT_IDS") != ""
+}
+
+func isLoopbackAddress(addr string) bool {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || port == "" {
+		return false
+	}
+	return host == "127.0.0.1" || host == "::1"
 }
