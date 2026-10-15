@@ -47,7 +47,7 @@ The binary requires:
   confidential introspection credentials available to the server only;
 - `MANAGEMENT_LISTEN_ADDR` default `127.0.0.1:8081`;
   `MANAGEMENT_BROWSER_ORIGIN` may only be an exact
-  `http://127.0.0.1:<port>` local pilot browser Origin.
+  exact `http://127.0.0.1:<port>` or `https://127.0.0.1:<port>` local-only browser Origin.
 
 Do not pass production secrets through CI, terminal command lines,
 plaintext Docker environment files or Git. Any future deployment must

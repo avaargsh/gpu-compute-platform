@@ -72,6 +72,11 @@ func newHandlerWithAuthorityCheck(db *sql.DB, auth Introspector, origin string, 
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(204)
 	})
+	// Readiness is NOT process liveness. It proves that the effective
+	// database login can still perform the required project-scoped
+	// transactions, including a fresh least-privilege authorization check.
+	// It does not test the identity provider or Kubernetes execution.
+	mux.HandleFunc("GET /readyz", svc.readiness)
 	mux.HandleFunc("GET /api/v1/management/clusters/{clusterID}/projects/{projectID}/resources/{kind}/{resourceID}", svc.serve)
 	mux.HandleFunc("PUT /api/v1/management/clusters/{clusterID}/projects/{projectID}/resources/{kind}/{resourceID}", svc.serve)
 	mux.HandleFunc("DELETE /api/v1/management/clusters/{clusterID}/projects/{projectID}/resources/{kind}/{resourceID}", svc.serve)
