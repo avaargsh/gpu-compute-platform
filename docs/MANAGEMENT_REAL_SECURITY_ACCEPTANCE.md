@@ -35,7 +35,17 @@ unauthenticated Agent endpoints. No production credentials or data are used.
 ## Not yet accepted
 
 These are independent tests: Keycloak and PostgreSQL are **not** wired together
-in one user workflow yet. They do not prove interactive browser PKCE,
+in one user workflow yet. A separate
+`.github/workflows/management-browser-postgres.yml` runs real Chromium
+against the real Vite localhost proxy, actual Go Management handler and an
+ephemeral PostgreSQL 17 database, asserting Pool/Workload Desired commits,
+CAS errors, viewer denial, operation receipts and safe reload/recovery.
+**Its OAuth code issuance and Go token introspection are TEST DOUBLES**,
+not Keycloak identity proof. The fixture refuses non-disposable,
+non-loopback DB names and cannot start outside an explicit test-only gate.
+Together these jobs cover the independent IdP, DB and browser/backend
+contracts, but they still do NOT prove a single complete real-IdP+PG
+interactive PKCE session. They do not prove interactive browser PKCE,
 multi-user project revocation races over actual Keycloak/Postgres, end-to-end
 deletion success, Kubernetes scheduling, model readiness or GPU execution.
 
