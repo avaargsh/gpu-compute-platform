@@ -42,6 +42,18 @@ export interface DesiredView {
   spec: Record<string, unknown>
 }
 
+export interface WorkloadInventoryItem {
+  id: string
+  generation: number
+  deleting: boolean
+}
+
+export interface WorkloadInventoryPage {
+  items: WorkloadInventoryItem[]
+  nextCursor: string | null
+  hasMore: boolean
+}
+
 export interface ExecutionView {
   clusterId: string
   projectId: string
@@ -148,6 +160,18 @@ async function request<T>(path: string, method: Method, token: string, payload?:
 // and a fixed same-origin path are used. DB grants remain authoritative.
 export async function listProjects(token: string): Promise<{ status: number; value: ProjectList | null }> {
   return request<ProjectList>('/api/v1/management/projects', 'GET', token)
+}
+
+// Fixed 25-row, cursor-based listing. Server-side live OIDC grant and
+// Project/Cluster/Desired binding are authoritative; no spec/observations
+// are leaked in this response. An empty page is not a cluster-wide view.
+export async function listWorkloads(cluster: string, project: string, token: string, after?: string): Promise<{ status: number; value: WorkloadInventoryPage | null }> {
+  safe(cluster); safe(project)
+  if (after !== undefined) safe(after)
+  const path = '/api/v1/management/clusters/' + cluster +
+    '/projects/' + project + '/workloads' +
+    (after ? '?after=' + encodeURIComponent(after) : '')
+  return request<WorkloadInventoryPage>(path, 'GET', token)
 }
 
 export async function readResource(scope: Scope, token: string): Promise<{ status: number; value: DesiredView | null }> {

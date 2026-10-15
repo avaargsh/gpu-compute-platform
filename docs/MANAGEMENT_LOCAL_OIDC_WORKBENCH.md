@@ -36,6 +36,18 @@ not weaken the legacy Cluster Agent / Kueue security boundary.
 - Browser can GET one scoped Desired resource, PUT a typed resource request
   with a fresh random `Idempotency-Key`, DELETE using the exact
   Generation as `If-Match`, and query a committed-operation audit receipt.
+- **Project Workload inventory:** the existing isolated Management API
+  accepts `GET /api/v1/management/clusters/{cluster}/projects/{project}/workloads`
+  and an optional `?after=<last-workload-id>` keyset cursor. Every page
+  re-introspects the OIDC access token and joins the **live Project grant**,
+  Project/Cluster binding and each Desired spec's `projectID` in the
+  same SQL statement. Only up to **25** workload IDs, Generations and
+  deleting flags are returned, with an explicit `hasMore` and `nextCursor`;
+  no image, command, lease, secret, Agent Observation or audit data is
+  returned. A cursor does not authorize a resource and a paged list is
+  **not** a consistent transaction snapshot. The browser lets users
+  select a listed Workload but requires an independent current Desired
+  read and original audit receipt before interpreting its state.
 - No automatic retries for mutations. Before a PUT/DELETE leaves the
   browser, its 128-bit operation ID and resource scope are written to
   **tab-local sessionStorage**, with 24-hour expiry and **only one record**.
