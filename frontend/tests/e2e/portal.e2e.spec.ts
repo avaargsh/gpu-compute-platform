@@ -123,6 +123,9 @@ test('developer can create actual scoped Workload Desired through Portal without
   await create.click()
   await expect(page.getByText('Desired 已接收（HTTP 204）', { exact: false })).toBeVisible()
   await expect(create).toBeDisabled() // identical intent is never replayed from this form
+  // Read-back is an explicit operator action; automatic refresh would tear
+  // down the form and erase the confirmed/unknown result before it is seen.
+  await page.getByRole('button', { name: '重新读取授权快照（核对 Desired / Observation）' }).click()
   await expect(page.getByText('train-portal-real-e2e', { exact: true }).first()).toBeVisible()
 
   // Independently read the actual Go desired state. A 204 never proves that
