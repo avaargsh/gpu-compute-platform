@@ -162,7 +162,7 @@ docker run -d --name "$GW" --network host --read-only \
   -v "$ROOT/deploy/local/management/Caddyfile:/etc/caddy/Caddyfile:ro" \
   -v "$TMP/gateway.crt:/etc/management-tls/server.crt:ro" \
   -v "$TMP/gateway.key:/etc/management-tls/server.key:ro" \
-  caddy:2.10.2-alpine caddy run --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+  caddy:2.11.6-alpine caddy run --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 ready=0
 for attempt in $(seq 1 90); do
   if curl -fsS --max-time 2 --cacert "$TMP/gateway.crt" \
