@@ -165,7 +165,6 @@ func TestAgentMTLSBodyIsPreservedForHandler(t *testing.T) {
 	}
 }
 
-
 func TestAgentMTLSRejectsAmbiguousJSONScope(t *testing.T) {
 	router := protectedAgentRouter(t)
 	for _, body := range []string{
