@@ -38,7 +38,12 @@ func (s *Service) workloadInventory(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest)
 		return
 	}
-	if values, exists := params["after"]; exists {
+	values, exists := params["after"]
+	if len(params) == 1 && !exists {
+		problem(w, http.StatusBadRequest)
+		return
+	}
+	if exists {
 		if len(values) != 1 || !safeID.MatchString(values[0]) {
 			problem(w, http.StatusBadRequest)
 			return
