@@ -52,8 +52,8 @@ jobs:
         run: make fmt-check
       - name: Vet
         run: go vet ./...
-      - name: Test
-        run: go test ./...
+      - name: Test (serialized shared PostgreSQL fixtures)
+        run: make test
       - name: Release acceptance contracts
         run: make acceptance-contract
       - name: Production supply-chain policy
