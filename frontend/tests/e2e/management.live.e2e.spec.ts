@@ -133,9 +133,11 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await expect(page.getByText('Generation:')).toContainText('1')
   // This new Management endpoint consults the SAME current OIDC project grant,
   // not the legacy local preview/Agent API. No independent observation yet.
-  await page.getByRole('button', { name: '查询已提交回执' }).click()
-  await page.getByRole('button', { name: '按回执核对当前 Desired' }).click()
-  await page.getByRole('button', { name: '查询独立 Agent / Kueue 观察' }).click()
+  // A single explicit read-only action re-verifies original audit, Desired,
+  // and independent Observation without issuing another PUT or DELETE.
+  await page.getByRole('button', { name: '一键重新核对回执、Desired 与执行观察' }).click()
+  await expect(page.getByRole('status')).toContainText('未发起写入或自动重试')
+  await expect(page.getByText('上次完整证据核对：', { exact: false })).toBeVisible()
   await expect(page.getByRole('group', { name: '独立执行状态' })).toContainText('NOT_OBSERVED')
   await expect(page.getByRole('group', { name: '独立执行状态' })).toContainText('不等于 Kueue 已准入')
 
