@@ -124,6 +124,20 @@ class DurabilityTests(unittest.TestCase):
             with self.assertRaises(wd.InvalidDraft):
                 wd.run(cfg, expected)
 
+    def test_mutating_webhook_cannot_redirect_job_to_foreign_pvc(self):
+        config = args()
+        requested = wd.workload_job(config, "pvc-write-test", "train-data",
+                                    "/workspace/test.bin", "payload", "digest", False)
+        admitted = copy.deepcopy(requested)
+        admitted["metadata"]["uid"] = "uid-123"
+        admitted["spec"]["template"]["spec"]["volumes"][0][
+            "persistentVolumeClaim"]["claimName"] = "foreign-data"
+        with patch.object(wd, "obj", return_value=admitted), \
+             patch.object(wd, "kubectl") as cli:
+            with self.assertRaises(wd.InvalidDraft):
+                wd.create_wait(config, requested)
+        cli.assert_not_called()
+
     def test_kubectl_never_executes_shell_or_deletes_pvc(self):
         cfg = args()
         calls = []

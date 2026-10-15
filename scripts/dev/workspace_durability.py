@@ -128,8 +128,37 @@ def create_wait(args: argparse.Namespace, wanted: dict[str, Any]) -> str:
     meta = returned.get("metadata")
     if (returned.get("kind") != "Job" or not isinstance(meta, dict)
         or meta.get("name") != wanted["metadata"]["name"]
-        or meta.get("namespace") != args.namespace or not meta.get("uid")):
+        or meta.get("namespace") != args.namespace or not isinstance(meta.get("uid"), str)
+        or not meta["uid"]):
         raise InvalidDraft("created Job identity does not match request")
+    # Check the admitted Job returned by Kubernetes, not just our locally
+    # authored manifest. A mutating webhook must not redirect the writer or
+    # reader to another PVC/image and still satisfy our success receipt.
+    actual_spec = returned.get("spec")
+    if not isinstance(actual_spec, dict):
+        raise InvalidDraft("created Job spec missing")
+    template = actual_spec.get("template")
+    if not isinstance(template, dict) or not isinstance(template.get("spec"), dict):
+        raise InvalidDraft("created Job Pod template missing")
+    pod = template["spec"]
+    volumes = pod.get("volumes")
+    containers = pod.get("containers")
+    expected_pod = wanted["spec"]["template"]["spec"]
+    if (not isinstance(volumes, list) or
+        not any(isinstance(v, dict) and v.get("name") == "workspace" and
+                isinstance(v.get("persistentVolumeClaim"), dict) and
+                v["persistentVolumeClaim"].get("claimName") ==
+                expected_pod["volumes"][0]["persistentVolumeClaim"]["claimName"]
+                for v in volumes) or
+        not isinstance(containers, list) or len(containers) != 1 or
+        not isinstance(containers[0], dict) or
+        containers[0].get("image") != args.image or
+        containers[0].get("command") != expected_pod["containers"][0]["command"] or
+        not any(isinstance(m, dict) and m.get("name") == "workspace" and
+                m.get("mountPath") == "/workspace" for m in
+                containers[0].get("volumeMounts", [])) or
+        pod.get("automountServiceAccountToken") is not False):
+        raise InvalidDraft("created Job storage or execution identity was altered")
     kubectl(args, ["wait", "--for=condition=complete",
                    "job/" + meta["name"], "--timeout=" + str(args.timeout) + "s"],
             timeout=args.timeout + 20)
