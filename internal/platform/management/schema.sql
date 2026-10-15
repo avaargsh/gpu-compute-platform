@@ -86,3 +86,44 @@ AS $management_pool_binding$
 $management_pool_binding$;
 
 REVOKE ALL ON FUNCTION public.management_locked_pool_binding(text) FROM PUBLIC;
+
+
+-- Read-only, project-scoped execution observation projection. Management's
+-- runtime login MUST NOT have direct SELECT on resource_observations.
+-- The DBA owns this static SQL function and grants EXECUTE only to the
+-- narrowly provisioned Management runtime role. The caller cannot supply a
+-- role or a different Project for an observation whose Desired belongs to
+-- another tenant. This read is a snapshot, not an execution attestation.
+CREATE OR REPLACE FUNCTION public.management_scoped_workload_observation(
+  p_issuer text, p_subject text, p_cluster text,
+  p_project text, p_resource text
+) RETURNS TABLE (
+  desired_generation bigint,
+  deleting boolean,
+  observed_generation bigint,
+  conditions jsonb,
+  observed_at timestamptz
+)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $management_observation$
+  SELECT d.generation, (d.deletion_timestamp IS NOT NULL),
+         o.observed_generation, o.conditions, o.observed_at
+  FROM public.desired_resources AS d
+  JOIN public.project_bindings AS b
+    ON b.project_id=p_project AND b.cluster_id=d.cluster_id
+  JOIN public.management_project_grants AS g
+    ON g.project_id=b.project_id AND g.issuer=p_issuer
+   AND g.subject=p_subject AND g.role IN ('viewer','operator','admin')
+  LEFT JOIN public.resource_observations AS o
+    ON o.cluster_id=d.cluster_id AND o.kind=d.kind
+   AND o.resource_id=d.resource_id
+  WHERE d.cluster_id=p_cluster AND d.kind='Workload'
+    AND d.resource_id=p_resource AND d.spec->>'projectID'=p_project;
+$management_observation$;
+
+REVOKE ALL ON FUNCTION public.management_scoped_workload_observation(
+  text,text,text,text,text
+) FROM PUBLIC;
