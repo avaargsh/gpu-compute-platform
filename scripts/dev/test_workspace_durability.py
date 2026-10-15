@@ -13,7 +13,6 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 import workspace_durability as wd  # noqa: E402
-from workspace_pvc import manifest
 
 DRAFT = {
     "metadata": {"id": "train-1", "generation": 1},
@@ -71,7 +70,7 @@ class DurabilityTests(unittest.TestCase):
 
     def test_full_sequence_deletes_writer_before_reader_and_preserves_uid(self):
         cfg = args()
-        expected = manifest(DRAFT, cfg)
+        expected = wd.pvc_manifest(DRAFT, cfg)
         events = []
         def fake_pvc(config, wanted, initial=None):
             events.append("pvc")
@@ -107,7 +106,7 @@ class DurabilityTests(unittest.TestCase):
         self.assertEqual(receipt["sha256"], digest)
 
     def test_reader_wrong_digest_is_not_success(self):
-        cfg, expected = args(), manifest(DRAFT, args())
+        cfg, expected = args(), wd.pvc_manifest(DRAFT, args())
         with patch.object(wd.secrets, "token_hex", side_effect=["0123456789abcd", "f" * 32]), \
              patch.object(wd, "pvc_uid", return_value="pvc-uid"), \
              patch.object(wd, "create_wait", return_value="job-uid"), \
@@ -117,7 +116,7 @@ class DurabilityTests(unittest.TestCase):
                 wd.run(cfg, expected)
 
     def test_pvc_uid_replacement_fails_before_reader(self):
-        cfg, expected = args(), manifest(DRAFT, args())
+        cfg, expected = args(), wd.pvc_manifest(DRAFT, args())
         with patch.object(wd.secrets, "token_hex", side_effect=["0123456789abcd", "f" * 32]), \
              patch.object(wd, "pvc_uid", side_effect=["original", wd.InvalidDraft("PVC UID changed")]), \
              patch.object(wd, "create_wait", return_value="job-uid"), \

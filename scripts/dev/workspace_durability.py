@@ -51,6 +51,13 @@ def obj(args: argparse.Namespace, tokens: list[str],
     return result
 
 
+def pvc_manifest(draft: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    # Adapt the PVC bootstrap CLI's create/status flag contract to this tool.
+    # This tool independently validates its own explicit --execute flag.
+    options = argparse.Namespace(**{**vars(args), "create": False, "status": False})
+    return expected_pvc(draft, options)
+
+
 def pvc_uid(args: argparse.Namespace, wanted: dict[str, Any],
             initial: str | None = None) -> str:
     observed = obj(args, ["get", "pvc", wanted["metadata"]["name"], "-o", "json"])
@@ -197,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
             raise InvalidDraft("invalid context, image digest, or timeout")
         # Reuses existing v0.1 draft and PVC validation; never trusts a
         # client-chosen namespace as proof of the server-side ProjectBinding.
-        wanted = expected_pvc(load_draft(args.draft), args)
+        wanted = pvc_manifest(load_draft(args.draft), args)
         if not args.execute:
             print(json.dumps({
                 "result": "PLAN_ONLY", "namespace": args.namespace,

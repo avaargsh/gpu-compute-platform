@@ -9,15 +9,15 @@ Kueue admission, model accuracy, checkpoint backup, or multi-tenant storage RBAC
    namespace and kubectl context out of band.
 3. Preview the plan (no network access):
 
-\`\`\`bash
+```bash
 python3 scripts/dev/workspace_durability.py workload.json \
   --namespace research --storage-class standard --context kind-gpu \
   --image registry.example/shell@sha256:<64hex>
-\`\`\`
+```
 
-4. After approving the exact cluster/PVC, add \`--execute\`. The image
-   MUST be digest-pinned and contain \`/bin/sh\`, \`mkdir\`, \`printf\`,
-   \`sha256sum\` and a non-root-compatible userland.
+4. After approving the exact cluster/PVC, add `--execute`. The image
+   MUST be digest-pinned and contain `/bin/sh`, `mkdir`, `printf`,
+   `sha256sum` and a non-root-compatible userland.
 
 The probe GETs a Bound, project-annotated PVC and records UID; creates a random
 CPU-only writer Job mounting it; waits for completion; **deletes writer Job**;
@@ -40,4 +40,4 @@ failover, model training or formal operation ownership. Follow with real
 storage disaster-recovery drills before production promotion.
 
 No-cluster negative tests:
-\`python3 -m unittest discover -s scripts/dev -p 'test_workspace_durability.py' -v\`.
+`python3 -m unittest discover -s scripts/dev -p 'test_workspace_durability.py' -v`.
