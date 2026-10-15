@@ -56,6 +56,8 @@ jobs:
         run: go test ./...
       - name: Release acceptance contracts
         run: make acceptance-contract
+      - name: Security authentication and RBAC contracts
+        run: make security-contract
       - name: Production supply-chain policy
         run: make supply-chain-check
       - name: Build binaries
