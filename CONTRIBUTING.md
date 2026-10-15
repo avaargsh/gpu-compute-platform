@@ -33,11 +33,11 @@ make build
 The full CI also builds container targets and runs the disposable kind + Kueue
 Golden Path. PostgreSQL contract tests require `TEST_POSTGRES_DSN`.
 
-**Shared PostgreSQL test isolation:** `make test` intentionally runs `go test -p 1 ./...`
-when `TEST_POSTGRES_DSN` is set: multiple package fixtures currently use the same
-database, and `internal/store/postgres` resets tables with `TRUNCATE`. Running
-`go test ./...` directly may interleave those package tests and produce false
-failures (or false acceptance). Intra-package concurrency tests still run.
+**Shared PostgreSQL test isolation:** `make test` always runs `go test -p 1 ./...`
+because multiple package fixtures currently share `TEST_POSTGRES_DSN`, and
+`internal/store/postgres` resets tables with `TRUNCATE`. Running `go test ./...`
+directly with that environment set may interleave package tests and produce
+nondeterministic failures. Intra-package concurrency tests still run.
 Keep CI on `make test` until separate disposable databases or schemas are
 proven for every PostgreSQL integration package; removing `-p 1` requires
 an explicit concurrent-run acceptance test.
