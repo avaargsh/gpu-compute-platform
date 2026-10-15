@@ -136,6 +136,9 @@
 
         <section v-else-if="view === 'jobs'" class="panel">
           <JobComposer :rows="snapshot.rows" />
+          <el-divider />
+          <WorkloadRuns :rows="snapshot.rows" :cluster-id="snapshot.agent.clusterId"
+            :truncated="snapshot.truncated" />
         </section>
 
         <section v-else-if="view === 'diagnostics'" class="panel">
@@ -156,7 +159,7 @@
         <section v-else class="content-stack">
           <div class="two-columns">
             <section class="panel integration-panel"><span class="integration-symbol">K</span><h2>Kueue</h2><p>当前唯一生产级执行路径。能力是否已安装以 Agent 的实际发现为准。</p><el-tag :type="snapshot.agent.capabilities.providers?.includes('kueue') ? 'success' : 'info'">{{ snapshot.agent.capabilities.providers?.includes('kueue') ? '运行时已注册' : '未注册' }}</el-tag></section>
-            <section class="panel integration-panel"><span class="integration-symbol">L</span><h2>llm-d / GAIE</h2><p>Serving 集成尚处于只读 InferencePool 前置验证阶段。Go Portal 不会凭 CRD 或历史 PR 推断 Serving Ready。</p><el-tag type="warning">独立 Draft PR · 未接入 Portal 数据源</el-tag></section>
+            <section class="panel integration-panel"><span class="integration-symbol">L</span><h2>llm-d / GAIE</h2><p>Serving 当前已提供 GAIE InferencePool 只读预检查；尚无模型部署、持续健康检查或 Serving API 创建闭环。</p><el-tag type="warning">只读探测已合并 · 未接入 Portal 数据源</el-tag></section>
           </div>
           <section class="panel">
             <div class="panel-heading"><h2>上游调度事实</h2><span>能力发现不会自动注册 Provider</span></div>
@@ -189,6 +192,7 @@
 import { computed, ref, watch } from 'vue'
 import { loadSnapshot, type PortalSnapshot, type ResourceRow } from './api'
 import JobComposer from './JobComposer.vue'
+import WorkloadRuns from './WorkloadRuns.vue'
 import { findingsFor, projectIdOf, projectSummaries, triageFindings, type Finding } from './project-model'
 
 type View = 'overview' | 'projects' | 'resources' | 'jobs' | 'diagnostics' | 'integrations'
