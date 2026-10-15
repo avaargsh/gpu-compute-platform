@@ -68,6 +68,11 @@ jobs:
           docker build -f Dockerfile -t gpu-control-plane:test .
           docker build -f Dockerfile --target control-plane -t gpu-control-plane:target-test .
           docker build -f Dockerfile --target cluster-agent -t gpu-cluster-agent:test .
+          docker build -f Dockerfile --target management-api -t gpu-management-api:ci .
+      - name: Verify nonroot Management container and fail-closed startup
+        run: |
+          bash -n scripts/e2e/management-image-security-smoke.sh
+          bash scripts/e2e/management-image-security-smoke.sh gpu-management-api:ci
       - name: Build compatibility container targets
         run: |
           docker build -f Dockerfile.control-plane --target control-plane -t gpu-control-plane:compat-test .
