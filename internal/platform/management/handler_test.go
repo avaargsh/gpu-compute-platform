@@ -1,0 +1,426 @@
+package management
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
+)
+
+func oidcFixture(t *testing.T) (Introspector, *httptest.Server) {
+	t.Helper()
+	active := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.Header.Get("Content-Type") != "application/x-www-form-urlencoded" {
+			t.Error("invalid introspection wire contract")
+			w.WriteHeader(400)
+			return
+		}
+		user, pw, ok := r.BasicAuth()
+		if !ok || user != "manager" || pw != "secret" {
+			w.WriteHeader(401)
+			return
+		}
+		_ = r.ParseForm()
+		token := r.Form.Get("token")
+		answer := map[string]any{"active": active, "iss": "https://issuer.example", "sub": "alice", "aud": []string{"manager-api"}, "exp": time.Now().Add(time.Minute).Unix(), "token_type": "Bearer"}
+		switch token {
+		case "provider-unavailable":
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		case "provider-malformed":
+			_, _ = w.Write([]byte("{"))
+			return
+		case "wrong-audience":
+			answer["aud"] = "other-api"
+		case "wrong-issuer":
+			answer["iss"] = "https://attacker.example"
+		case "expired-token":
+			answer["exp"] = time.Now().Add(-time.Minute).Unix()
+		case "revoked-token":
+			answer["active"] = false
+		case "missing-subject":
+			delete(answer, "sub")
+		case "missing-token-type":
+			delete(answer, "token_type")
+		case "bob-token":
+			answer["sub"] = "bob"
+		}
+		_ = json.NewEncoder(w).Encode(answer)
+	}))
+	return Introspector{URL: server.URL, Issuer: "https://issuer.example", Audience: "manager-api", ClientID: "manager", ClientSecret: "secret", AllowHTTPForTests: true}, server
+}
+
+func TestOIDCProviderIntrospectionDeniesForgedWrongAndRevokedTokens(t *testing.T) {
+	verifier, server := oidcFixture(t)
+	defer server.Close()
+	if id, err := verifier.Verify(context.Background(), "good-access-token"); err != nil || id.Subject != "alice" {
+		t.Fatalf("verified identity %+v err %v", id, err)
+	}
+	for _, token := range []string{"wrong-audience", "wrong-issuer", "expired-token", "revoked-token", "missing-subject", "missing-token-type", "short", "malformed token"} {
+		if _, err := verifier.Verify(context.Background(), token); err == nil {
+			t.Fatalf("accepted forbidden token %q", token)
+		}
+	}
+	verifier.AllowHTTPForTests = false
+	if _, err := verifier.Verify(context.Background(), "good-access-token"); err == nil {
+		t.Fatal("production accepted plaintext introspection")
+	}
+}
+
+func TestManagementRejectsUnconfiguredRoutesAndBearer(t *testing.T) {
+	verifier, server := oidcFixture(t)
+	defer server.Close()
+	if _, err := NewHandler(nil, verifier); err == nil {
+		t.Fatal("accepted nil postgres DB")
+	}
+	db := &sql.DB{}
+	handler, err := NewHandler(db, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, req := range []struct {
+		method, path, header string
+		status               int
+	}{
+		{"GET", "/api/v1/agent/desired", "", 404},
+		{"POST", "/api/v1/agent/register", "", 404},
+		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "", 401},
+		{"PUT", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer short", 401},
+		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer provider-unavailable", 503},
+		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer provider-malformed", 503},
+		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/operations/0123456789abcdef0123456789abcdef", "Bearer provider-unavailable", 503},
+		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/operations/0123456789abcdef0123456789abcdef", "Bearer revoked-token", 401},
+		{"DELETE", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/bad!id", "", 400},
+	} {
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(req.method, req.path, nil)
+		if req.header != "" {
+			r.Header.Set("Authorization", req.header)
+		}
+		handler.ServeHTTP(rec, r)
+		if rec.Code != req.status {
+			t.Errorf("%s %s: got %d want %d", req.method, req.path, rec.Code, req.status)
+		}
+	}
+}
+
+func TestManagementPostgresAuthorizationCASAndAtomicAudit(t *testing.T) {
+	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("requires TEST_POSTGRES_DSN PostgreSQL")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	for _, path := range []string{"../../store/postgres/schema.sql", "schema.sql"} {
+		src, err := os.ReadFile(filepath.Clean(path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.ExecContext(ctx, string(src)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	suffix := time.Now().UnixNano()
+	cluster := fmtID("cluster", suffix)
+	project := fmtID("project", suffix)
+	pool := fmtID("pool", suffix)
+	job := fmtID("job", suffix)
+	defer func() {
+		for _, statement := range []string{
+			"DELETE FROM management_operation_audit WHERE project_id=$1",
+			"DELETE FROM management_project_grants WHERE project_id=$1",
+			"DELETE FROM desired_resources WHERE cluster_id=$1",
+			"DELETE FROM cluster_bindings WHERE cluster_id=$1",
+			"DELETE FROM project_bindings WHERE project_id=$1",
+		} {
+			if strings.Contains(statement, "cluster_id=$1") {
+				_, _ = db.ExecContext(ctx, statement, cluster)
+			} else {
+				_, _ = db.ExecContext(ctx, statement, project)
+			}
+		}
+	}()
+	for _, statement := range []struct {
+		q    string
+		args []any
+	}{
+		{"INSERT INTO project_bindings(project_id,cluster_id,namespace) VALUES($1,$2,$3)", []any{project, cluster, project}},
+		{"INSERT INTO cluster_bindings(pool_id,cluster_id,provider) VALUES($1,$2,'kueue')", []any{pool, cluster}},
+		{"INSERT INTO management_project_grants(issuer,subject,project_id,role) VALUES($1,$2,$3,$4)", []any{"https://issuer.example", "alice", project, "operator"}},
+		{"INSERT INTO management_project_grants(issuer,subject,project_id,role) VALUES($1,$2,$3,$4)", []any{"https://issuer.example", "bob", project, "viewer"}},
+	} {
+		if _, err := db.ExecContext(ctx, statement.q, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	verifier, idp := oidcFixture(t)
+	defer idp.Close()
+	handler, err := NewHandlerWithBrowserOrigin(db, verifier, "http://127.0.0.1:3002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	base := server.URL + "/api/v1/management/clusters/" + cluster + "/projects/" + project + "/resources/"
+	issueWithKey := func(method, url, body, token, ifMatch, key string) (int, http.Header) {
+		t.Helper()
+		r, err := http.NewRequest(method, url, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token != "" {
+			r.Header.Set("Authorization", "Bearer "+token)
+		}
+		if key != "" {
+			r.Header.Set("Idempotency-Key", key)
+		}
+		if method == "PUT" {
+			r.Header.Set("Content-Type", "application/json")
+		}
+		if ifMatch != "" {
+			r.Header.Set("If-Match", ifMatch)
+		}
+		resp, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode, resp.Header
+	}
+	// Real-browser header behavior traverses Go -> verified OIDC -> DB.
+	// The local Vite proxy forwards the browser's Origin unchanged.
+	issueBrowser := func(method, url, body, token, ifMatch, key, origin, fetchSite string) (int, http.Header) {
+		t.Helper()
+		r, err := http.NewRequest(method, url, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Idempotency-Key", key)
+		if method == http.MethodPut {
+			r.Header.Set("Content-Type", "application/json")
+		}
+		if ifMatch != "" {
+			r.Header.Set("If-Match", ifMatch)
+		}
+		if origin != "" {
+			r.Header.Set("Origin", origin)
+		}
+		if fetchSite != "" {
+			r.Header.Set("Sec-Fetch-Site", fetchSite)
+		}
+		resp, err := server.Client().Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode, resp.Header
+	}
+	issue := func(method, url, body, token, ifMatch string) (int, http.Header) {
+		t.Helper()
+		key, err := createRequestID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return issueWithKey(method, url, body, token, ifMatch, key)
+	}
+	poolBody := `{"expectedGeneration":0,"spec":{"accelerators":[{"class":"h100","quota":2}],"acceleratorBindings":[{"class":"h100","resourceName":"nvidia.com/gpu","flavor":"h100"}],"scheduling":{"mode":"kueue"}}}`
+	if status, _ := issue("PUT", base+"ComputePool/"+pool, poolBody, "", ""); status != 401 {
+		t.Fatalf("anonymous write: %d", status)
+	}
+	if status, _ := issue("PUT", base+"ComputePool/"+pool, poolBody, "bob-token", ""); status != 403 {
+		t.Fatalf("viewer write: %d", status)
+	}
+	foreignBase := server.URL + "/api/v1/management/clusters/" + cluster + "/projects/forbidden-project/resources/"
+	if status, _ := issue("PUT", foreignBase+"ComputePool/"+pool, poolBody, "good-access-token", ""); status != 403 {
+		t.Fatalf("foreign project create: %d", status)
+	}
+	if status, _ := issue("DELETE", foreignBase+"ComputePool/"+pool, "", "good-access-token", `"1"`); status != 403 {
+		t.Fatalf("foreign project delete: %d", status)
+	}
+	poolOperationID, err := createRequestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A valid bearer token alone must not bypass the browser Origin gate.
+	// Reuse the same never-committed ID; denied attempts must create no audit.
+	for _, attempt := range []struct {
+		origin string
+		site   string
+	}{
+		{"http://evil.example:3002", "cross-site"},
+		{"null", "same-origin"},
+		{"http://127.0.0.1:3003", "same-origin"},
+		{"http://127.0.0.1:3002", "cross-site"},
+	} {
+		if status, _ := issueBrowser("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID, attempt.origin, attempt.site); status != 403 {
+			t.Fatalf("untrusted origin=%q site=%q wrote Desired: %d", attempt.origin, attempt.site, status)
+		}
+	}
+	var deniedCount int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM desired_resources WHERE cluster_id=$1 AND kind='ComputePool' AND resource_id=$2", cluster, pool).Scan(&deniedCount); err != nil || deniedCount != 0 {
+		t.Fatalf("denied browser writes changed Desired: count=%d err=%v", deniedCount, err)
+	}
+	if status, _ := issueBrowser("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID, "http://127.0.0.1:3002", "same-origin"); status != 204 {
+		t.Fatalf("same-origin authenticated browser create pool: %d", status)
+	}
+	// Audit receipt is a separate, authenticated *committed Desired* lookup.
+	// It must never imply provider admission or execution ownership.
+	receiptURL := server.URL + "/api/v1/management/clusters/" + cluster + "/projects/" + project + "/operations/" + poolOperationID
+	lookupReceipt := func(target, token string) (int, http.Header, OperationReceipt) {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, target, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := server.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var receipt OperationReceipt
+		if resp.StatusCode == http.StatusOK {
+			if err := json.NewDecoder(resp.Body).Decode(&receipt); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return resp.StatusCode, resp.Header, receipt
+	}
+	if status, _, _ := lookupReceipt(receiptURL, ""); status != http.StatusUnauthorized {
+		t.Fatalf("anonymous receipt disclosed: %d", status)
+	}
+	if status, _, _ := lookupReceipt(receiptURL, "bob-token"); status != http.StatusNotFound {
+		t.Fatalf("viewer could read another operator receipt: %d", status)
+	}
+	if status, _, _ := lookupReceipt(strings.Replace(receiptURL, "/projects/"+project+"/", "/projects/foreign-project/", 1), "good-access-token"); status != http.StatusNotFound {
+		t.Fatalf("cross-project receipt disclosed: %d", status)
+	}
+	if status, _, _ := lookupReceipt(strings.Replace(receiptURL, "/clusters/"+cluster+"/", "/clusters/foreign-cluster/", 1), "good-access-token"); status != http.StatusNotFound {
+		t.Fatalf("cross-cluster receipt disclosed: %d", status)
+	}
+	if status, _, _ := lookupReceipt(strings.TrimSuffix(receiptURL, poolOperationID)+"invalid!", "good-access-token"); status != http.StatusBadRequest {
+		t.Fatalf("invalid operation ID was accepted: %d", status)
+	}
+	unknownID, err := createRequestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _, _ := lookupReceipt(strings.TrimSuffix(receiptURL, poolOperationID)+unknownID, "good-access-token"); status != http.StatusNotFound {
+		t.Fatalf("uncommitted operation reported success: %d", status)
+	}
+	status, headers, receipt := lookupReceipt(receiptURL, "good-access-token")
+	if status != http.StatusOK || headers.Get("Cache-Control") != "no-store" ||
+		headers.Get("ETag") != `"1"` || headers.Get("X-Request-ID") != poolOperationID ||
+		receipt.Status != "desired-committed" || receipt.RequestID != poolOperationID ||
+		receipt.Kind != "ComputePool" || receipt.ResourceID != pool ||
+		receipt.Action != "create" || receipt.ExpectedGeneration != 0 ||
+		receipt.ResultingGeneration != 1 || receipt.RequestDigest == "" {
+		t.Fatalf("unexpected scoped receipt: status=%d headers=%v payload=%+v", status, headers, receipt)
+	}
+	// A lost HTTP response may be retried with the exact same operation ID:
+	// it must replay the original result rather than mutate or audit again.
+	if status, header := issueWithKey("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", "", poolOperationID); status != 204 || header.Get("ETag") != `"1"` {
+		t.Fatalf("idempotent replay status=%d ETag=%s", status, header.Get("ETag"))
+	}
+	modifiedBody := strings.Replace(poolBody, `"quota":2`, `"quota":3`, 1)
+	if status, _ := issueWithKey("PUT", base+"ComputePool/"+pool, modifiedBody, "good-access-token", "", poolOperationID); status != 409 {
+		t.Fatalf("operation ID reused for a different payload: %d", status)
+	}
+	if status, _ := issueWithKey("DELETE", base+"ComputePool/"+pool, "", "good-access-token", `"1"`, poolOperationID); status != 409 {
+		t.Fatalf("operation ID reused for a different method: %d", status)
+	}
+	if status, _ := issue("PUT", base+"ComputePool/"+pool, poolBody, "good-access-token", ""); status != 409 {
+		t.Fatalf("stale create should be 409: %d", status)
+	}
+	jobBody := `{"expectedGeneration":0,"poolId":"` + pool + `","spec":{"image":"example.invalid/train:1","accelerator":{"class":"h100","quota":1}}}`
+	if status, _ := issue("PUT", base+"Workload/"+job, jobBody, "good-access-token", ""); status != 204 {
+		t.Fatalf("create work: %d", status)
+	}
+	if status, _ := issue("DELETE", base+"ComputePool/"+pool, "", "good-access-token", `"1"`); status != 409 {
+		t.Fatalf("active workload allowed pool deletion: %d", status)
+	}
+	if status, _ := issue("DELETE", base+"Workload/"+job, "", "good-access-token", `"2"`); status != 409 {
+		t.Fatalf("stale generation delete: %d", status)
+	}
+	deleteID, err := createRequestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := issueBrowser("DELETE", base+"Workload/"+job, "", "good-access-token", `"1"`, deleteID, "http://127.0.0.1:3002", "same-origin"); status != 202 {
+		t.Fatalf("same-origin authenticated browser delete work: %d", status)
+	}
+	var deleting bool
+	if err := db.QueryRowContext(ctx, "SELECT deletion_timestamp IS NOT NULL FROM desired_resources WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2", cluster, job).Scan(&deleting); err != nil || !deleting {
+		t.Fatalf("deleting=%t err=%v", deleting, err)
+	}
+	var audits int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM management_operation_audit WHERE project_id=$1", project).Scan(&audits); err != nil || audits != 3 {
+		t.Fatalf("audit count=%d err=%v", audits, err)
+	}
+	// Force an audit insert failure for this test project only. The Desired
+	// INSERT must rollback as part of the same SQL transaction, so no
+	// apparently successful resource can exist without its audit evidence.
+	auditPool := fmtID("audit", suffix)
+	if _, err := db.ExecContext(ctx, "INSERT INTO cluster_bindings(pool_id,cluster_id,provider) VALUES($1,$2,'kueue')", auditPool, cluster); err != nil {
+		t.Fatal(err)
+	}
+	constraint := "management_test_block_" + strings.ReplaceAll(project, "-", "_")
+	if _, err := db.ExecContext(ctx, "ALTER TABLE management_operation_audit ADD CONSTRAINT "+constraint+" CHECK (project_id <> '"+project+"') NOT VALID"); err != nil {
+		t.Fatalf("failed to install audit failure injector: %v", err)
+	}
+	defer db.ExecContext(ctx, "ALTER TABLE management_operation_audit DROP CONSTRAINT "+constraint)
+	if status, _ := issue("PUT", base+"ComputePool/"+auditPool, poolBody, "good-access-token", ""); status != 503 {
+		t.Fatalf("audit failure status=%d, want 503", status)
+	}
+	var created int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM desired_resources WHERE cluster_id=$1 AND kind='ComputePool' AND resource_id=$2", cluster, auditPool).Scan(&created); err != nil || created != 0 {
+		t.Fatalf("audit insertion failure left undesired resource count=%d err=%v", created, err)
+	}
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM management_operation_audit WHERE project_id=$1", project).Scan(&audits); err != nil || audits != 3 {
+		t.Fatalf("audit failed write count=%d err=%v", audits, err)
+	}
+	// Project authorization comes from a fresh DB lookup on every request.
+	// Role downgrade immediately blocks writes; revoke blocks reads too.
+	if _, err := db.ExecContext(ctx, "UPDATE management_project_grants SET role='viewer' WHERE issuer=$1 AND subject=$2 AND project_id=$3", "https://issuer.example", "alice", project); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := issue("DELETE", base+"Workload/"+job, "", "good-access-token", `"1"`); status != 403 {
+		t.Fatalf("downgraded operator still allowed to delete: %d", status)
+	}
+	if status, _, _ := lookupReceipt(receiptURL, "good-access-token"); status != http.StatusNotFound {
+		t.Fatalf("viewer retained access to operator receipt: %d", status)
+	}
+	if status, _ := issue("GET", base+"ComputePool/"+pool, "", "good-access-token", ""); status != 200 {
+		t.Fatalf("viewer should retain scoped read: %d", status)
+	}
+	if _, err := db.ExecContext(ctx, "DELETE FROM management_project_grants WHERE issuer=$1 AND subject=$2 AND project_id=$3", "https://issuer.example", "alice", project); err != nil {
+		t.Fatal(err)
+	}
+	if status, _ := issue("GET", base+"ComputePool/"+pool, "", "good-access-token", ""); status != 403 {
+		t.Fatalf("revoked membership still granted read: %d", status)
+	}
+	if status, _, _ := lookupReceipt(receiptURL, "good-access-token"); status != http.StatusNotFound {
+		t.Fatalf("revoked membership still reads past receipt: %d", status)
+	}
+}
+
+func fmtID(prefix string, n int64) string {
+	return prefix + "-" + strconv.FormatInt(n, 10)
+}
