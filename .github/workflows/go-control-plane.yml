@@ -32,6 +32,7 @@ jobs:
           --health-retries 10
     env:
       TEST_POSTGRES_DSN: postgres://gpu:gpu@localhost:5432/gpu_platform_test?sslmode=disable
+      TEST_POSTGRES_STORE_DSN: postgres://gpu:gpu@localhost:5432/gpu_store_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -48,12 +49,17 @@ jobs:
             git diff -- go.mod go.sum
             exit 1
           fi
+      - name: Provision independent Store package test database
+        run: |
+          docker exec "${{ job.services.postgres.id }}" \
+            psql -U gpu -d gpu_platform_test -v ON_ERROR_STOP=1 \
+            -c 'CREATE DATABASE gpu_store_test'
       - name: Format check
         run: make fmt-check
       - name: Vet
         run: go vet ./...
-      - name: Test (serialized shared PostgreSQL fixtures)
-        run: make test
+      - name: Test (parallel Go packages with independent PostgreSQL databases)
+        run: make test-parallel-isolated
       - name: Release acceptance contracts
         run: make acceptance-contract
       - name: Production supply-chain policy
