@@ -95,6 +95,13 @@ func TestManagementRuntimeRoleLeastPrivilegeWithPostgres(t *testing.T) {
 		"SELECT role FROM public.management_locked_project_role('test-issuer','test-subject',$1,'role-test-cluster') AS locked(role)", project).Scan(&lockedRole); err != nil || lockedRole != "operator" {
 		t.Fatalf("DBA-owned fixed query must lock and return current role, role=%q err=%v", lockedRole, err)
 	}
+	// Narrow runtime can EXECUTE the scoped projection but may not SELECT
+	// any rows directly from the private Observation table.
+	var exposed int
+	if err := tx.QueryRowContext(ctx,
+		"SELECT count(*) FROM public.management_scoped_workload_observation('test-issuer','test-subject','role-test-cluster',$1,'nonexistent')", project).Scan(&exposed); err != nil || exposed != 0 {
+		t.Fatalf("scoped observation projection must be callable without leaking resources: rows=%d err=%v", exposed, err)
+	}
 	var effective string
 	if err := tx.QueryRowContext(ctx, "SELECT current_user").Scan(&effective); err != nil || effective != role {
 		t.Fatalf("runtime role not effective: user=%q err=%v", effective, err)
