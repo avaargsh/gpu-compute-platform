@@ -46,6 +46,10 @@ func oidcFixture(t *testing.T) (Introspector, *httptest.Server) {
 			answer["iss"] = "https://attacker.example"
 		case "expired-token":
 			answer["exp"] = time.Now().Add(-time.Minute).Unix()
+		case "future-not-before":
+			answer["nbf"] = time.Now().Add(time.Minute).Unix()
+		case "valid-not-before":
+			answer["nbf"] = time.Now().Add(-time.Minute).Unix()
 		case "revoked-token":
 			answer["active"] = false
 		case "missing-subject":
@@ -63,10 +67,12 @@ func oidcFixture(t *testing.T) (Introspector, *httptest.Server) {
 func TestOIDCProviderIntrospectionDeniesForgedWrongAndRevokedTokens(t *testing.T) {
 	verifier, server := oidcFixture(t)
 	defer server.Close()
-	if id, err := verifier.Verify(context.Background(), "good-access-token"); err != nil || id.Subject != "alice" {
-		t.Fatalf("verified identity %+v err %v", id, err)
+	for _, token := range []string{"good-access-token", "valid-not-before"} {
+		if id, err := verifier.Verify(context.Background(), token); err != nil || id.Subject != "alice" {
+			t.Fatalf("verified identity %+v err %v for %q", id, err, token)
+		}
 	}
-	for _, token := range []string{"wrong-audience", "wrong-issuer", "expired-token", "revoked-token", "missing-subject", "missing-token-type", "short", "malformed token"} {
+	for _, token := range []string{"wrong-audience", "wrong-issuer", "expired-token", "future-not-before", "revoked-token", "missing-subject", "missing-token-type", "short", "malformed token"} {
 		if _, err := verifier.Verify(context.Background(), token); err == nil {
 			t.Fatalf("accepted forbidden token %q", token)
 		}
@@ -97,6 +103,7 @@ func TestManagementRejectsUnconfiguredRoutesAndBearer(t *testing.T) {
 		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "", 401},
 		{"PUT", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer short", 401},
 		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer provider-unavailable", 503},
+		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer future-not-before", 401},
 		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/resources/Workload/job-a", "Bearer provider-malformed", 503},
 		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/operations/0123456789abcdef0123456789abcdef", "Bearer provider-unavailable", 503},
 		{"GET", "/api/v1/management/clusters/cluster-a/projects/proj/operations/0123456789abcdef0123456789abcdef", "Bearer revoked-token", 401},
