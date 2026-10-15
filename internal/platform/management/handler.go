@@ -134,7 +134,7 @@ func (s *Service) browserWriteAllowed(r *http.Request) bool {
 // The optional charset parameter is permitted only when it is UTF-8.
 func validJSONMutationContentType(header http.Header) bool {
 	values := header.Values("Content-Type")
-	if len(values) != 1 {
+	if len(values) != 1 || strings.HasSuffix(strings.TrimSpace(values[0]), ";") {
 		return false
 	}
 	mediaType, params, err := mime.ParseMediaType(values[0])
