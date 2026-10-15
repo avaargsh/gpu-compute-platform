@@ -9,6 +9,8 @@ export CONTROL_PLANE_LISTEN_ADDR=127.0.0.1:8080
 export PORTAL_OPERATOR_CLUSTER_ID=portal-ci
 export PORTAL_OPERATOR_PROJECT_IDS=research,serving
 export PORTAL_OPERATOR_TOKEN="$(openssl rand -hex 32)"
+export PORTAL_OPERATOR_WRITE_TOKEN="$(openssl rand -hex 32)"
+export CONTROL_PLANE_PROFILE=development
 
 TMP_LOG="$(mktemp -d)"
 GO_PID=""
@@ -37,7 +39,9 @@ json_request() {
 }
 
 json_request POST agent/register '{"clusterId":"portal-ci","agentVersion":"e2e","kubernetesVersion":"v1.34.0","capabilities":{"kueue":true,"serving":false,"draApiAvailable":false,"providers":["kueue"],"schedulers":[{"name":"kueue","version":"v0.19.6"}]}}'
-json_request PUT internal/clusters/portal-ci/desired/ComputePool/pool-aaa '{"generation":2,"spec":{"projectID":"research","accelerators":[{"class":"h100","quota":4}]}}'
+json_request PUT projects/research/binding '{"metadata":{"id":"project-bind","generation":1},"projectId":"research","clusterId":"portal-ci","namespace":"research"}'
+json_request PUT compute-pools/pool-aaa/binding '{"metadata":{"id":"pool-bind","generation":1},"poolId":"pool-aaa","clusterId":"portal-ci","provider":"kueue"}'
+json_request PUT internal/clusters/portal-ci/desired/ComputePool/pool-aaa '{"generation":2,"spec":{"projectID":"research","namespace":"research","accelerators":[{"class":"h100","quota":4}],"acceleratorBindings":[{"class":"h100","resourceName":"nvidia.com/gpu","flavor":"h100"}]}}'
 # Seed ONLY disposable HTTP test data; this does NOT claim real GPU admission.
 for n in $(seq -w 1 124); do
   json_request PUT "internal/clusters/portal-ci/desired/Workload/work-$n" '{"generation":2,"spec":{"projectID":"research","image":"example.invalid/e2e:fixture"}}'
@@ -48,7 +52,7 @@ json_request POST agent/report '{"clusterId":"portal-ci","observations":[{"kind"
 
 (
   cd frontend
-  exec env -u PORTAL_OPERATOR_TOKEN -u PORTAL_OPERATOR_PROJECT_IDS -u PORTAL_OPERATOR_CLUSTER_ID -u DATABASE_URL node node_modules/vite/bin/vite.js --config vite.portal.config.ts --host 127.0.0.1 >"$TMP_LOG/vite.log" 2>&1
+  exec env -u PORTAL_OPERATOR_TOKEN -u PORTAL_OPERATOR_WRITE_TOKEN -u PORTAL_OPERATOR_PROJECT_IDS -u PORTAL_OPERATOR_CLUSTER_ID -u DATABASE_URL node node_modules/vite/bin/vite.js --config vite.portal.config.ts --host 127.0.0.1 >"$TMP_LOG/vite.log" 2>&1
 ) &
 VITE_PID=$!
 for attempt in $(seq 1 45); do

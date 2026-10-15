@@ -29,6 +29,10 @@ if [[ -z "${PORTAL_OPERATOR_TOKEN:-}" ]]; then
   NEW_TOKEN=1
 fi
 [[ "${#PORTAL_OPERATOR_TOKEN}" -ge 32 ]] || die "PORTAL_OPERATOR_TOKEN must be at least 32 characters"
+if [[ -n "${PORTAL_OPERATOR_WRITE_TOKEN:-}" ]]; then
+  [[ "${#PORTAL_OPERATOR_WRITE_TOKEN}" -ge 32 ]] || die "PORTAL_OPERATOR_WRITE_TOKEN must be at least 32 characters"
+  [[ "$PORTAL_OPERATOR_WRITE_TOKEN" != "$PORTAL_OPERATOR_TOKEN" ]] || die "read/write credentials must be different"
+fi
 export PORTAL_OPERATOR_CLUSTER_ID="$CLUSTER"
 export PORTAL_OPERATOR_PROJECT_IDS="$PROJECTS"
 export CONTROL_PLANE_LISTEN_ADDR=127.0.0.1:8080
@@ -83,7 +87,7 @@ done
   cd frontend
   # Vite does not need operator or database credentials; do not expose
   # them to its plugin/config process.
-  exec env -u PORTAL_OPERATOR_TOKEN -u PORTAL_OPERATOR_PROJECT_IDS -u PORTAL_OPERATOR_CLUSTER_ID -u DATABASE_URL node node_modules/vite/bin/vite.js --config vite.portal.config.ts --host 127.0.0.1
+  exec env -u PORTAL_OPERATOR_TOKEN -u PORTAL_OPERATOR_WRITE_TOKEN -u PORTAL_OPERATOR_PROJECT_IDS -u PORTAL_OPERATOR_CLUSTER_ID -u DATABASE_URL node node_modules/vite/bin/vite.js --config vite.portal.config.ts --host 127.0.0.1
 ) >"$WORK_DIR/vite.log" 2>&1 &
 VITE_PID=$!
 for attempt in $(seq 1 45); do
@@ -101,7 +105,7 @@ for attempt in $(seq 1 45); do
   sleep 1
 done
 
-printf '\nGPU Compute Portal — LOCAL, READ-ONLY preview\n'
+printf '\nGPU Compute Portal — LOCAL, operator preview\n'
 printf 'URL:       http://127.0.0.1:3001/portal.html\n'
 printf 'Cluster:   %s\n' "$CLUSTER"
 printf 'Projects:  %s\n' "$PROJECTS"
@@ -115,6 +119,11 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   printf 'Storage:   IN MEMORY — no real resources until an Agent registers; state is lost at shutdown\n'
 else
   printf 'Storage:   configured PostgreSQL; state may persist across restarts\n'
+fi
+if [[ -n "${PORTAL_OPERATOR_WRITE_TOKEN:-}" ]]; then
+  printf 'Mode:      development Workload submit enabled (independent write token, not printed)\n'
+else
+  printf 'Mode:      read-only; supply distinct PORTAL_OPERATOR_WRITE_TOKEN to enable dev submit\n'
 fi
 printf 'Security:  localhost only; no OIDC / multi-user RBAC; never publish port 8080 or 3001\n'
 printf 'Stop:      Ctrl-C (terminates both child processes)\n\n'

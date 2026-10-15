@@ -98,3 +98,68 @@ test('pagination fails closed when a Desired generation changes without changing
   await expect(page.getByText('连接你的计算集群')).toBeVisible()
   await expect(page.getByText('资源状态预览')).toHaveCount(0)
 })
+
+
+test('developer can create actual scoped Workload Desired through Portal without exposing write token', async ({ page, request }) => {
+  const devWrite = process.env.PORTAL_OPERATOR_WRITE_TOKEN
+  if (!devWrite) throw new Error('PORTAL_OPERATOR_WRITE_TOKEN must be set by local e2e script')
+  const paths: string[] = []
+  page.on('request', event => {
+    if (event.url().includes('/api/v1/')) paths.push(new URL(event.url()).pathname)
+  })
+  await unlock(page)
+  await expect(page.getByText('资源状态预览')).toBeVisible()
+  await page.getByRole('button', { name: /训推任务/ }).click()
+  await expect(page.getByText('训练 / 批量推理任务', { exact: true })).toBeVisible()
+  // Composer preselects the only valid ComputePool, so Element Plus removes
+  // the placeholder. Assert the real scoped selection rather than clicking
+  // a placeholder that only appears when no pool was chosen.
+  await expect(page.getByText('research / pool-aaa', { exact: true }).first()).toBeVisible()
+  await page.getByPlaceholder('train-qwen-001').fill('train-portal-real-e2e')
+  await page.getByPlaceholder('registry.example/team/train@sha256:...').fill('example.invalid/train:local-e2e')
+  await page.getByPlaceholder('PORTAL_OPERATOR_WRITE_TOKEN（至少 32 字符）').fill(devWrite)
+  const create = page.getByRole('button', { name: '创建 Workload Desired（仅本机开发）' })
+  await expect(create).toBeEnabled()
+  await create.click()
+  await expect(page.getByText('train-portal-real-e2e', { exact: true }).first()).toBeVisible()
+
+  // Independently read the actual Go desired state. A 204 never proves that
+  // any GPU was reserved, the Job admitted or the checkpoint persisted.
+  const desired = await request.get('http://127.0.0.1:8080/api/v1/workloads/train-portal-real-e2e')
+  expect(desired.status()).toBe(200)
+  const resource = await desired.json()
+  expect(resource.projectId).toBe('research')
+  expect(resource.poolId).toBe('pool-aaa')
+  expect(resource.metadata.generation).toBe(1)
+  expect(resource.spec.accelerator.class).toBe('h100')
+  expect(resource.status.syncState).toBe('Reconciling')
+
+  expect(paths.some(path => path ===
+    '/api/v1/operator/clusters/portal-ci/projects/research/workloads/train-portal-real-e2e')).toBe(true)
+  expect(paths.every(path => path.startsWith('/api/v1/operator/'))).toBe(true)
+
+  await page.getByRole('button', { name: '锁定' }).click()
+  await expect(page.getByText('连接你的计算集群')).toBeVisible()
+  await expect(page.getByText('train-portal-real-e2e')).toHaveCount(0)
+})
+
+test('read-only credential cannot create Workload and the Portal never proxies legacy write API', async ({ page, request }) => {
+  await unlock(page)
+  await expect(page.getByText('资源状态预览')).toBeVisible()
+  // No write credential present: API must reject even a well-formed request.
+  const result = await page.evaluate(async ({ token }) => {
+    const response = await fetch('/api/v1/operator/clusters/portal-ci/projects/research/workloads/not-authorized', {
+      method: 'PUT', credentials: 'omit',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ metadata: { id: 'not-authorized', generation: 1 },
+        projectId: 'research', poolId: 'pool-aaa', spec: {
+          image: 'example.invalid/train:local-e2e', command: ['true'],
+          accelerator: { class: 'h100', quota: 1 },
+        } }),
+    })
+    return response.status
+  }, { token: credential })
+  expect(result).toBe(401)
+  const resource = await request.get('http://127.0.0.1:8080/api/v1/workloads/not-authorized')
+  expect(resource.status()).toBe(404)
+})
