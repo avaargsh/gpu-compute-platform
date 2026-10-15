@@ -13,9 +13,9 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"time"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
