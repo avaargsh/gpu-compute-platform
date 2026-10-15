@@ -71,10 +71,15 @@
         @click="submitWorkload">
         创建 Workload Desired（仅本机开发）
       </el-button>
-      <el-alert v-if="currentSubmission"
-        :type="currentSubmission.kind === 'accepted' ? 'success' : 'warning'"
-        :title="currentSubmission.detail" :closable="false"
-        style="margin-top: 12px" />
+      <div v-if="currentSubmission" style="margin-top: 12px">
+        <el-alert
+          :type="currentSubmission.kind === 'accepted' ? 'success' : 'warning'"
+          :title="currentSubmission.detail" :closable="false" />
+        <el-button type="primary" plain style="margin-top: 10px"
+          @click="emit('submitted')">
+          重新读取授权快照（核对 Desired / Observation）
+        </el-button>
+      </div>
       <el-alert v-if="submitError" :title="submitError" type="error"
         :closable="false" style="margin-top: 12px" />
       <p class="table-footnote" v-if="currentSubmission">
@@ -150,8 +155,9 @@ async function submitWorkload(): Promise<void> {
       detail: 'Desired 已接收（HTTP 204）：' + payload.projectId + '/' + payload.metadata.id +
         ' · Generation ' + payload.metadata.generation + '。请刷新并检查 Agent Observation；不代表 Kueue 准入、Pod 运行或训练成功。',
     }
-    // Server-side acceptance is only Desired creation, never GPU execution.
-    if (props.clusterId === cluster && props.readToken === reader) emit('submitted')
+    // Keep the confirmation on screen until the operator explicitly asks
+    // for a read-back. Auto-refresh unmounts the form and loses the outcome
+    // and no-retry guard before the operator can inspect them.
   } catch (cause) {
     if (cause instanceof WorkloadSubmissionUncertainError) {
       submissionState.value = { fingerprint, kind: 'unknown', detail: cause.message }
