@@ -44,10 +44,12 @@ Security boundary:
   or unexpected 2xx is an **unknown outcome**: the request may already have
   committed. The UI does **not** automatically retry, and disables submitting
   the same draft again until the operator deliberately changes the intent.
-- After an unknown outcome, use the authorized snapshot to locate the same
-  Project / Workload ID / Generation and inspect independent Agent Observation
-  before considering a new operation. A paginated or stale snapshot that
-  does not show the resource is **not proof of rollback**.
+- After a 204 or unknown outcome, the form deliberately keeps the result
+  visible instead of automatically refreshing (which would unmount it). The
+  operator can explicitly click **重新读取授权快照** to read back the same
+  Project / Workload ID / Generation and inspect independent Agent Observation.
+  A paginated or stale snapshot that does not show the resource is **not proof
+  of rollback**.
 - Explicit 401/403/404/409 denials remain separate actionable errors. Do not
   elevate a local read token into a write credential or persist either token.
 - The exact request status is not an operation receipt or durable idempotency
