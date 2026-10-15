@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testMatch: '**/*.spec.ts',
+  testMatch: '**/portal.e2e.spec.ts',
   timeout: 60_000,
   retries: 0,
   workers: 1,
