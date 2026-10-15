@@ -13,6 +13,12 @@ export interface AuthorizedPool {
   accelerators: Array<{ class: string; quota: number }>
 }
 
+// Always calculate expiry at the point of use: Date.now() is not a reactive
+// dependency, so a cached Vue computed value is not a token expiry fence.
+export function isSessionActive(session: { expiresAt: number } | null, now = Date.now()): boolean {
+  return !!session && Number.isFinite(session.expiresAt) && session.expiresAt > now
+}
+
 // A verified Pool belongs to the exact in-memory OIDC login instance.
 // A later login by the same user is not the same authorization snapshot.
 export interface VerifiedPoolSelection {
