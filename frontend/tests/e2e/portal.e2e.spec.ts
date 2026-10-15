@@ -172,7 +172,7 @@ test('operator produces a KServe custom predictor manifest from the real scoped 
   await expect(page.getByText('在线推理服务 · KServe', { exact: true })).toBeVisible()
   const output = page.getByPlaceholder('填写有效配置以生成 KServe 清单')
   await expect(output).toHaveValue('')
-  await page.getByPlaceholder('research').fill('research')
+  await page.getByRole('textbox', { name: '目标 Kubernetes Namespace（管理员确认）' }).fill('research')
   await page.getByPlaceholder('qwen-serving').fill('qwen-v1')
   const pinned = 'registry.example/vllm@sha256:' + 'a'.repeat(64)
   await page.getByPlaceholder('registry.example/llm@sha256:...').fill(pinned)

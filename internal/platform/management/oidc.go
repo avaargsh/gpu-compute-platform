@@ -1,0 +1,187 @@
+package management
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+// RFC 7662 token introspection delegates cryptographic token validation and
+// revocation to an OIDC provider. Do NOT parse JWT payloads as identity or
+// trust forwarded user headers. The provider MUST return iss, sub, exp, aud.
+type Introspector struct {
+	URL               string
+	Issuer            string
+	Audience          string
+	ClientID          string
+	ClientSecret      string
+	Client            *http.Client
+	AllowHTTPForTests bool
+}
+
+// ErrIntrospectionUnavailable distinguishes IdP/network/server failure from
+// a provider-confirmed invalid/expired/revoked access token.
+var ErrIntrospectionUnavailable = errors.New("identity provider unavailable")
+
+type Identity struct{ Issuer, Subject string }
+type introspectionResult struct {
+	Active    bool            `json:"active"`
+	Issuer    string          `json:"iss"`
+	Subject   string          `json:"sub"`
+	ExpiresAt int64           `json:"exp"`
+	Audience  json.RawMessage `json:"aud"`
+	TokenType string          `json:"token_type"`
+}
+
+func (i Introspector) ValidateConfig() error {
+	u, err := url.Parse(i.URL)
+	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" || (u.Scheme != "https" && !(i.AllowHTTPForTests && u.Scheme == "http")) {
+		return errors.New("OIDC introspection requires an absolute HTTPS URL")
+	}
+	issuer, err := url.Parse(i.Issuer)
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.RawQuery != "" || issuer.Fragment != "" {
+		return errors.New("OIDC issuer must be an absolute HTTPS URL")
+	}
+	if i.Audience == "" || i.ClientID == "" || i.ClientSecret == "" {
+		return errors.New("OIDC audience and introspection client credentials are required")
+	}
+	return nil
+}
+
+func (i Introspector) Verify(ctx context.Context, token string) (Identity, error) {
+	if err := i.ValidateConfig(); err != nil {
+		return Identity{}, fmt.Errorf("%w: invalid identity provider configuration", ErrIntrospectionUnavailable)
+	}
+	if len(token) < 8 || len(token) > 8192 || strings.ContainsAny(token, " \r\n\t") {
+		return Identity{}, errors.New("invalid access token")
+	}
+	form := url.Values{"token": {token}, "token_type_hint": {"access_token"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, i.URL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return Identity{}, fmt.Errorf("%w: create introspection request", ErrIntrospectionUnavailable)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.SetBasicAuth(i.ClientID, i.ClientSecret)
+	client := i.Client
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Second}
+	}
+	// Never forward an access token or introspection client credentials to a
+	// redirected endpoint, even when tests or callers inject a custom client
+	// whose redirect policy would otherwise follow 307/308 with the POST body.
+	// Clone the client instead of mutating a caller-owned shared instance.
+	noRedirect := *client
+	noRedirect.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := noRedirect.Do(req)
+	if err != nil {
+		return Identity{}, fmt.Errorf("%w: introspection transport", ErrIntrospectionUnavailable)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Identity{}, fmt.Errorf("%w: introspection returned HTTP %d", ErrIntrospectionUnavailable, resp.StatusCode)
+	}
+	// Decode the entire bounded response, not only its first JSON value.
+	// A streaming decoder may otherwise accept a valid identity followed by
+	// arbitrary trailing JSON or an oversized body that starts with valid JSON.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8193))
+	if err != nil || len(body) > 8192 {
+		return Identity{}, fmt.Errorf("%w: introspection response read or size limit", ErrIntrospectionUnavailable)
+	}
+	result, err := decodeUniqueIntrospection(body)
+	if err != nil {
+		return Identity{}, fmt.Errorf("%w: malformed or ambiguous introspection response", ErrIntrospectionUnavailable)
+	}
+	if !result.Active || result.Issuer != i.Issuer || result.Subject == "" || len(result.Subject) > 512 || result.ExpiresAt <= time.Now().Unix() || !strings.EqualFold(result.TokenType, "Bearer") {
+		return Identity{}, errors.New("inactive, expired, or untrusted identity")
+	}
+	var single string
+	if err := json.Unmarshal(result.Audience, &single); err == nil {
+		if single != i.Audience {
+			return Identity{}, errors.New("wrong token audience")
+		}
+	} else {
+		var values []string
+		if err := json.Unmarshal(result.Audience, &values); err != nil {
+			return Identity{}, errors.New("missing token audience")
+		}
+		matched := false
+		for _, v := range values {
+			if v == i.Audience {
+				matched = true
+			}
+		}
+		if !matched {
+			return Identity{}, errors.New("wrong token audience")
+		}
+	}
+	return Identity{Issuer: i.Issuer, Subject: result.Subject}, nil
+}
+
+// decodeUniqueIntrospection rejects conflicting duplicate JSON object keys
+// before struct decoding. encoding/json.Unmarshal otherwise silently uses
+// the last value, including for identity-critical active/iss/sub/aud/exp.
+// The response was already bounded to 8192 bytes by Verify.
+func decodeUniqueIntrospection(body []byte) (introspectionResult, error) {
+	var result introspectionResult
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	first, err := decoder.Token()
+	if err != nil || first != json.Delim('{') {
+		return result, errors.New("introspection JSON must be an object")
+	}
+	seen := make(map[string]struct{})
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return result, err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return result, errors.New("invalid introspection key")
+		}
+		// Unmarshal matches struct keys case-insensitively, so treat ASCII
+		// case variants as duplicates too.
+		key = strings.ToLower(key)
+		if _, exists := seen[key]; exists {
+			return result, errors.New("duplicate introspection key")
+		}
+		seen[key] = struct{}{}
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
+			return result, err
+		}
+	}
+	last, err := decoder.Token()
+	if err != nil || last != json.Delim('}') {
+		return result, errors.New("unterminated introspection JSON")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return result, errors.New("trailing introspection JSON")
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func bearerToken(r *http.Request) string {
+	values := r.Header.Values("Authorization")
+	if len(values) != 1 || !strings.HasPrefix(values[0], "Bearer ") {
+		return ""
+	}
+	token := strings.TrimPrefix(values[0], "Bearer ")
+	if token == "" || strings.ContainsAny(token, " \r\n\t") {
+		return ""
+	}
+	return token
+}

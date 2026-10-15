@@ -17,6 +17,7 @@ vet:
 build:
 	go build ./cmd/control-plane
 	go build ./cmd/cluster-agent
+	go build ./cmd/management-api
 
 supply-chain-check:
 	bash scripts/verify-production-images.sh
