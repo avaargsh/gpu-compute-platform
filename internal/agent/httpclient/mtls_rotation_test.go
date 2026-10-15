@@ -52,6 +52,10 @@ func newRotationCA(t *testing.T) rotationCA {
 }
 
 func rotationLeaf(t *testing.T, ca rotationCA, serial int64, client bool) ([]byte, []byte) {
+	return rotationLeafWithIdentity(t, ca, serial, client, "spiffe://platform.example/cluster/cluster-a/agent")
+}
+
+func rotationLeafWithIdentity(t *testing.T, ca rotationCA, serial int64, client bool, identity string) ([]byte, []byte) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -65,7 +69,7 @@ func rotationLeaf(t *testing.T, ca rotationCA, serial int64, client bool) ([]byt
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 	}
 	if client {
-		uri, err := url.Parse("spiffe://platform.example/cluster/cluster-a/agent")
+		uri, err := url.Parse(identity)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +140,7 @@ func TestMTLSClientCertificateRotationAndFailClosedReload(t *testing.T) {
 	firstCert, firstKey := rotationLeaf(t, ca, 21, true)
 	nextCert, nextKey := rotationLeaf(t, ca, 22, true)
 	writeRotationPair(t, certPath, keyPath, firstCert, firstKey)
-	client, err := NewMTLSClient(caPath, certPath, keyPath)
+	client, err := NewClusterMTLSClient(caPath, certPath, keyPath, "cluster-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,5 +184,25 @@ func TestMTLSClientCertificateRotationAndFailClosedReload(t *testing.T) {
 	writeRotationPair(t, certPath, keyPath, nextCert, nextKey)
 	if got, err := getIdentity(); err != nil || got != "22" {
 		t.Fatalf("restored TLS identity=%q err=%v; want serial 22", got, err)
+	}
+	// A different cluster certificate is otherwise valid and signed by
+	// the same CA. The Agent must refuse it locally during live rotation.
+	wrongClusterCert, wrongClusterKey := rotationLeafWithIdentity(t, ca, 23, true,
+		"spiffe://platform.example/cluster/cluster-b/agent")
+	writeRotationPair(t, certPath, keyPath, wrongClusterCert, wrongClusterKey)
+	if got, err := getIdentity(); err == nil {
+		t.Fatalf("wrong-cluster rotated TLS identity accepted: %q", got)
+	}
+	writeRotationPair(t, certPath, keyPath, nextCert, nextKey)
+	if got, err := getIdentity(); err != nil || got != "22" {
+		t.Fatalf("restored cluster identity=%q err=%v; want serial 22", got, err)
+	}
+	if _, err := NewClusterMTLSClient(caPath, certPath, keyPath, "cluster-b"); err == nil {
+		t.Fatal("accepted a certificate belonging to another configured cluster at startup")
+	}
+	for _, cluster := range []string{"", "cluster/b", "../cluster-a", "cluster b"} {
+		if _, err := NewClusterMTLSClient(caPath, certPath, keyPath, cluster); err == nil {
+			t.Fatalf("accepted invalid configured cluster %q", cluster)
+		}
 	}
 }
