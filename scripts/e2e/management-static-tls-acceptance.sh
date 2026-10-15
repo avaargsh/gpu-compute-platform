@@ -9,7 +9,7 @@ chmod 755 "$TMP"
 PG="gpu-management-browser-pg-$$"
 KC="gpu-management-browser-kc-$$"
 API_PID=""
-GW="gpu-management-static-tls-$"
+GW="gpu-management-static-tls-$BASHPID"
 cleanup() {
   trap - EXIT INT TERM
   for id in "$API_PID"; do
