@@ -109,6 +109,10 @@
         <button type="button" :disabled="!activeReceipt || busy" @click="readBackDesired">
           按回执核对当前 Desired
         </button>
+        <button type="button" :disabled="!activeReceipt || !activeReadback?.desired || activeReceipt.kind !== 'Workload' || busy"
+          @click="readExecutionObservation">
+          查询独立 Agent / Kueue 观察
+        </button>
       </div>
       <div v-if="activeReadback" class="management-status" role="note">
         <strong>独立授权回读：{{ activeReadback.status }}</strong>
@@ -117,6 +121,20 @@
           当前 Generation: {{ activeReadback.desired.generation }} · 删除请求:
           {{ activeReadback.desired.deleting ? '已发起' : '未发起' }}
         </p>
+      </div>
+      <div v-if="activeExecution" class="management-status" role="group" aria-label="独立执行状态">
+        <strong>独立执行状态：{{ activeExecution.label }}（{{ activeExecution.code }}）</strong>
+        <p>{{ activeExecution.detail }}</p>
+        <p>最后观察：{{ activeExecution.observedAt || '尚未上报' }} · Generation:
+          {{ activeExecution.generation }}</p>
+        <p v-if="activeExecution.newerThanReceipt">Desired 已在原操作后更新：不能把当前执行状态归因于原操作。</p>
+        <p>状态来自服务端按 OIDC 项目权限限定的历史 Agent Observation；不证明当前集群实时可用，
+          也不证明模型质量、日志保密或 Checkpoint 持久化。</p>
+        <ul>
+          <li v-for="c in activeExecution.conditions" :key="c.type">
+            {{ c.type }}: {{ c.status }} · {{ c.reason || c.message || '无上报原因' }}
+          </li>
+        </ul>
       </div>
       <p>回读只查询当前被授权的 Desired，并与服务端审计回执的资源范围及 Generation 比较。
         找不到 Desired 并不代表任务成功删除、写入回滚或操作未提交；仍需独立的 Agent/Kueue 执行证据。</p>
@@ -132,7 +150,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
-import { readResource, writeResource, deleteResource, readReceipt, listProjects, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, desiredMatchesScope, createOperationId } from './api'
+import { readResource, writeResource, deleteResource, readReceipt, readExecution, listProjects, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, desiredMatchesScope, createOperationId } from './api'
+import { classifyScopedExecution, type ScopedExecution } from './execution'
 import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from './readback'
 import { rememberOperation, recoverOperation, forgetOperation, type OperationPointer } from './recovery'
 import { parseAuthorizedPool, buildAuthorizedWorkloadRequest, type AuthorizedPool } from './workload-composer'
@@ -174,11 +193,14 @@ const projectListTruncated = ref(false)
 const receiptData = ref<Receipt | null>(null)
 const receiptAnchor = ref('')
 const receiptReadback = ref<{ anchor: string; result: DesiredReadback } | null>(null)
+const executionReadback = ref<{ anchor: string; result: ScopedExecution } | null>(null)
 const operationId = ref('')
 const receiptSelector = computed(() => JSON.stringify([cluster.value, project.value, operationId.value]))
 const activeReceipt = computed(() => receiptAnchor.value === receiptSelector.value ? receiptData.value : null)
 const activeReadback = computed(() =>
   receiptReadback.value?.anchor === receiptSelector.value ? receiptReadback.value.result : null)
+const activeExecution = computed(() =>
+  executionReadback.value?.anchor === receiptSelector.value ? executionReadback.value.result : null)
 const recentOperation = ref<OperationPointer | null>(null)
 const busy = ref(false)
 const message = ref('')
@@ -196,6 +218,7 @@ function clearResult() {
   receiptData.value = null
   receiptAnchor.value = ''
   receiptReadback.value = null
+  executionReadback.value = null
 }
 function describeError(e: unknown) { error.value = e instanceof Error ? e.message : '未知请求失败' }
 
@@ -286,6 +309,7 @@ function signOut() {
   receiptData.value = null
   receiptAnchor.value = ''
   receiptReadback.value = null
+  executionReadback.value = null
   availableProjects.value = []
   projectListTruncated.value = false
   message.value = '本页访问令牌已清除；身份提供商 SSO 会话未注销'
@@ -316,6 +340,7 @@ function selectProject(item: ProjectAccess) {
   receiptData.value = null
   receiptAnchor.value = ''
   receiptReadback.value = null
+  executionReadback.value = null
   operationId.value = ''
   message.value = '已选择项目 ' + item.projectId + '（' + item.role + '），请重新选择资源'
   error.value = ''
@@ -337,6 +362,7 @@ function restoreOperation() {
   receiptData.value = null
   receiptAnchor.value = ''
   receiptReadback.value = null
+  executionReadback.value = null
   recentOperation.value = pointer
   message.value = '已恢复操作范围和 ID；请重新登录后查询服务端回执'
   error.value = ''
@@ -349,6 +375,7 @@ function discardOperation() {
   receiptData.value = null
   receiptAnchor.value = ''
   receiptReadback.value = null
+  executionReadback.value = null
   message.value = '本页操作记录已清除，服务端审计不受影响'
 }
 
@@ -423,6 +450,7 @@ async function readBackDesired() {
   if (!original || busy.value) return
   const selected = receiptSelector.value
   receiptReadback.value = null
+  executionReadback.value = null
   error.value = ''
   busy.value = true
   try {
@@ -444,6 +472,27 @@ async function readBackDesired() {
   } catch (e) { describeError(e) }
   finally { busy.value = false }
 }
+async function readExecutionObservation() {
+  const audit = activeReceipt.value
+  const readback = activeReadback.value
+  if (!audit || audit.kind !== 'Workload' || !readback?.desired || busy.value) return
+  const selected = receiptSelector.value
+  executionReadback.value = null
+  error.value = ''
+  busy.value = true
+  try {
+    const target = receiptResourceScope(audit, cluster.value, project.value, operationId.value)
+    const result = await readExecution(target, token())
+    if (receiptSelector.value !== selected || !result.value) {
+      throw new Error('执行观察范围已经变化或没有有效数据，请重新查询')
+    }
+    const classified = classifyScopedExecution(result.value, audit)
+    executionReadback.value = { anchor: selected, result: classified }
+    message.value = '已读取授权范围内的独立 Agent/Kueue 观察；仅供诊断，并非实时 Kubernetes 状态证明'
+  } catch (e) { describeError(e) }
+  finally { busy.value = false }
+}
+
 async function copyOperationId() {
   try { await navigator.clipboard.writeText(operationId.value); message.value = '操作 ID 已复制' }
   catch { error.value = '浏览器不允许复制，请手动保存操作 ID' }
