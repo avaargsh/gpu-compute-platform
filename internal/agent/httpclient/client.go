@@ -25,6 +25,18 @@ func New(baseURL string, client *http.Client) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), client: client}
 }
 
+// doRequest never follows redirects. A Control Plane response must not
+// re-route Agent protocol requests, especially 307/308 which replay POST
+// bodies, to any second endpoint. Clone the caller's client: other consumers
+// may legitimately need its original redirect policy.
+func (c *Client) doRequest(req *http.Request) (*http.Response, error) {
+	noRedirect := *c.client
+	noRedirect.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return noRedirect.Do(req)
+}
+
 func (c *Client) Register(ctx context.Context, registration agent.Registration) error {
 	return c.post(ctx, "/api/v1/agent/register", registration)
 }
@@ -71,7 +83,7 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return err
 	}
-	resp, err := c.client.Do(req)
+	resp, err := c.doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -92,7 +104,7 @@ func (c *Client) post(ctx context.Context, path string, in any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.client.Do(req)
+	resp, err := c.doRequest(req)
 	if err != nil {
 		return err
 	}
@@ -113,7 +125,7 @@ func (c *Client) postJSON(ctx context.Context, path string, in, out any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.client.Do(req)
+	resp, err := c.doRequest(req)
 	if err != nil {
 		return err
 	}
