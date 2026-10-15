@@ -1,7 +1,14 @@
 # Management API v0 — authenticated, project-scoped mutation candidate
 
-Status: **draft, under validation**. This is the start of Issue #63, not a
-declaration that the full production portal is ready.
+Status: **isolated Management API backend candidate, under validation**.
+This source is a narrowly extracted subset of historical draft PR #65 onto
+the current Go Control Plane baseline. The standalone API, Postgres
+migrations, negative tests and operation receipts are checked in; the older
+management CLI, browser PKCE UI and disposable live Keycloak/PG scripts cited
+later in this historical design document are **not included in this extraction
+and must not be treated as completed gates**. Go unit/database fixtures are
+not equivalent to an accepted independent IdP and constrained runtime-login
+end-to-end deployment. No production/public ingress is authorized.
 
 ## Explicit security boundary
 
