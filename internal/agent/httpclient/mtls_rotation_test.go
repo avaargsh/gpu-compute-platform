@@ -34,10 +34,10 @@ func newRotationCA(t *testing.T) rotationCA {
 	}
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{CommonName: "disposable agent rotation CA"},
-		NotBefore: time.Now().Add(-time.Hour),
-		NotAfter: time.Now().Add(24 * time.Hour),
-		IsCA: true, BasicConstraintsValid: true,
+		Subject:      pkix.Name{CommonName: "disposable agent rotation CA"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		IsCA:         true, BasicConstraintsValid: true,
 		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
@@ -58,11 +58,11 @@ func rotationLeaf(t *testing.T, ca rotationCA, serial int64, client bool) ([]byt
 		t.Fatal(err)
 	}
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(serial),
-		NotBefore: time.Now().Add(-time.Hour),
-		NotAfter: time.Now().Add(time.Hour),
+		SerialNumber:          big.NewInt(serial),
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
 		BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageDigitalSignature,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 	}
 	if client {
 		uri, err := url.Parse("spiffe://platform.example/cluster/cluster-a/agent")
@@ -118,10 +118,10 @@ func TestMTLSClientCertificateRotationAndFailClosedReload(t *testing.T) {
 		_, _ = w.Write([]byte(r.TLS.PeerCertificates[0].SerialNumber.String()))
 	}))
 	server.TLS = &tls.Config{
-		MinVersion: tls.VersionTLS13,
+		MinVersion:   tls.VersionTLS13,
 		Certificates: []tls.Certificate{serverPair},
-		ClientAuth: tls.RequireAndVerifyClientCert,
-		ClientCAs: roots,
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    roots,
 	}
 	server.StartTLS()
 	defer server.Close()
