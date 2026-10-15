@@ -9,16 +9,16 @@
       <button type="button" class="nav-item" :class="{ active: view === 'jobs' }" @click="view = 'jobs'">▧ <span>训推任务</span></button>
       <button type="button" class="nav-item" :class="{ active: view === 'diagnostics' }" @click="view = 'diagnostics'">△ <span>异常待办</span><span v-if="findings.length" class="nav-count">{{ findings.length }}</span></button>
       <button type="button" class="nav-item" :class="{ active: view === 'integrations' }" @click="view = 'integrations'">◇ <span>生态集成</span></button>
-      <div class="sidebar-bottom"><span class="local-dot"></span>开发环境 · 只读模式</div>
+      <div class="sidebar-bottom"><span class="local-dot"></span>开发环境 · 默认只读</div>
     </aside>
 
     <main class="portal-main">
       <header class="portal-topbar">
         <div><span class="eyebrow">MANAGEMENT / {{ viewTitle }}</span><h1>{{ viewTitle }}</h1></div>
-        <el-tag type="warning" effect="plain" size="large">LOCAL PREVIEW · READ ONLY</el-tag>
+        <el-tag type="warning" effect="plain" size="large">LOCAL PREVIEW · DEV WRITE OPT-IN</el-tag>
       </header>
 
-      <el-alert title="本机单操作员试用：服务端校验凭证及项目范围。尚未实现 OIDC / 多用户 RBAC，禁止公网部署和资源写入。凭证仅保留在本页内存，不持久化。"  type="warning" :closable="false" show-icon class="safety-banner" />
+      <el-alert title="本机单操作员预览：默认只读。仅 development 配置独立写入凭证后，可创建指定项目 Workload Desired；尚未实现生产 OIDC / RBAC，严禁公网部署。凭证仅保留在页面内存。"  type="warning" :closable="false" show-icon class="safety-banner" />
 
       <section class="context-bar">
         <label class="context-label" for="cluster-id">Cluster ID</label>
