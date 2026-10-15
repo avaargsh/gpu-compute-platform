@@ -54,6 +54,14 @@ GRANT EXECUTE ON FUNCTION public.management_locked_project_role(
 ) TO gpu_management_runtime;
 
 
+-- Scoped, read-only Observation projection. No direct table SELECT is given.
+REVOKE ALL ON FUNCTION public.management_scoped_workload_observation(
+  text,text,text,text,text
+) FROM gpu_management_runtime;
+GRANT EXECUTE ON FUNCTION public.management_scoped_workload_observation(
+  text,text,text,text,text
+) TO gpu_management_runtime;
+
 -- The second fixed-query function locks an individual pool binding without
 -- giving the runtime UPDATE privileges on cluster_bindings.
 REVOKE ALL ON FUNCTION public.management_locked_pool_binding(text)
