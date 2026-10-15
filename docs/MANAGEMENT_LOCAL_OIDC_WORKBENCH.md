@@ -147,8 +147,19 @@ or add `Access-Control-Allow-Origin: *`.
 4. Read the same resource. Note its returned Generation.
 5. Query the displayed operation ID. Verify
    `status: "desired-committed"` and matching resource/scope/generation.
-6. Create a Workload against the pool, then attempt to DELETE the pool:
-   the API must reject deletion while dependent Workloads exist.
+6. Use **训练 / 批量推理 Workload 向导** to enter a Pool ID, and click
+   **读取并验证 ComputePool**. The browser performs a real, project-scoped
+   Management GET with the current OIDC access token; it rejects a foreign,
+   deleted, malformed or non-Kueue Pool. Choose the accelerator class, quota,
+   image, command and a new Workload ID. The draft generator emits the
+   canonical `{expectedGeneration:0,poolId,spec}` shape — **not** the
+   separate local development operator payload. Review the JSON in the
+   existing editor and separately confirm PUT. The same server still checks
+   live DB project grants, pool binding, CAS and operation idempotency.
+   No automatic submit, no browser-stored write secret, no extra ingress.
+   An authorized Pool read or HTTP 204 does not prove GPU availability.
+   Then attempt to DELETE the parent Pool: the API must reject deletion
+   while dependent Workloads exist.
 7. Read a Workload, confirm DELETE and inspect its receipt.
    HTTP 202 records a deletion request/finalizer, not proof of physical
    teardown. Inspect the *independent* observation and Golden Path evidence
