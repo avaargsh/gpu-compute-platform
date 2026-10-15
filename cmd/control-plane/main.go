@@ -55,7 +55,11 @@ func main() {
 		}
 		// This PoC serves ONLY project-scoped GET and healthz. No Agent,
 		// administrative, global resource or mutation route is reachable.
-		handler, err = httpapi.NewProjectReadRouter(store, placement, store, verifier)
+		membership, ok := store.(httpapi.ProjectMembership)
+		if !ok {
+			log.Fatal("project-scoped API requires a PostgreSQL-backed membership store")
+		}
+		handler, err = httpapi.NewProjectReadRouter(store, placement, membership, verifier)
 		if err != nil {
 			log.Fatalf("project read API: %v", err)
 		}
