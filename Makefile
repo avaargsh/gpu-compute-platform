@@ -15,8 +15,8 @@ test:
 # CI provisions independent databases for Management and Store packages.
 # Do not use package-level concurrency with a shared DSN.
 test-parallel-isolated:
-	@test -n "${TEST_POSTGRES_DSN:-}" || (echo "TEST_POSTGRES_DSN is required" >&2; exit 1)
-	@test -n "${TEST_POSTGRES_STORE_DSN:-}" || (echo "TEST_POSTGRES_STORE_DSN is required" >&2; exit 1)
+	@printenv TEST_POSTGRES_DSN | grep -q . || (echo "TEST_POSTGRES_DSN is required" >&2; exit 1)
+	@printenv TEST_POSTGRES_STORE_DSN | grep -q . || (echo "TEST_POSTGRES_STORE_DSN is required" >&2; exit 1)
 	go test -p 4 ./...
 
 vet:
