@@ -48,7 +48,7 @@ func NewOperatorDevWriteHandler(store agentstore.Store, bindings BindingStore, c
 			tokenSHA: sha256.Sum256([]byte(cfg.Token)), cluster: cfg.ClusterID, projects: allowed,
 		},
 		writeSHA: sha256.Sum256([]byte(cfg.DevelopmentWriteToken)),
-		store: store, placement: bindings,
+		store:    store, placement: bindings,
 	}
 	return http.HandlerFunc(api.putWorkload), nil
 }
