@@ -463,6 +463,7 @@ async function readBackDesired() {
   const selected = receiptSelector.value
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
   error.value = ''
   busy.value = true
   try {
@@ -490,6 +491,7 @@ async function readExecutionObservation() {
   if (!audit || audit.kind !== 'Workload' || !readback?.desired || busy.value) return
   const selected = receiptSelector.value
   executionReadback.value = null
+  evidenceChecked.value = null
   error.value = ''
   busy.value = true
   try {
@@ -501,6 +503,51 @@ async function readExecutionObservation() {
     const classified = classifyScopedExecution(result.value, audit)
     executionReadback.value = { anchor: selected, result: classified }
     message.value = '已读取授权范围内的独立 Agent/Kueue 观察；仅供诊断，并非实时 Kubernetes 状态证明'
+  } catch (e) { describeError(e) }
+  finally { busy.value = false }
+}
+
+// Manual read-only refresh: re-verify original audit ownership, then read
+// Desired and independent Agent state. These are NOT an atomic DB snapshot.
+// Publish only a coherent result; never automatically replay a mutation.
+async function refreshEvidenceChain() {
+  if (busy.value) return
+  clearResult()
+  busy.value = true
+  const selected = receiptSelector.value
+  const originalSession = session.value
+  const clusterId = cluster.value
+  const projectId = project.value
+  const requestId = operationId.value
+  try {
+    const access = token()
+    const receiptResult = await readReceipt(clusterId, projectId, requestId, access)
+    if (!receiptResult.value) throw new Error('服务端未返回原始审计回执')
+    const audit = receiptResult.value
+    const target = receiptResourceScope(audit, clusterId, projectId, requestId)
+    let current: DesiredView | null
+    try {
+      current = (await readResource(target, access)).value
+    } catch (e) {
+      if (!(e instanceof ManagementHTTPError) || e.status !== 404) throw e
+      current = null
+    }
+    const currentReadback = classifyDesiredReadback(audit, current)
+    let observed: Awaited<ReturnType<typeof readExecution>>['value'] = null
+    if (target.kind === 'Workload' && current &&
+        !['inconsistent', 'desired-advanced'].includes(currentReadback.status)) {
+      observed = (await readExecution(target, access)).value
+    }
+    const evidence = verifyEvidencePair(audit, current, observed)
+    if (receiptSelector.value !== selected || session.value !== originalSession) {
+      throw new Error('核对期间登录身份或操作范围已变化；已丢弃本次查询结果')
+    }
+    receiptData.value = audit
+    receiptAnchor.value = selected
+    receiptReadback.value = { anchor: selected, result: evidence.readback }
+    if (evidence.execution) executionReadback.value = { anchor: selected, result: evidence.execution }
+    evidenceChecked.value = { anchor: selected, at: new Date().toISOString() }
+    message.value = '原始操作回执、当前 Desired 和独立观察已完成分层核对；未发起写入或自动重试'
   } catch (e) { describeError(e) }
   finally { busy.value = false }
 }
