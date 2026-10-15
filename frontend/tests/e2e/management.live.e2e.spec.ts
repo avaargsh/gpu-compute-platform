@@ -131,6 +131,13 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await expect(page.getByRole('status')).toContainText('Desired 事务已提交')
   await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
   await expect(page.getByText('Generation:')).toContainText('1')
+  // This new Management endpoint consults the SAME current OIDC project grant,
+  // not the legacy local preview/Agent API. No independent observation yet.
+  await page.getByRole('button', { name: '查询已提交回执' }).click()
+  await page.getByRole('button', { name: '按回执核对当前 Desired' }).click()
+  await page.getByRole('button', { name: '查询独立 Agent / Kueue 观察' }).click()
+  await expect(page.getByRole('group', { name: '独立执行状态' })).toContainText('NOT_OBSERVED')
+  await expect(page.getByRole('group', { name: '独立执行状态' })).toContainText('不等于 Kueue 已准入')
 
   // Parent deletion must reject existing dependent Workload.
   await page.locator('select').first().selectOption('ComputePool')

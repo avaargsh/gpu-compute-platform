@@ -42,6 +42,18 @@ export interface DesiredView {
   spec: Record<string, unknown>
 }
 
+export interface ExecutionView {
+  clusterId: string
+  projectId: string
+  kind: 'Workload'
+  id: string
+  desiredGeneration: number
+  deleting: boolean
+  observedGeneration: number | null
+  observedAt: string | null
+  conditions: Array<{ type: string; status: string; reason?: string; message?: string }>
+}
+
 export interface Receipt {
   requestId: string
   status: 'desired-committed'
@@ -148,6 +160,16 @@ export async function writeResource(scope: Scope, token: string, rawJSON: string
 
 export async function deleteResource(scope: Scope, token: string, generation: number, operationId: string): Promise<{ status: number; value: null }> {
   return request<null>(resourcePath(scope), 'DELETE', token, undefined, operationId, generation)
+}
+
+// This OIDC-protected Management projection does NOT grant the browser
+// access to legacy Agent/Operator APIs or direct Observation table reads.
+export async function readExecution(scope: Scope, token: string): Promise<{ status: number; value: ExecutionView | null }> {
+  if (scope.kind !== 'Workload') throw new Error('只支持 Workload 独立执行观察')
+  safe(scope.cluster); safe(scope.project); safe(scope.resource)
+  const path = '/api/v1/management/clusters/' + scope.cluster +
+    '/projects/' + scope.project + '/execution/workloads/' + scope.resource
+  return request<ExecutionView>(path, 'GET', token)
 }
 
 export async function readReceipt(cluster: string, project: string, operationId: string, token: string): Promise<{ status: number; value: Receipt | null }> {
