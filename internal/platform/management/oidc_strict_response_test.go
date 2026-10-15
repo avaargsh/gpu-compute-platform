@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -52,6 +53,49 @@ func TestIntrospectorRejectsTrailingAndOversizedResponse(t *testing.T) {
 				}
 			} else if !errors.Is(err, ErrIntrospectionUnavailable) {
 				t.Fatalf("must fail closed as provider-unavailable, got=%+v err=%v", got, err)
+			}
+		})
+	}
+}
+
+// An injected HTTP client must not re-enable redirect-following for the
+// credential-bearing introspection POST. In particular 307/308 preserve
+// the original POST body and could disclose the user's access token.
+func TestIntrospectorInjectedClientDoesNotForwardCredentialsOnRedirect(t *testing.T) {
+	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			var forwarded atomic.Int64
+			destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				forwarded.Add(1)
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"active":true}`))
+			}))
+			defer destination.Close()
+
+			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Errorf("introspection request method = %s, want POST", r.Method)
+				}
+				w.Header().Set("Location", destination.URL+"/collect")
+				w.WriteHeader(status)
+			}))
+			defer origin.Close()
+
+			introspector := Introspector{
+				URL: origin.URL, Issuer: "https://idp.example.test/realms/gpu",
+				Audience: "gpu-management", ClientID: "introspection-client",
+				ClientSecret: "test-only-secret", AllowHTTPForTests: true,
+				Client: &http.Client{
+					Timeout: 2 * time.Second,
+					CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return nil },
+				},
+			}
+			got, err := introspector.Verify(context.Background(), "test-token-valid-123")
+			if got != (Identity{}) || !errors.Is(err, ErrIntrospectionUnavailable) {
+				t.Fatalf("redirect must fail closed: got=%+v err=%v", got, err)
+			}
+			if count := forwarded.Load(); count != 0 {
+				t.Fatalf("credential-bearing request reached redirect target %d times", count)
 			}
 		})
 	}

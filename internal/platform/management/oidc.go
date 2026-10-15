@@ -72,9 +72,17 @@ func (i Introspector) Verify(ctx context.Context, token string) (Identity, error
 	req.SetBasicAuth(i.ClientID, i.ClientSecret)
 	client := i.Client
 	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+		client = &http.Client{Timeout: 5 * time.Second}
 	}
-	resp, err := client.Do(req)
+	// Never forward an access token or introspection client credentials to a
+	// redirected endpoint, even when tests or callers inject a custom client
+	// whose redirect policy would otherwise follow 307/308 with the POST body.
+	// Clone the client instead of mutating a caller-owned shared instance.
+	noRedirect := *client
+	noRedirect.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	resp, err := noRedirect.Do(req)
 	if err != nil {
 		return Identity{}, fmt.Errorf("%w: introspection transport", ErrIntrospectionUnavailable)
 	}
