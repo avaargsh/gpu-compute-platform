@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/avaargsh/gpu-compute-platform/internal/platform/bootstrap"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/authn"
+	"github.com/avaargsh/gpu-compute-platform/internal/platform/bootstrap"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	postgresstore "github.com/avaargsh/gpu-compute-platform/internal/store/postgres"
