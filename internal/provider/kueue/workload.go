@@ -5,6 +5,7 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const generationAnnotation = "ai.compute/generation"
@@ -20,6 +21,7 @@ type Job struct {
 	Labels      map[string]string
 	Annotations map[string]string
 	DRA         *DRARequest
+	Workspace   *domain.WorkspaceMount
 }
 
 type DRARequest struct {
@@ -37,6 +39,9 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 	}
 	if in.Accelerator.Class == "" || in.Accelerator.Quota <= 0 {
 		return Job{}, fmt.Errorf("accelerator class and positive count are required")
+	}
+	if in.Workspace != nil && len(validation.IsDNS1123Subdomain(in.Workspace.ClaimName)) != 0 {
+		return Job{}, fmt.Errorf("workspace claimName must be a valid PVC name")
 	}
 	binding := in.AcceleratorBinding
 	if binding.Class == "" || binding.Flavor == "" {
@@ -60,6 +65,7 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 			Labels:      map[string]string{"kueue.x-k8s.io/queue-name": resourceName("lq", string(in.PoolID))},
 			Annotations: map[string]string{"ai.compute/accelerator-class": in.Accelerator.Class, "ai.compute/accelerator-flavor": binding.Flavor},
 			DRA:         &DRARequest{ClaimName: resourceName("accelerator", string(in.WorkloadID)), DeviceClassName: binding.DRA.DeviceClassName, Count: in.Accelerator.Quota},
+			Workspace:   in.Workspace,
 		}, nil
 	}
 	if binding.ResourceName == "" {
@@ -85,5 +91,6 @@ func ProjectWorkload(in baseprovider.WorkloadProjection) (Job, error) {
 			"ai.compute/accelerator-class":  in.Accelerator.Class,
 			"ai.compute/accelerator-flavor": binding.Flavor,
 		},
+		Workspace: in.Workspace,
 	}, nil
 }

@@ -38,6 +38,10 @@
       <el-form-item label="容器镜像">
         <el-input v-model.trim="image" placeholder="registry.example/team/train@sha256:..." />
       </el-form-item>
+      <el-form-item label="持久工作区 PVC（可选，必须已在项目 Namespace 中创建）">
+        <el-input v-model.trim="workspaceClaim" placeholder="training-data-pvc" maxlength="253" />
+        <small>容器内固定挂载到 /workspace；删除 Job 不删除 PVC，所填名称不代表已具备访问权限。</small>
+      </el-form-item>
       <el-form-item label="Command（JSON argv 数组，不执行 Shell 模板插值）">
         <el-input v-model="commandJson" type="textarea" :rows="3" />
       </el-form-item>
@@ -73,6 +77,7 @@ const acceleratorClass = ref('')
 const quota = ref(1)
 const workloadId = ref('')
 const image = ref('')
+const workspaceClaim = ref('')
 const commandJson = ref('["python","train.py"]')
 const copyStatus = ref('')
 
@@ -90,6 +95,7 @@ watch(mode, value => {
 const draft = computed(() => buildWorkloadDraft({
   id: workloadId.value, poolId: poolId.value, acceleratorClass: acceleratorClass.value,
   quota: quota.value, image: image.value, commandJson: commandJson.value, mode: mode.value,
+  workspaceClaim: workspaceClaim.value,
 }, pools.value))
 const payloadText = computed(() => draft.value.payload ? JSON.stringify(draft.value.payload, null, 2) : '')
 async function copyDraft(): Promise<void> {

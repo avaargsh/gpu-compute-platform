@@ -41,6 +41,7 @@ type WorkloadProjection struct {
 	Command            []string
 	Accelerator        domain.AcceleratorRequest
 	AcceleratorBinding domain.AcceleratorBinding
+	Workspace          *domain.WorkspaceMount
 }
 
 type WorkloadObservation struct {

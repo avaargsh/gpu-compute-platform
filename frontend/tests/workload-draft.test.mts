@@ -54,3 +54,20 @@ test('rejects duplicate or unrecognized accelerator class', () => {
   }, draftPools([pool('pool-a', 'research', 4)]))
   assert.equal(result.payload, null)
 })
+
+test('existing PVC name is included only when explicitly provided', () => {
+  const pools = draftPools([pool('pool-a', 'research', 4)])
+  const without = buildWorkloadDraft(input, pools)
+  assert.equal(without.payload?.spec.workspace, undefined)
+  const withPVC = buildWorkloadDraft({ ...input, workspaceClaim: 'train-data.v1' }, pools)
+  assert.deepEqual(withPVC.errors, [])
+  assert.deepEqual(withPVC.payload?.spec.workspace, { claimName: 'train-data.v1' })
+})
+test('invalid or cross-namespace PVC names fail closed', () => {
+  const pools = draftPools([pool('pool-a', 'research', 4)])
+  for (const name of ['../other', '/etc/passwd', 'OTHER_NS', 'bad..name', 'workspace/other', 'not valid']) {
+    const got = buildWorkloadDraft({ ...input, workspaceClaim: name }, pools)
+    assert.equal(got.payload, null, name)
+    assert.match(got.errors.join(' '), /PVC/, name)
+  }
+})

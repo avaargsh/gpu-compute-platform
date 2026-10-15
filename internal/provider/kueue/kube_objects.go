@@ -86,7 +86,7 @@ func localQueueObject(in LocalQueue) *unstructured.Unstructured {
 	}}
 }
 
-func jobObject(in Job) (*batchv1.Job, error) {
+func buildJobObject(in Job) (*batchv1.Job, error) {
 	if in.DRA != nil {
 		if len(in.Resources) != 0 || in.DRA.ClaimName == "" || in.DRA.DeviceClassName == "" || in.DRA.Count <= 0 {
 			return nil, fmt.Errorf("valid DRA request must not include extended resources")

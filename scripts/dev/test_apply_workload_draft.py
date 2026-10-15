@@ -54,6 +54,22 @@ class TestDraft(unittest.TestCase):
         with self.assertRaises(target.InvalidDraft):
             target.load_draft(self.file(json.dumps(invalid)))
 
+    def test_rejects_actual_nul_in_command_argv(self):
+        invalid = json.loads(json.dumps(VALID))
+        invalid["spec"]["command"] = ["python", "bad" + chr(0) + "argv"]
+        with self.assertRaises(target.InvalidDraft):
+            target.load_draft(self.file(json.dumps(invalid)))
+
+    def test_workspace_pvc_roundtrip_and_invalid_name(self):
+        valid = json.loads(json.dumps(VALID))
+        valid["spec"]["workspace"] = {"claimName": "training-data.v1"}
+        parsed = target.load_draft(self.file(json.dumps(valid)))
+        self.assertEqual(parsed["spec"]["workspace"]["claimName"], "training-data.v1")
+        for bad in ("", "../escape", "UPPER", "invalid/name", "bad..claim"):
+            valid["spec"]["workspace"] = {"claimName": bad}
+            with self.assertRaises(target.InvalidDraft):
+                target.load_draft(self.file(json.dumps(valid)))
+
     def test_explicit_apply_puts_to_local_go_endpoint_only(self):
         received = {}
         class Handler(BaseHTTPRequestHandler):
