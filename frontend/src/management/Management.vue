@@ -322,6 +322,7 @@ function signOut() {
   receiptAnchor.value = ''
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
   availableProjects.value = []
   projectListTruncated.value = false
   message.value = '本页访问令牌已清除；身份提供商 SSO 会话未注销'
@@ -353,6 +354,7 @@ function selectProject(item: ProjectAccess) {
   receiptAnchor.value = ''
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
   operationId.value = ''
   message.value = '已选择项目 ' + item.projectId + '（' + item.role + '），请重新选择资源'
   error.value = ''
@@ -375,6 +377,7 @@ function restoreOperation() {
   receiptAnchor.value = ''
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
   recentOperation.value = pointer
   message.value = '已恢复操作范围和 ID；请重新登录后查询服务端回执'
   error.value = ''
@@ -388,6 +391,7 @@ function discardOperation() {
   receiptAnchor.value = ''
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
   message.value = '本页操作记录已清除，服务端审计不受影响'
 }
 
