@@ -100,6 +100,11 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await page.getByRole('button', { name: '查询已提交回执' }).click()
   await expect(page.getByRole('status')).toContainText('仅证明 Desired 写入和操作审计已提交')
   await expect(page.locator('pre').last()).toContainText(poolRequestID)
+  // This is an independent, same-subject, scoped Desired GET inferred
+  // from the committed audit receipt — not a proof of Kueue success.
+  await page.getByRole('button', { name: '按回执核对当前 Desired' }).click()
+  await expect(page.getByRole('note')).toContainText('desired-visible')
+  await expect(page.getByRole('note')).toContainText('不代表 Kueue')
   await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
   await expect(page.getByText('Generation:')).toContainText('1')
 
@@ -144,6 +149,9 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   expect(deletionID).toMatch(/^[0-9a-f]{32}$/)
   await page.getByRole('button', { name: '查询已提交回执' }).click()
   await expect(page.locator('pre').last()).toContainText('delete-request')
+  await page.getByRole('button', { name: '按回执核对当前 Desired' }).click()
+  await expect(page.getByRole('note')).toContainText('delete-request-visible')
+  await expect(page.getByRole('note')).toContainText('仍须独立证明')
   await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
   await expect(page.getByText('删除请求: 已发起')).toBeVisible()
 
@@ -170,6 +178,7 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await page.getByPlaceholder('原始 Idempotency-Key').fill(poolRequestID)
   await page.getByRole('button', { name: '查询已提交回执' }).click()
   await expect(page.getByRole('alert')).toContainText('无可访问的资源或操作回执')
+  await expect(page.getByRole('button', { name: '按回执核对当前 Desired' })).toBeDisabled()
 
   expect(requests.filter(x => x.method === 'PUT').length).toBeGreaterThanOrEqual(3)
   expect(requests.some(x => x.method === 'DELETE')).toBe(true)

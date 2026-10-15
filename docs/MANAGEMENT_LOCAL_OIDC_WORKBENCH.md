@@ -147,6 +147,17 @@ or add `Access-Control-Allow-Origin: *`.
 4. Read the same resource. Note its returned Generation.
 5. Query the displayed operation ID. Verify
    `status: "desired-committed"` and matching resource/scope/generation.
+   Then click **按回执核对当前 Desired**: the workbench derives a
+   project/cluster/resource-scoped GET from the *verified* receipt and
+   compares its current Generation and `deleting` flag. This is a fresh
+   authorized database read, **not** a replay of the write. It distinguishes
+   same-generation Desired, later Generation, visible delete request,
+   inconsistent evidence and 404 (not visible/possibly no access).
+   In particular **404 does not prove a write rolled back, deletion
+   finalized, or a Kubernetes Job succeeded**. The displayed receipt and
+   readback are bound to the selected cluster, project and operation ID;
+   switching these invalidates the prior evidence. Neither read proves
+   Kueue admission, Pod Ready or checkpoint durability.
 6. Use **训练 / 批量推理 Workload 向导** to enter a Pool ID, and click
    **读取并验证 ComputePool**. The browser performs a real, project-scoped
    Management GET with the current OIDC access token; it rejects a foreign,
