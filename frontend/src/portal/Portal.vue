@@ -135,7 +135,8 @@
         </section>
 
         <section v-else-if="view === 'jobs'" class="panel">
-          <JobComposer :rows="snapshot.rows" />
+          <JobComposer :rows="snapshot.rows" :cluster-id="snapshot.agent.clusterId"
+            :read-token="operatorToken" @submitted="refresh" />
           <el-divider />
           <WorkloadRuns :rows="snapshot.rows" :cluster-id="snapshot.agent.clusterId"
             :truncated="snapshot.truncated" />
