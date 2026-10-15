@@ -7,6 +7,10 @@ on:
       - 'scripts/dev/kserve_http_acceptance.py'
       - 'scripts/dev/test_kserve_http_acceptance.py'
       - 'docs/KSERVE_DEV_SERVING.md'
+      - 'frontend/src/portal/KServeComposer.vue'
+      - 'frontend/src/portal/kserve-http-command.ts'
+      - 'frontend/tests/kserve-http-command.test.mts'
+      - 'frontend/src/portal/kserve-draft.ts'
       - '.github/workflows/kserve-dev.yml'
   workflow_dispatch:
 
@@ -21,3 +25,17 @@ jobs:
           python-version: '3.12'
       - name: Verify KServe manifest and kubectl write/read boundary
         run: python3 -m unittest discover -s scripts/dev -p 'test_kserve*.py' -v
+      - name: Enable pinned Node for Portal contract tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install Portal dependencies
+        working-directory: frontend
+        run: npm ci --ignore-scripts
+      - name: Verify Portal KServe acceptance command and typecheck
+        working-directory: frontend
+        run: |
+          npm run portal:test
+          npm run portal:build
