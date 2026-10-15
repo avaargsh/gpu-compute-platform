@@ -1,6 +1,6 @@
 import type { DesiredView, ExecutionView, Receipt } from './api'
-import { classifyDesiredReadback, type DesiredReadback } from './readback'
-import { classifyScopedExecution, type ScopedExecution } from './execution'
+import { classifyDesiredReadback, type DesiredReadback } from './readback.ts'
+import { classifyScopedExecution, type ScopedExecution } from './execution.ts'
 
 // These endpoints are independent, sequentially authorized GETs — NOT a
 // database snapshot transaction. Reject a mixed-generation pair rather than
