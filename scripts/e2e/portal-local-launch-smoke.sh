@@ -21,6 +21,7 @@ trap 'exit 130' INT TERM
 export PORTAL_OPERATOR_CLUSTER_ID=portal-launch-ci
 export PORTAL_OPERATOR_PROJECT_IDS=research
 export PORTAL_OPERATOR_TOKEN="$(openssl rand -hex 32)"
+export PORTAL_OPERATOR_WRITE_TOKEN="$(openssl rand -hex 32)"
 unset DATABASE_URL
 
 bash scripts/dev/portal-local.sh >"$LOG" 2>&1 &
@@ -43,7 +44,8 @@ for attempt in $(seq 1 120); do
   sleep 1
 done
 
-if grep -Fq -- "$PORTAL_OPERATOR_TOKEN" "$LOG"; then
+if grep -Fq -- "$PORTAL_OPERATOR_TOKEN" "$LOG" ||
+   grep -Fq -- "$PORTAL_OPERATOR_WRITE_TOKEN" "$LOG"; then
   echo 'operator secret appeared in noninteractive stdout/stderr' >&2
   exit 1
 fi
