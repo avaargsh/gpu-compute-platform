@@ -94,6 +94,10 @@ func (v *Introspector) Verify(ctx context.Context, token string) (Principal, err
 		!matchesAudience(info.Aud, v.audience) {
 		return Principal{}, denied
 	}
+	var extra json.RawMessage
+	if err := dec.Decode(&extra); err != io.EOF {
+		return Principal{}, denied
+	}
 	exp, err := strconv.ParseInt(string(info.Exp), 10, 64)
 	if err != nil || exp <= time.Now().Unix() {
 		return Principal{}, denied
