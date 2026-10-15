@@ -4,6 +4,9 @@ on:
     paths:
       - 'scripts/dev/kserve_service.py'
       - 'scripts/dev/test_kserve_service.py'
+      - 'scripts/dev/kserve_http_acceptance.py'
+      - 'scripts/dev/test_kserve_http_acceptance.py'
+      - 'docs/KSERVE_DEV_SERVING.md'
       - '.github/workflows/kserve-dev.yml'
   workflow_dispatch:
 
@@ -17,4 +20,4 @@ jobs:
         with:
           python-version: '3.12'
       - name: Verify KServe manifest and kubectl write/read boundary
-        run: python3 -m unittest discover -s scripts/dev -p 'test_kserve_service.py' -v
+        run: python3 -m unittest discover -s scripts/dev -p 'test_kserve*.py' -v

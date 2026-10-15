@@ -66,3 +66,80 @@ promoted into the v0.1 accepted capability matrix.
 
 Upstream schema: https://kserve.github.io/website/docs/0.16/model-serving/predictive-inference/frameworks/custom-predictor
 and https://github.com/kserve/kserve/blob/master/docs/samples/v1beta1/custom/simple.yaml
+
+
+## Actual inference HTTP acceptance (developer opt-in)
+
+The Portal composer and `kserve_service.py --create/--status` establish a
+Kubernetes object workflow, **not** a verified inference response. Run a
+separate, explicit probe after KServe reports `Ready=True`.
+
+Create the *model-specific* `request.json`, for example a custom predictor
+which explicitly implements an OpenAI-compatible Chat Completions endpoint:
+
+```json
+{"model":"example","messages":[{"role":"user","content":"reply briefly"}]}
+```
+
+Create `expect.json` with a **bounded, explicit result contract**:
+
+```json
+{"pointer":"/choices/0/message/content","nonEmptyString":true}
+```
+
+Alternatively, check a known metadata field:
+
+```json
+{"pointer":"/object","equals":"chat.completion"}
+```
+
+These are examples, *not* claims that every custom KServe predictor supports
+the OpenAI API. Adjust the request, response pointer, and expected value to
+the **actual pinned runtime**.
+
+```bash
+# Offline: validate manifest + request + expectation, no network side effects
+python3 scripts/dev/kserve_http_acceptance.py serving.json \
+  --request request.json --expect expect.json
+
+# In a separately approved terminal, identify the actual KServe ingress or
+# Predictor Service and arrange port-forwarding to a local-only port 18080.
+# The script does NOT auto-discover or create any port-forward.
+
+# Active acceptance: KServe GET -> real loopback HTTP POST -> KServe GET
+python3 scripts/dev/kserve_http_acceptance.py serving.json \
+  --request request.json --expect expect.json \
+  --execute --context kind-gpu \
+  --url http://127.0.0.1:18080/v1/chat/completions
+
+# For ingress routes with name-based routing, opt in to an explicit Host:
+# --host-header model-a.research.example.local
+```
+
+The tool verifies KServe UID/project/spec and `Ready=True` *before and after*
+the response, exactly HTTP 200 and the declared JSON response field, and
+produces SHA256 hashes, KServe UID/generation and evidence booleans **without
+printing the raw request or response**. Duplicate JSON keys, unexpected HTTP
+status, missing output, replaced KServe object, mutated spec, foreign cluster
+objects, redirects, external target URLs and oversized outputs fail closed.
+
+**Strict security boundaries:** it accepts HTTP **loopback only**, prohibits
+redirects and environment proxies, and requires an operator-provisioned and
+verified port-forward/ingress route. It cannot prove the port-forward points
+to the observed KServe UID and sets `portForwardTargetVerified=false`. Avoid
+placing secrets or customer data in the test request, and do not interpret
+output schema acceptance as accuracy, throughput, SLO, production URL, TLS
+or multi-tenant authorization proof.
+
+**Upstream caveat (2026):** KServe issue
+https://github.com/kserve/kserve/issues/6081 documents a bug where the
+InferenceService `status.observedGeneration` can reflect child-generation
+rather than its parent `metadata.generation`. The probe reports this field
+as **advisory**, and uses UID/spec identity fences across the HTTP test
+instead of treating numerical equality alone as conclusive readiness.
+
+A release gate still needs independent proof of trusted network routing,
+authorization, model/data version, workload-specific semantic assertions,
+and GPU/token latency measurements. This utility is developer acceptance
+only; it does not promote the external KServe operator to a supported GPUPanel
+Serving control plane.

@@ -101,6 +101,8 @@ def at_pointer(value: Any, pointer: str) -> Any:
 
 
 def verify_body(raw: bytes, contract: tuple[str, str, str | None]) -> None:
+    if not raw or len(raw) > MAX_RESPONSE:
+        raise AcceptanceError("inference response is empty or oversized")
     try:
         value = json.loads(raw, object_pairs_hook=kserve.unique_keys)
     except (ValueError, UnicodeError) as exc:
@@ -179,6 +181,9 @@ def execute(manifest: dict[str, Any], request: bytes, contract: tuple[str, str, 
         "kserveStatusObservedGenerationAdvisory": (
             second.get("status", {}).get("observedGeneration")
         ),
+        "manifestSHA256": hashlib.sha256(
+            json.dumps(manifest, separators=(",", ":"), sort_keys=True).encode()
+        ).hexdigest(),
         "requestSHA256": hashlib.sha256(request).hexdigest(),
         "responseSHA256": hashlib.sha256(body).hexdigest(),
         "responseBytes": len(body),
