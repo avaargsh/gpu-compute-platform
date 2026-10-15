@@ -136,6 +136,9 @@
 
         <section v-else-if="view === 'jobs'" class="panel">
           <JobComposer :rows="snapshot.rows" />
+          <el-divider />
+          <WorkloadRuns :rows="snapshot.rows" :cluster-id="snapshot.agent.clusterId"
+            :truncated="snapshot.truncated" />
         </section>
 
         <section v-else-if="view === 'diagnostics'" class="panel">
@@ -189,6 +192,7 @@
 import { computed, ref, watch } from 'vue'
 import { loadSnapshot, type PortalSnapshot, type ResourceRow } from './api'
 import JobComposer from './JobComposer.vue'
+import WorkloadRuns from './WorkloadRuns.vue'
 import { findingsFor, projectIdOf, projectSummaries, triageFindings, type Finding } from './project-model'
 
 type View = 'overview' | 'projects' | 'resources' | 'jobs' | 'diagnostics' | 'integrations'
