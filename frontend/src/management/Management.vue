@@ -226,6 +226,7 @@ const inventoryAnchor = computed(() => JSON.stringify([cluster.value, project.va
 const activeInventory = computed(() =>
   inventory.value?.anchor === inventoryAnchor.value && inventory.value.session === session.value
     ? inventory.value.page : null)
+watch(() => [cluster.value, project.value], () => { inventory.value = null })
 const receiptData = ref<Receipt | null>(null)
 const receiptAnchor = ref('')
 const receiptReadback = ref<{ anchor: string; result: DesiredReadback } | null>(null)
@@ -393,6 +394,7 @@ async function signIn() {
 
 function signOut() {
   session.value = null
+  inventory.value = null
   clearPendingLogin(sessionStorage)
   forgetOperation(sessionStorage)
   recentOperation.value = null
@@ -408,6 +410,7 @@ function signOut() {
   message.value = '本页访问令牌已清除；身份提供商 SSO 会话未注销'
 }
 async function loadProjects() {
+  inventory.value = null
   clearResult()
   busy.value = true
   try {
