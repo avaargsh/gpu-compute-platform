@@ -32,13 +32,13 @@ func newTestCA(t *testing.T) testCA {
 		t.Fatal(err)
 	}
 	certTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{CommonName: "test agent CA"},
-		NotBefore: time.Now().Add(-time.Hour),
-		NotAfter: time.Now().Add(24 * time.Hour),
-		IsCA: true,
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test agent CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
 		BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, certTemplate, certTemplate, &key.PublicKey, key)
 	if err != nil {
@@ -64,11 +64,11 @@ func newTestCertificate(t *testing.T, ca testCA, client bool, expired bool) tls.
 		notAfter = time.Now().Add(-time.Hour)
 	}
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
-		NotBefore: notBefore,
-		NotAfter: notAfter,
+		SerialNumber:          big.NewInt(2),
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
 		BasicConstraintsValid: true,
-		KeyUsage: x509.KeyUsageDigitalSignature,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 	}
 	if client {
 		uri, err := url.Parse(clusterAIdentity)
@@ -104,7 +104,7 @@ func tlsClientForTest(ca testCA, cert *tls.Certificate) *http.Client {
 	roots.AppendCertsFromPEM(ca.pem)
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS13,
-		RootCAs: roots,
+		RootCAs:    roots,
 	}
 	if cert != nil {
 		tlsConfig.Certificates = []tls.Certificate{*cert}
@@ -129,9 +129,9 @@ func TestRealTLSHandshakeAndAgentScope(t *testing.T) {
 	agentRoots := x509.NewCertPool()
 	agentRoots.AppendCertsFromPEM(agentCA.pem)
 	server.TLS = &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		ClientAuth: tls.VerifyClientCertIfGiven,
-		ClientCAs: agentRoots,
+		MinVersion:   tls.VersionTLS13,
+		ClientAuth:   tls.VerifyClientCertIfGiven,
+		ClientCAs:    agentRoots,
 		Certificates: []tls.Certificate{serverCert},
 	}
 	server.StartTLS()
@@ -172,7 +172,7 @@ func TestRealTLSHandshakeAndAgentScope(t *testing.T) {
 
 	for name, cert := range map[string]*tls.Certificate{
 		"wrong-ca": &wrongCert,
-		"expired": &expiredCert,
+		"expired":  &expiredCert,
 	} {
 		t.Run(name, func(t *testing.T) {
 			client := tlsClientForTest(serverCA, cert)
