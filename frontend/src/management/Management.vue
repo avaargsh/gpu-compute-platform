@@ -47,7 +47,39 @@
     </section>
 
     <section class="management-card">
-      <h2>3. 创建或修改 Desired 资源</h2>
+      <h2>3. 训练 / 批量推理 Workload 向导（OIDC 项目授权）</h2>
+      <p>先使用当前已登录身份读取项目内的 ComputePool，再按其真实加速器绑定生成任务请求。
+        本向导不会自动提交，也不使用旧 Portal 开发双令牌接口。真实准入仍由 Kueue 决定。</p>
+      <label>已授权 ComputePool ID<input v-model.trim="workloadPoolId" autocomplete="off"
+        placeholder="用于训练的 ComputePool ID" /></label>
+      <div class="management-actions">
+        <button type="button" :disabled="!authenticated || busy" @click="verifyWorkloadPool">
+          读取并验证 ComputePool
+        </button>
+      </div>
+      <div v-if="currentWorkloadPool" class="management-status">
+        已确认 {{ currentWorkloadPool.project }}/{{ currentWorkloadPool.id }} · Generation {{ currentWorkloadPool.generation }}
+        <div class="management-fields">
+          <label>新 Workload ID<input v-model.trim="workloadID" autocomplete="off" placeholder="新的训练任务 ID" /></label>
+          <label>加速器类型<select v-model="workloadAcceleratorClass">
+            <option v-for="acc in currentWorkloadPool.accelerators" :key="acc.class" :value="acc.class">
+              {{ acc.class }} · 池声明配额 {{ acc.quota }}
+            </option>
+          </select></label>
+          <label>请求 GPU 数量<input v-model.number="workloadQuota" type="number" min="1" /></label>
+          <label>镜像<input v-model.trim="workloadImage" autocomplete="off" placeholder="registry.example/train@sha256:..." /></label>
+        </div>
+        <label>Command（JSON argv 数组；不做 Shell 插值）
+          <textarea v-model="workloadCommandJSON" rows="3" spellcheck="false"></textarea>
+        </label>
+        <button type="button" :disabled="busy" @click="prepareWorkloadRequest">生成受约束的 Workload PUT 请求</button>
+      </div>
+      <p>仅使用服务器读取的 Pool 信息生成草案；服务端提交时仍重新执行 OIDC、项目 RBAC、
+        Pool 绑定和 Generation CAS。不会承诺 PVC 持久化、Pod Ready 或训练成功。</p>
+    </section>
+
+    <section class="management-card">
+      <h2>4. 创建或修改 Desired 资源</h2>
       <label>JSON 请求体（必须包含 expectedGeneration 和 spec；Workload 还需 poolId）
         <textarea v-model="requestJSON" rows="12" spellcheck="false"></textarea>
       </label>
@@ -60,7 +92,7 @@
     </section>
 
     <section class="management-card">
-      <h2>4. 操作回执与恢复</h2>
+      <h2>5. 操作回执与恢复</h2>
       <div v-if="recentOperation && authenticated" class="management-status">
         最近一次操作（仅当前浏览器标签）：
         <code>{{ recentOperation.method }} {{ recentOperation.project }}/{{ recentOperation.kind }}/{{ recentOperation.resource }}</code>
@@ -85,10 +117,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
 import { readResource, writeResource, deleteResource, readReceipt, listProjects, type Kind, type DesiredView, type Receipt, type ProjectAccess, desiredMatchesScope, createOperationId } from './api'
 import { rememberOperation, recoverOperation, forgetOperation, type OperationPointer } from './recovery'
+import { parseAuthorizedPool, buildAuthorizedWorkloadRequest, type AuthorizedPool } from './workload-composer'
 
 const issuer = import.meta.env.VITE_MANAGEMENT_OIDC_ISSUER || ''
 const clientId = import.meta.env.VITE_MANAGEMENT_OIDC_CLIENT_ID || ''
@@ -100,6 +133,19 @@ const cluster = ref('')
 const project = ref('')
 const resource = ref('')
 const kind = ref<Kind>('ComputePool')
+const workloadPoolId = ref('')
+const verifiedWorkloadPool = ref<AuthorizedPool | null>(null)
+const currentWorkloadPool = computed(() => {
+  const pool = verifiedWorkloadPool.value
+  return pool?.cluster === cluster.value && pool.project === project.value &&
+    pool.id === workloadPoolId.value ? pool : null
+})
+const workloadID = ref('')
+const workloadImage = ref('')
+const workloadAcceleratorClass = ref('')
+const workloadQuota = ref(1)
+const workloadCommandJSON = ref('["python","train.py"]')
+watch(() => [cluster.value, project.value], () => { verifiedWorkloadPool.value = null })
 const requestJSON = ref(JSON.stringify({
   expectedGeneration: 0,
   spec: {
@@ -126,6 +172,52 @@ function token() {
 function scope() { return { cluster: cluster.value, project: project.value, kind: kind.value, resource: resource.value } }
 function clearResult() { error.value = ''; message.value = ''; receiptData.value = null }
 function describeError(e: unknown) { error.value = e instanceof Error ? e.message : '未知请求失败' }
+
+async function verifyWorkloadPool() {
+  clearResult()
+  verifiedWorkloadPool.value = null
+  busy.value = true
+  const clusterId = cluster.value
+  const projectId = project.value
+  const poolId = workloadPoolId.value
+  try {
+    const result = await readResource({
+      cluster: clusterId, project: projectId, kind: 'ComputePool', resource: poolId,
+    }, token())
+    if (!result.value) throw new Error('当前项目未读取到可用 ComputePool')
+    if (cluster.value !== clusterId || project.value !== projectId || workloadPoolId.value !== poolId) {
+      throw new Error('项目或 Pool 已变化，请重新读取')
+    }
+    const pool = parseAuthorizedPool(clusterId, projectId, result.value)
+    verifiedWorkloadPool.value = pool
+    workloadAcceleratorClass.value = pool.accelerators[0]?.class ?? ''
+    workloadQuota.value = 1
+    message.value = '已读取并验证授权 ComputePool；尚未创建 Workload'
+  } catch (e) { describeError(e) }
+  finally { busy.value = false }
+}
+
+function prepareWorkloadRequest() {
+  clearResult()
+  try {
+    const pool = currentWorkloadPool.value
+    if (!pool) throw new Error('请先使用当前 OIDC 身份读取同一项目内的 ComputePool')
+    const prepared = buildAuthorizedWorkloadRequest(pool, {
+      id: workloadID.value,
+      image: workloadImage.value,
+      acceleratorClass: workloadAcceleratorClass.value,
+      quota: workloadQuota.value,
+      commandJSON: workloadCommandJSON.value,
+    }, cluster.value, project.value)
+    kind.value = 'Workload'
+    resource.value = prepared.target.resource
+    requestJSON.value = prepared.requestJSON
+    desired.value = null
+    receiptData.value = null
+    operationId.value = ''
+    message.value = '已生成 Workload 创建请求（expectedGeneration=0）。请审核下面的 JSON 并单独确认 PUT；尚未写入 Desired'
+  } catch (e) { describeError(e) }
+}
 
 onMounted(async () => {
   // Recovery pointer is metadata only; a browser reload always discards
