@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,6 +65,11 @@ func rotationLeaf(t *testing.T, ca rotationCA, serial int64, client bool) ([]byt
 		KeyUsage: x509.KeyUsageDigitalSignature,
 	}
 	if client {
+		uri, err := url.Parse("spiffe://platform.example/cluster/cluster-a/agent")
+		if err != nil {
+			t.Fatal(err)
+		}
+		template.URIs = []*url.URL{uri}
 		template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
 	} else {
 		template.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
