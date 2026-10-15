@@ -1,0 +1,97 @@
+name: Prune safely merged PR branches
+
+# One initial cleanup after this workflow is merged. Future runs are
+# explicitly manual; ordinary pushes will not delete feature branches.
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/prune-merged-pr-branches.yml
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Delete only verified merged branches (unchecked = report only)"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: prune-merged-pr-branches
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    if: github.repository == 'avaargsh/gpu-compute-platform'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 1
+      - name: Audit merged PRs and delete only unchanged heads
+        uses: actions/github-script@v7
+        env:
+          APPLY: ${{ github.event_name == 'push' || inputs.apply == true }}
+        with:
+          script: |
+            const { spawnSync } = require('node:child_process')
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const { default_branch: defaultBranch } = (await github.rest.repos.get({ owner, repo })).data
+            if (defaultBranch !== 'master') throw new Error('Unexpected default branch; refusing cleanup')
+            const [branches, closed, open] = await Promise.all([
+              github.paginate(github.rest.repos.listBranches, { owner, repo, per_page: 100 }),
+              github.paginate(github.rest.pulls.list, { owner, repo, state: 'closed', per_page: 100 }),
+              github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', per_page: 100 }),
+            ])
+            const openHeads = new Set(open
+              .filter(p => p.head?.repo?.full_name === context.repo.owner + '/' + context.repo.repo)
+              .map(p => p.head.ref))
+            const mergedByHead = new Map()
+            for (const p of closed) {
+              if (!p.merged_at || !p.merge_commit_sha || p.base?.ref !== defaultBranch ||
+                  p.head?.repo?.full_name !== owner + '/' + repo || !p.head?.ref) continue
+              const items = mergedByHead.get(p.head.ref) || []
+              items.push(p)
+              mergedByHead.set(p.head.ref, items)
+            }
+            const reserved = /^(?:release|hotfix|backup|archive|keep)\//
+            const candidates = branches.filter(b => {
+              if (b.name === defaultBranch || b.protected || reserved.test(b.name) ||
+                  openHeads.has(b.name)) return false
+              return (mergedByHead.get(b.name) || []).some(p => p.head.sha === b.commit.sha)
+            })
+            // Protect against an accidental expansion of selection criteria.
+            if (candidates.length > 80) throw new Error('More than 80 deletion candidates; manual review required')
+            const dryRun = process.env.APPLY !== 'true'
+            const deleted = []
+            const failed = []
+            core.info(`Mode=${dryRun ? 'DRY RUN' : 'APPLY'}; found ${branches.length} branches, ${open.length} open PRs, ${candidates.length} exact-SHA merged candidates`)
+            for (const b of candidates) {
+              const matching = (mergedByHead.get(b.name) || []).find(p => p.head.sha === b.commit.sha)
+              core.info(`candidate: ${b.name} @ ${b.commit.sha} (merged PR #${matching.number})`)
+              if (dryRun) continue
+              // Compare-and-swap deletion: if anyone advanced the remote
+              // branch since the audit, Git refuses to remove it.
+              const ref = 'refs/heads/' + b.name
+              const result = spawnSync('git', [
+                'push', '--porcelain', '--force-with-lease=' + ref + ':' + b.commit.sha,
+                'origin', ':' + ref,
+              ], { encoding: 'utf8', timeout: 30000 })
+              if (result.status === 0) deleted.push(b.name)
+              else {
+                failed.push(b.name)
+                core.warning(`Kept ${b.name}: push deletion failed; ${(result.stderr || '').slice(0, 350)}`)
+              }
+            }
+            await core.summary.addHeading('Merged-PR branch cleanup', 2)
+              .addRaw(`Default branch: ${defaultBranch}; checked ${branches.length} branches.\n\n`)
+              .addRaw(`Exact-SHA merged candidates: ${candidates.length}; deleted: ${deleted.length}; failures: ${failed.length}.\n\n`)
+              .addRaw(`Mode: ${dryRun ? 'dry-run' : 'apply'}. Open PR branches and unmatched heads were preserved.\n`)
+              .write()
+            if (failed.length) throw new Error(`Failed to delete ${failed.length} otherwise safe branches; see job log`)
