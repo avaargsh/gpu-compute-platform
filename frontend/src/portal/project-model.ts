@@ -1,5 +1,5 @@
 import type { ResourceRow } from './api'
-import { executionOf } from './execution-model'
+import { executionOf } from './execution-model.ts'
 
 export type FindingSeverity = 'critical' | 'warning'
 
