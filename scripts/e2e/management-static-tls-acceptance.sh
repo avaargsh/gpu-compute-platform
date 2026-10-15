@@ -194,7 +194,7 @@ fi
 
 # Negative ingress matrix: reject any Agent/internal API path; no API bearer
 # gives 401 (never unprotected fallback); unrelated URL returns 404.
-for path in /api/v1/agent/register /api/v1/internal/config /api/v1/projects /; do
+for path in /api/v1/agent/register /api/v1/internal/config /api/v1/projects /healthz /readyz /; do
   status="$(curl -s -o /dev/null -w '%{http_code}' --cacert "$TMP/gateway.crt" \
       "https://127.0.0.1:3443$path")"
   [[ "$status" == 404 ]] || { echo "FAIL disallowed gateway path: $path returned $status" >&2; exit 1; }
