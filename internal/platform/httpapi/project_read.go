@@ -79,9 +79,19 @@ func (a *ProjectReadAPI) authorize(w http.ResponseWriter, r *http.Request) (doma
 	return projectID, placement, true
 }
 
+func desiredID(value any) domain.ID {
+	switch v := value.(type) {
+	case string:
+		return domain.ID(v)
+	case domain.ID:
+		return v
+	default:
+		return ""
+	}
+}
+
 func desiredBelongsToProject(item agent.DesiredResource, projectID domain.ID) bool {
-	owner, ok := item.Spec["projectID"].(string)
-	return ok && domain.ID(owner) == projectID
+	return projectID != "" && desiredID(item.Spec["projectID"]) == projectID
 }
 
 func (a *ProjectReadAPI) projectView(ctx context.Context, kind string, item agent.DesiredResource, clusterID domain.ID) (any, error) {
@@ -105,11 +115,10 @@ func (a *ProjectReadAPI) projectView(ctx context.Context, kind string, item agen
 func (a *ProjectReadAPI) inProjectCluster(ctx context.Context, item agent.DesiredResource, kind string, clusterID domain.ID) bool {
 	poolID := item.ID
 	if kind == "Workload" {
-		raw, ok := item.Spec["poolID"].(string)
-		if !ok || raw == "" {
+		poolID = desiredID(item.Spec["poolID"])
+		if poolID == "" {
 			return false
 		}
-		poolID = domain.ID(raw)
 	}
 	binding, err := a.placement.ResolvePool(ctx, poolID)
 	return err == nil && binding.ClusterID == clusterID
