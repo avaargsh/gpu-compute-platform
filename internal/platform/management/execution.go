@@ -12,9 +12,9 @@ import (
 // It does NOT report Kubernetes live state, authenticated Job success,
 // checkpoint durability, or resource deletion completion.
 type executionCondition struct {
-	Type string `json:"type"`
-	Status string `json:"status"`
-	Reason string `json:"reason,omitempty"`
+	Type    string `json:"type"`
+	Status  string `json:"status"`
+	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
 }
 
@@ -31,7 +31,9 @@ func decodeExecutionConditions(raw []byte) ([]executionCondition, bool) {
 			len(c.Reason) > 256 || len(c.Message) > 1024 {
 			return nil, false
 		}
-		if _, duplicate := seen[c.Type]; duplicate { return nil, false }
+		if _, duplicate := seen[c.Type]; duplicate {
+			return nil, false
+		}
 		seen[c.Type] = struct{}{}
 	}
 	return values, true
