@@ -107,7 +107,7 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   // generate the typed, scoped Workload write. No dev-operator tokens.
   await page.getByPlaceholder('用于训练的 ComputePool ID').fill('pool-a')
   await page.getByRole('button', { name: '读取并验证 ComputePool' }).click()
-  await expect(page.getByText(/已确认 research\\/pool-a/)).toBeVisible()
+  await expect(page.getByText('已确认 research/pool-a', { exact: false })).toBeVisible()
   await page.getByPlaceholder('新的训练任务 ID').fill('job-a')
   await page.getByPlaceholder('registry.example/train@sha256:...').fill('example.invalid/ci:1')
   await page.getByRole('button', { name: '生成受约束的 Workload PUT 请求' }).click()
@@ -128,14 +128,14 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await expect(page.getByText('Generation:')).toContainText('1')
 
   // Parent deletion must reject existing dependent Workload.
-  await page.locator('select').selectOption('ComputePool')
+  await page.locator('select').first().selectOption('ComputePool')
   await page.getByPlaceholder('pool-a').fill('pool-a')
   await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
   await page.getByRole('button', { name: '确认并发起删除请求' }).click()
   await expect(page.getByRole('alert')).toContainText('资源版本已变化、资源仍被占用')
 
   // Workload deletion is a Finalizer request, not physical provider deletion.
-  await page.locator('select').selectOption('Workload')
+  await page.locator('select').first().selectOption('Workload')
   await page.getByPlaceholder('pool-a').fill('job-a')
   await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
   await page.getByRole('button', { name: '确认并发起删除请求' }).click()
@@ -161,7 +161,7 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await expect(page.getByRole('button', { name: '使用 research (browser-ci) · viewer' })).toBeVisible()
   await expect(page.getByRole('button', { name: /operator/ })).toHaveCount(0)
   await page.getByRole('button', { name: '使用 research (browser-ci) · viewer' }).click()
-  await page.locator('select').selectOption('ComputePool')
+  await page.locator('select').first().selectOption('ComputePool')
   await page.getByPlaceholder('pool-a').fill('pool-a')
   await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
   await expect(page.getByText('Generation:')).toContainText('1')
