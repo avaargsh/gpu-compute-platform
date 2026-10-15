@@ -1,0 +1,73 @@
+name: Management Browser PostgreSQL Acceptance
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'cmd/management-e2e-fixture/**'
+      - 'cmd/management-api/**'
+      - 'internal/platform/management/**'
+      - 'internal/store/postgres/schema.sql'
+      - 'frontend/src/management/**'
+      - 'frontend/playwright.management.live.config.ts'
+      - 'frontend/tests/e2e/management.live.e2e.spec.ts'
+      - 'frontend/vite.management.config.ts'
+      - 'frontend/management.html'
+      - 'scripts/e2e/management-postgres-browser-e2e.sh'
+      - '.github/workflows/management-browser-postgres.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: management-browser-pg-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chromium-postgres:
+    name: Real Chromium / Management API / PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gpu
+          POSTGRES_PASSWORD: gpu
+          POSTGRES_DB: gpu_platform_browser_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gpu -d gpu_platform_browser_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_DSN: postgres://gpu:gpu@localhost:5432/gpu_platform_browser_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Verify isolated disposable-only fixture guards and shell syntax
+        run: |
+          go test ./cmd/management-e2e-fixture
+          bash -n scripts/e2e/management-postgres-browser-e2e.sh
+      - name: Install pinned Portal dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install ephemeral Playwright runner without lockfile mutations
+        working-directory: frontend
+        run: npm install --no-save --package-lock=false @playwright/test@1.56.1
+      - name: Install Chromium for real UI acceptance
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Browser to real Management Go handler and disposable PostgreSQL
+        run: bash scripts/e2e/management-postgres-browser-e2e.sh
