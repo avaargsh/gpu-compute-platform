@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
@@ -20,6 +21,23 @@ func openContractDB(t *testing.T) *sql.DB {
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN is not set")
+	}
+	// Only the store contract package may use this database. The Management
+	// package continues to use TEST_POSTGRES_DSN; it must never be truncated
+	// by a Store fixture running concurrently.
+	if isolated := os.Getenv("TEST_POSTGRES_STORE_DSN"); isolated != "" {
+		primaryConfig, err := pgx.ParseConfig(dsn)
+		if err != nil {
+			t.Fatalf("parse primary test DSN: %v", err)
+		}
+		storeConfig, err := pgx.ParseConfig(isolated)
+		if err != nil {
+			t.Fatalf("parse store test DSN: %v", err)
+		}
+		if primaryConfig.Database == storeConfig.Database {
+			t.Fatal("TEST_POSTGRES_STORE_DSN must name a different database from TEST_POSTGRES_DSN")
+		}
+		dsn = isolated
 	}
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -44,6 +62,30 @@ func openContractDB(t *testing.T) *sql.DB {
 		}
 	}
 	return db
+}
+
+// A Store fixture may TRUNCATE its own tables, but it must not be able to
+// clear the independent Management package's database during parallel CI.
+func TestPostgresPackageDatabaseIsolation(t *testing.T) {
+	if os.Getenv("TEST_POSTGRES_STORE_DSN") == "" {
+		t.Skip("explicit per-package database not configured")
+	}
+	primary, err := sql.Open("pgx", os.Getenv("TEST_POSTGRES_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer primary.Close()
+	store := openContractDB(t)
+	var primaryName, storeName string
+	if err := primary.QueryRow("SELECT current_database()").Scan(&primaryName); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.QueryRow("SELECT current_database()").Scan(&storeName); err != nil {
+		t.Fatal(err)
+	}
+	if primaryName == storeName {
+		t.Fatalf("management and store contract tests share database %q", primaryName)
+	}
 }
 
 func TestPostgresReconcileLeaseOwnershipAndExpiry(t *testing.T) {
