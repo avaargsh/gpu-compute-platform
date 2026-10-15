@@ -86,7 +86,7 @@ func TestIntrospectorInjectedClientDoesNotForwardCredentialsOnRedirect(t *testin
 				Audience: "gpu-management", ClientID: "introspection-client",
 				ClientSecret: "test-only-secret", AllowHTTPForTests: true,
 				Client: &http.Client{
-					Timeout: 2 * time.Second,
+					Timeout:       2 * time.Second,
 					CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return nil },
 				},
 			}
