@@ -9,6 +9,8 @@ on:
       - 'scripts/dev/test_apply_workload_draft.py'
       - 'scripts/dev/workspace_pvc.py'
       - 'scripts/dev/test_workspace_pvc.py'
+      - 'scripts/dev/workspace_durability.py'
+      - 'scripts/dev/test_workspace_durability.py'
       - '.github/workflows/train-infer-dev.yml'
   pull_request:
     paths:
@@ -16,6 +18,8 @@ on:
       - 'scripts/dev/test_apply_workload_draft.py'
       - 'scripts/dev/workspace_pvc.py'
       - 'scripts/dev/test_workspace_pvc.py'
+      - 'scripts/dev/workspace_durability.py'
+      - 'scripts/dev/test_workspace_durability.py'
       - '.github/workflows/train-infer-dev.yml'
   workflow_dispatch:
 
@@ -28,5 +32,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Verify Workload and PVC bootstrap
+      - name: Test Workload and PVC create/read/durability acceptance
         run: python3 -m unittest discover -s scripts/dev -p 'test_*.py' -v
