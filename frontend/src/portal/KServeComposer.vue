@@ -47,7 +47,23 @@
       <el-input v-model.trim="context" placeholder="kind-gpu" />
     </el-form-item>
     <el-input type="textarea" readonly :rows="4" :model-value="commands" />
-    <p class="table-footnote">先将 JSON 保存为 serving.json。服务端 KServe Controller 的 Ready Condition 仍不代表真实 HTTP API / Token 生成 / 路由 / 模型正确性，需另做在线请求验收。</p>
+    <p class="table-footnote">先将 JSON 保存为 serving.json。KServe Controller Ready 并不等于真实模型响应，必须单独验证数据面。</p>
+    <el-divider />
+    <h3>真实 HTTP 推理验收 · 仅生成本地命令</h3>
+    <el-alert type="warning" :closable="false"
+      title="必须先由管理员确认 KServe Service / Ingress 对应关系，并将其转发到本机回环地址；这里不自动端口转发、执行推理或发送凭证。HTTP 200 及响应字段匹配仍不能证明模型质量或生产路由身份。" />
+    <div class="detail-grid" style="margin-top: 12px">
+      <el-form-item label="本地已授权 Port-forward URL">
+        <el-input v-model.trim="httpUrl" placeholder="http://127.0.0.1:18080/v1/chat/completions" />
+      </el-form-item>
+      <el-form-item label="HTTP Host（可选，Ingress 名称路由）">
+        <el-input v-model.trim="httpHost" placeholder="model-a.research.example.local" />
+      </el-form-item>
+    </div>
+    <p>先根据实际推理镜像接口准备 <code>request.json</code> 和 <code>expect.json</code>。例如，OpenAI 兼容接口可断言 <code>/choices/0/message/content</code> 为非空字符串；并非所有自定义 Predictor 都支持这个协议。</p>
+    <el-input type="textarea" readonly :rows="3"
+      :model-value="httpAcceptanceCommand || '填写合法的本机 URL、Kubernetes context 和 KServe 清单后才能生成验收命令。'" />
+    <p class="table-footnote">本地验收工具默认离线，可用 --execute 进行 KServe GET → 真实 HTTP POST → KServe GET，返回 SHA256 证据；原始请求和响应不会打印到 Portal。详情见 docs/KSERVE_DEV_SERVING.md。</p>
   </section>
 </template>
 
@@ -55,6 +71,7 @@
 import { computed, ref, watch } from 'vue'
 import type { ResourceRow } from './api'
 import { buildKServeDraft, servingProjects } from './kserve-draft'
+import { kserveHTTPAcceptanceCommand } from './kserve-http-command'
 
 const props = defineProps<{ rows: ResourceRow[] }>()
 const projects = computed(() => servingProjects(props.rows))
@@ -65,6 +82,8 @@ const gpu = ref(1)
 const image = ref('')
 const argsJson = ref('["--model","/models/model"]')
 const context = ref('')
+const httpUrl = ref('')
+const httpHost = ref('')
 const copyStatus = ref('')
 watch(projects, value => {
   if (!value.some(p => p.id === projectId.value)) projectId.value = value[0]?.id ?? ''
@@ -77,6 +96,10 @@ const draft = computed(() => buildKServeDraft({
 const manifestJson = computed(() => draft.value.manifest
   ? JSON.stringify(draft.value.manifest, null, 2) : '')
 const validContext = computed(() => /^[a-zA-Z0-9][a-zA-Z0-9_.:@/-]{0,127}$/.test(context.value))
+const httpAcceptanceCommand = computed(() => kserveHTTPAcceptanceCommand({
+  manifestValid: draft.value.manifest !== null,
+  context: context.value, url: httpUrl.value, host: httpHost.value,
+}))
 const commands = computed(() => {
   if (!draft.value.manifest || !validContext.value) {
     return '填写 KServe 清单后，输入明确的本地 Kubernetes context 才显示命令。'
