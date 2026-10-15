@@ -13,6 +13,22 @@ export interface AuthorizedPool {
   accelerators: Array<{ class: string; quota: number }>
 }
 
+// A verified Pool belongs to the exact in-memory OIDC login instance.
+// A later login by the same user is not the same authorization snapshot.
+export interface VerifiedPoolSelection {
+  pool: AuthorizedPool
+  session: object
+}
+
+export function poolForCurrentSession(
+  selection: VerifiedPoolSelection | null, session: object | null,
+  authenticated: boolean, cluster: string, project: string, poolId: string,
+): AuthorizedPool | null {
+  if (!authenticated || !session || selection?.session !== session) return null
+  const pool = selection.pool
+  return pool.cluster === cluster && pool.project === project && pool.id === poolId ? pool : null
+}
+
 export interface WorkloadForm {
   id: string
   image: string
