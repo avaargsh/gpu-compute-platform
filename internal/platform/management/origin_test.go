@@ -12,9 +12,9 @@ func TestManagementBrowserOriginConfigurationFailsClosed(t *testing.T) {
 		"http://localhost:3002", "http://0.0.0.0:3002",
 		"http://127.0.0.2:3002", "https://127.0.0.2:3002",
 		"http://127.0.0.1:3002/", "http://127.0.0.1:3002?key=1",
-	    "https://127.0.0.1:3443/", "https://127.0.0.1:3443#frag",
-	    "https://user:pw@127.0.0.1:3443", "https://127.0.0.1:65536",
-	    "https://localhost:3443", "https://evil.example:3443",
+		"https://127.0.0.1:3443/", "https://127.0.0.1:3443#frag",
+		"https://user:pw@127.0.0.1:3443", "https://127.0.0.1:65536",
+		"https://localhost:3443", "https://evil.example:3443",
 		"http://127.0.0.1:3002#token", "http://user:pw@127.0.0.1:3002",
 		"http://127.0.0.1:0", "http://127.0.0.1:65536",
 		"http://127.0.0.1:bad", "http://attacker.example:3002",
@@ -24,8 +24,10 @@ func TestManagementBrowserOriginConfigurationFailsClosed(t *testing.T) {
 			t.Errorf("unsafe management browser Origin accepted: %q", origin)
 		}
 	}
-	for _, origin := range []string{"", "http://127.0.0.1:3002", "http://127.0.0.1:3033",
-	    "https://127.0.0.1:3443"} {
+	for _, origin := range []string{
+		"", "http://127.0.0.1:3002", "http://127.0.0.1:3033",
+		"https://127.0.0.1:3443",
+	} {
 		if err := validateBrowserOrigin(origin); err != nil {
 			t.Errorf("expected loopback Origin %q: %v", origin, err)
 		}
@@ -74,17 +76,17 @@ func TestManagementBrowserWriteOriginGateDeniesUntrustedOrigins(t *testing.T) {
 		origin  string
 		allowed bool
 	}{
-	    {"https://127.0.0.1:3443", true},
-	    {"http://127.0.0.1:3443", false},
-	    {"https://127.0.0.1:3002", false},
-	    {"https://localhost:3443", false},
-	    {"https://attacker.example", false},
+		{"https://127.0.0.1:3443", true},
+		{"http://127.0.0.1:3443", false},
+		{"https://127.0.0.1:3002", false},
+		{"https://localhost:3443", false},
+		{"https://attacker.example", false},
 	} {
-	    req := httptest.NewRequest(http.MethodPut, "/api/v1/management/", nil)
-	    req.Header.Set("Origin", tc.origin)
-	    if got := tls.browserWriteAllowed(req); got != tc.allowed {
-	        t.Errorf("HTTPS Origin %q: allowed=%v, want=%v", tc.origin, got, tc.allowed)
-	    }
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/management/", nil)
+		req.Header.Set("Origin", tc.origin)
+		if got := tls.browserWriteAllowed(req); got != tc.allowed {
+		    t.Errorf("HTTPS Origin %q: allowed=%v, want=%v", tc.origin, got, tc.allowed)
+		}
 	}
 	withoutOptIn := &Service{}
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/management/", nil)
