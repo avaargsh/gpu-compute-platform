@@ -29,10 +29,10 @@ acceptance-contract:
 
 
 security-contract:
-	@test -n "$TEST_POSTGRES_DSN" || (echo "security-contract requires dedicated TEST_POSTGRES_DSN" >&2; exit 2)
+	@test -n "$(TEST_POSTGRES_DSN)" || (echo "security-contract requires dedicated TEST_POSTGRES_DSN" >&2; exit 2)
 	go test ./internal/platform/authn -run 'Test(Introspection|Audience)'
 	go test ./internal/platform/httpapi -run 'Test(ProjectRead|AgentMTLS|RealTLSHandshake)'
-	go test ./internal/store/postgres -run '^TestPostgresProjectMembershipAuthorityAndRevocation$'
+	go test ./internal/store/postgres -run '^TestPostgresProjectMembershipAuthorityAndRevocation'
 
 stage-b-volcano-contract:
 	go test ./internal/provider/volcano -run 'Test(Project|Volcano|Classify|Ensure|Dynamic|Observe|Delete)'
