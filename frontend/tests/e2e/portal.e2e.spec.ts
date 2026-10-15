@@ -176,6 +176,7 @@ test('operator produces a KServe custom predictor manifest from the real scoped 
   await page.getByPlaceholder('qwen-serving').fill('qwen-v1')
   const pinned = 'registry.example/vllm@sha256:' + 'a'.repeat(64)
   await page.getByPlaceholder('registry.example/llm@sha256:...').fill(pinned)
+  await expect(output).toHaveValue(/"InferenceService"/)
   const json = await output.inputValue()
   const manifest = JSON.parse(json)
   expect(manifest.apiVersion).toBe('serving.kserve.io/v1beta1')
