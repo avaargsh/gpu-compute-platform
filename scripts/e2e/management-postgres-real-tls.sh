@@ -273,10 +273,10 @@ OIDC_CLIENT_SECRET=ci-only-secret
 OIDC_AUDIENCE=management-api
 ENV
 chmod 600 "$IMAGE_ENV"
-docker run -d --name "$IMAGE_CONTAINER" --network host \\
-  --read-only --cap-drop ALL --security-opt no-new-privileges \\
-  --pids-limit 128 --memory 256m --env-file "$IMAGE_ENV" \\
-  --mount "type=bind,src=$TMP_DIR/ca.pem,dst=/etc/management/pg-ca.pem,readonly" \\
+docker run -d --name "$IMAGE_CONTAINER" --network host \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --pids-limit 128 --memory 256m --env-file "$IMAGE_ENV" \
+  --mount "type=bind,src=$TMP_DIR/ca.pem,dst=/etc/management/pg-ca.pem,readonly" \
   gpu-management-api:tls-ci >/dev/null
 image_ready=0
 for attempt in $(seq 1 100); do
@@ -294,7 +294,7 @@ if [[ "$image_ready" != 1 ]]; then
   echo "FAIL Management image failed local health check" >&2
   exit 1
 fi
-image_tls_count="$(docker exec "$PG_CONTAINER" psql -X -tA -U gpu -d gpu_management_tls_ci \\
+image_tls_count="$(docker exec "$PG_CONTAINER" psql -X -tA -U gpu -d gpu_management_tls_ci \
   -c "SELECT count(*) FROM pg_stat_activity a JOIN pg_stat_ssl s USING(pid) WHERE a.usename='management_tls_login' AND s.ssl IS TRUE")"
 if [[ ! "$image_tls_count" =~ ^[1-9][0-9]*$ ]]; then
   echo "FAIL Management image has no verified live PostgreSQL TLS connection" >&2
