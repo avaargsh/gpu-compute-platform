@@ -118,6 +118,7 @@ VALUES($1,$2,$3,1,$4::jsonb)`,
 		{"bob-token", path + "?after=../other", 400},
 		{"bob-token", path + "?after=job-01&after=job-02", 400},
 		{"bob-token", path + "?limit=100000", 400},
+		{"bob-token", path + "?after=job-02&limit=100000", 400},
 	} {
 		rec := read(tc.token, tc.endpoint)
 		if rec.Code != tc.status {
