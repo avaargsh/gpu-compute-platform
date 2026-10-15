@@ -253,3 +253,54 @@ expect_failure "stale CA B rejected after CA A rollback" "management postgres un
 expect_verified_login "original CA A works after certificate rollback" "$VERIFIED_DSN"
 echo "PASS PostgreSQL TLS CA rotation and rollback acceptance (restart cutover; not zero downtime)"
 
+
+
+# The supported Management image must also start against the real verified
+# PostgreSQL TLS server as a NONROOT, READ-ONLY container. Linux host networking
+# is used ONLY by this local disposable fixture; the process remains bound to
+# 127.0.0.1 and is NOT approved for external exposure.
+docker build -f Dockerfile --target management-api -t gpu-management-api:tls-ci .
+IMAGE_CONTAINER="gpu-management-runtime-tls-ci-$$"
+trap 'docker rm -f "$IMAGE_CONTAINER" >/dev/null 2>&1 || true; cleanup' EXIT INT TERM
+IMAGE_ENV="$TMP_DIR/management-image.env"
+cat > "$IMAGE_ENV" <<ENV
+MANAGEMENT_DATABASE_URL=postgres://management_tls_login:$TEST_PASSWORD@localhost:55433/gpu_management_tls_ci?sslmode=verify-full&sslrootcert=/etc/management/pg-ca.pem
+MANAGEMENT_LISTEN_ADDR=127.0.0.1:18081
+OIDC_ISSUER=https://issuer.example.test/realms/gpu
+OIDC_INTROSPECTION_URL=https://issuer.example.test/realms/gpu/protocol/openid-connect/token/introspect
+OIDC_CLIENT_ID=disposable-management-ci
+OIDC_CLIENT_SECRET=ci-only-secret
+OIDC_AUDIENCE=management-api
+ENV
+chmod 600 "$IMAGE_ENV"
+docker run -d --name "$IMAGE_CONTAINER" --network host \\
+  --read-only --cap-drop ALL --security-opt no-new-privileges \\
+  --pids-limit 128 --memory 256m --env-file "$IMAGE_ENV" \\
+  --mount "type=bind,src=$TMP_DIR/ca.pem,dst=/etc/management/pg-ca.pem,readonly" \\
+  gpu-management-api:tls-ci >/dev/null
+image_ready=0
+for attempt in $(seq 1 100); do
+  if curl -fsS --max-time 1 http://127.0.0.1:18081/healthz >/dev/null 2>&1; then
+    image_ready=1
+    break
+  fi
+  if ! docker inspect -f '{{.State.Running}}' "$IMAGE_CONTAINER" 2>/dev/null | grep -qx true; then
+    echo "FAIL Management image could not start under strict TLS and runtime role" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+if [[ "$image_ready" != 1 ]]; then
+  echo "FAIL Management image failed local health check" >&2
+  exit 1
+fi
+image_tls_count="$(docker exec "$PG_CONTAINER" psql -X -tA -U gpu -d gpu_management_tls_ci \\
+  -c "SELECT count(*) FROM pg_stat_activity a JOIN pg_stat_ssl s USING(pid) WHERE a.usename='management_tls_login' AND s.ssl IS TRUE")"
+if [[ ! "$image_tls_count" =~ ^[1-9][0-9]*$ ]]; then
+  echo "FAIL Management image has no verified live PostgreSQL TLS connection" >&2
+  exit 1
+fi
+docker stop "$IMAGE_CONTAINER" >/dev/null
+docker rm "$IMAGE_CONTAINER" >/dev/null
+IMAGE_CONTAINER=""
+echo "PASS nonroot read-only Management image + scoped runtime role + real verify-full PostgreSQL TLS"
