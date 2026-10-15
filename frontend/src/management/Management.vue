@@ -106,6 +106,9 @@
       <div class="management-actions">
         <button type="button" :disabled="!authenticated || busy" @click="receipt">查询已提交回执</button>
         <button type="button" :disabled="!operationId" @click="copyOperationId">复制操作 ID</button>
+        <button type="button" :disabled="!authenticated || !operationId || busy" @click="refreshEvidenceChain">
+          一键重新核对回执、Desired 与执行观察
+        </button>
         <button type="button" :disabled="!activeReceipt || busy" @click="readBackDesired">
           按回执核对当前 Desired
         </button>
@@ -114,6 +117,10 @@
           查询独立 Agent / Kueue 观察
         </button>
       </div>
+      <p v-if="activeEvidenceChecked" class="management-status" role="note">
+        上次完整证据核对：{{ activeEvidenceChecked.at }}。这是人工触发的一组独立读取，
+        不保证数据库事务快照一致；需要最新状态请再次核对。
+      </p>
       <div v-if="activeReadback" class="management-status" role="note">
         <strong>独立授权回读：{{ activeReadback.status }}</strong>
         <p>{{ activeReadback.detail }}</p>
@@ -152,6 +159,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
 import { readResource, writeResource, deleteResource, readReceipt, readExecution, listProjects, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, desiredMatchesScope, createOperationId } from './api'
 import { classifyScopedExecution, type ScopedExecution } from './execution'
+import { verifyEvidencePair } from './evidence-check'
 import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from './readback'
 import { rememberOperation, recoverOperation, forgetOperation, type OperationPointer } from './recovery'
 import { parseAuthorizedPool, buildAuthorizedWorkloadRequest, type AuthorizedPool } from './workload-composer'
@@ -194,6 +202,7 @@ const receiptData = ref<Receipt | null>(null)
 const receiptAnchor = ref('')
 const receiptReadback = ref<{ anchor: string; result: DesiredReadback } | null>(null)
 const executionReadback = ref<{ anchor: string; result: ScopedExecution } | null>(null)
+const evidenceChecked = ref<{ anchor: string; at: string } | null>(null)
 const operationId = ref('')
 const receiptSelector = computed(() => JSON.stringify([cluster.value, project.value, operationId.value]))
 const activeReceipt = computed(() => receiptAnchor.value === receiptSelector.value ? receiptData.value : null)
@@ -201,6 +210,8 @@ const activeReadback = computed(() =>
   receiptReadback.value?.anchor === receiptSelector.value ? receiptReadback.value.result : null)
 const activeExecution = computed(() =>
   executionReadback.value?.anchor === receiptSelector.value ? executionReadback.value.result : null)
+const activeEvidenceChecked = computed(() =>
+  evidenceChecked.value?.anchor === receiptSelector.value ? evidenceChecked.value : null)
 const recentOperation = ref<OperationPointer | null>(null)
 const busy = ref(false)
 const message = ref('')
@@ -219,6 +230,7 @@ function clearResult() {
   receiptAnchor.value = ''
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
 }
 function describeError(e: unknown) { error.value = e instanceof Error ? e.message : '未知请求失败' }
 
