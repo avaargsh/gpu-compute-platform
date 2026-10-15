@@ -120,3 +120,20 @@ CREATE TABLE IF NOT EXISTS deletion_tombstones (
 
 CREATE INDEX IF NOT EXISTS deletion_tombstones_finalized_idx
     ON deletion_tombstones (finalized_at);
+
+
+-- Human management API membership, deliberately independent from the legacy
+-- Python tenancy tables. Enrollment/update must be performed by a trusted
+-- administrative migration or identity reconciliation, never by an API caller.
+CREATE TABLE IF NOT EXISTS platform_project_memberships (
+    issuer TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('owner', 'developer', 'viewer')),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (issuer, subject, project_id)
+);
+
+CREATE INDEX IF NOT EXISTS platform_project_memberships_project_idx
+    ON platform_project_memberships (project_id, active);
