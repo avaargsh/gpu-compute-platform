@@ -30,6 +30,29 @@
         </button>
       </div>
       <p v-if="projectListTruncated">只显示前 100 个项目，列表不完整。请联系管理员或手动输入授权项目。</p>
+      <div class="management-actions">
+        <button type="button" :disabled="!authenticated || busy || !cluster || !project" @click="loadWorkloads()">
+          查询项目 Workload 列表（每页 25 条）
+        </button>
+      </div>
+      <div v-if="activeInventory" class="management-status" role="region" aria-label="授权 Workload 列表">
+        <p>当前项目 {{ project }} · {{ activeInventory.items.length }} 条已读取（仅 Desired 元数据）。
+          不包含 Kueue 准入、Agent 状态或执行成功证明。</p>
+        <p v-if="!activeInventory.items.length">此页未找到任务；可能为空、已删除或项目授权发生变化。</p>
+        <ul>
+          <li v-for="item in activeInventory.items" :key="item.id">
+            {{ item.id }} · Generation {{ item.generation }} · {{ item.deleting ? '删除请求已发起' : '未请求删除' }}
+            <button type="button" :disabled="busy" @click="selectInventoryWorkload(item)">
+              选择 Workload {{ item.id }}
+            </button>
+          </li>
+        </ul>
+        <button v-if="activeInventory.nextCursor" type="button" :disabled="busy"
+          @click="loadWorkloads(activeInventory.nextCursor)">
+          加载下一页 Workload
+        </button>
+        <p v-if="activeInventory.hasMore">尚有其他页面。游标翻页并非单个事务快照，列表不能证明已包含所有任务。</p>
+      </div>
       <div class="management-fields">
         <label>Cluster ID<input v-model.trim="cluster" autocomplete="off" placeholder="cluster-a" /></label>
         <label>Project ID<input v-model.trim="project" autocomplete="off" placeholder="research" /></label>
@@ -157,7 +180,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
-import { readResource, writeResource, deleteResource, readReceipt, readExecution, listProjects, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, desiredMatchesScope, createOperationId } from './api'
+import { readResource, writeResource, deleteResource, readReceipt, readExecution, listProjects, listWorkloads, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, type WorkloadInventoryItem, type WorkloadInventoryPage, desiredMatchesScope, createOperationId } from './api'
 import { classifyScopedExecution, type ScopedExecution } from './execution'
 import { verifyEvidencePair } from './evidence-check'
 import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from './readback'
@@ -198,6 +221,11 @@ const requestJSON = ref(JSON.stringify({
 const desired = ref<DesiredView | null>(null)
 const availableProjects = ref<ProjectAccess[]>([])
 const projectListTruncated = ref(false)
+const inventory = ref<{ anchor: string; session: AccessSession; page: WorkloadInventoryPage } | null>(null)
+const inventoryAnchor = computed(() => JSON.stringify([cluster.value, project.value]))
+const activeInventory = computed(() =>
+  inventory.value?.anchor === inventoryAnchor.value && inventory.value.session === session.value
+    ? inventory.value.page : null)
 const receiptData = ref<Receipt | null>(null)
 const receiptAnchor = ref('')
 const receiptReadback = ref<{ anchor: string; result: DesiredReadback } | null>(null)
@@ -233,6 +261,58 @@ function clearResult() {
   evidenceChecked.value = null
 }
 function describeError(e: unknown) { error.value = e instanceof Error ? e.message : '未知请求失败' }
+
+async function loadWorkloads(after?: string) {
+  if (busy.value) return
+  error.value = ''
+  message.value = ''
+  busy.value = true
+  const selected = inventoryAnchor.value
+  const originalSession = session.value
+  const clusterId = cluster.value
+  const projectId = project.value
+  try {
+    const access = token()
+    // A stale cursor must never be interpreted under another project.
+    if (after && (!activeInventory.value || activeInventory.value.nextCursor !== after)) {
+      throw new Error('分页游标已失效，请重新读取当前项目列表')
+    }
+    const result = await listWorkloads(clusterId, projectId, access, after)
+    const page = result.value
+    if (!page || !Array.isArray(page.items) || page.items.length > 25 ||
+        typeof page.hasMore !== 'boolean' ||
+        (page.hasMore && !page.nextCursor) || (!page.hasMore && page.nextCursor !== null)) {
+      throw new Error('服务端返回的 Workload 列表格式异常')
+    }
+    if (selected !== inventoryAnchor.value || originalSession !== session.value) {
+      throw new Error('列表查询期间授权身份或项目已变化，请重新查询')
+    }
+    const previous = after ? activeInventory.value?.items ?? [] : []
+    const ids = new Set(previous.map(item => item.id))
+    for (const item of page.items) {
+      if (ids.has(item.id) || !Number.isSafeInteger(item.generation) || item.generation < 1) {
+        throw new Error('分页出现重复或无效 Workload 元数据，拒绝合并')
+      }
+      ids.add(item.id)
+    }
+    inventory.value = { anchor: selected, session: originalSession!, page: {
+      items: [...previous, ...page.items], nextCursor: page.nextCursor, hasMore: page.hasMore,
+    } }
+    message.value = '已查询当前 OIDC 项目内 Workload Desired；只读、分页且不包含执行完成证明'
+  } catch (e) {
+    inventory.value = null
+    describeError(e)
+  } finally { busy.value = false }
+}
+function selectInventoryWorkload(item: WorkloadInventoryItem) {
+  if (!activeInventory.value || !activeInventory.value.items.some(row => row.id === item.id)) return
+  kind.value = 'Workload'
+  resource.value = item.id
+  operationId.value = ''
+  desired.value = null
+  clearResult()
+  message.value = '已选择 Workload ' + item.id + '；请单独读取最新 Desired 与对应操作回执'
+}
 
 async function verifyWorkloadPool() {
   clearResult()
