@@ -85,7 +85,7 @@ func TestManagementBrowserWriteOriginGateDeniesUntrustedOrigins(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPut, "/api/v1/management/", nil)
 		req.Header.Set("Origin", tc.origin)
 		if got := tls.browserWriteAllowed(req); got != tc.allowed {
-		    t.Errorf("HTTPS Origin %q: allowed=%v, want=%v", tc.origin, got, tc.allowed)
+			t.Errorf("HTTPS Origin %q: allowed=%v, want=%v", tc.origin, got, tc.allowed)
 		}
 	}
 	withoutOptIn := &Service{}
