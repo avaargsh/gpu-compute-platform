@@ -111,8 +111,10 @@ test('developer can create actual scoped Workload Desired through Portal without
   await expect(page.getByText('资源状态预览')).toBeVisible()
   await page.getByRole('button', { name: /训推任务/ }).click()
   await expect(page.getByText('训练 / 批量推理任务', { exact: true })).toBeVisible()
-  await page.getByPlaceholder('从真实资源快照中选择').click()
-  await page.getByText('research / pool-aaa', { exact: true }).last().click()
+  // Composer preselects the only valid ComputePool, so Element Plus removes
+  // the placeholder. Assert the real scoped selection rather than clicking
+  // a placeholder that only appears when no pool was chosen.
+  await expect(page.getByText('research / pool-aaa', { exact: true }).first()).toBeVisible()
   await page.getByPlaceholder('train-qwen-001').fill('train-portal-real-e2e')
   await page.getByPlaceholder('registry.example/team/train@sha256:...').fill('example.invalid/train:local-e2e')
   await page.getByPlaceholder('PORTAL_OPERATOR_WRITE_TOKEN（至少 32 字符）').fill(devWrite)
