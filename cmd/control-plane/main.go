@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/bootstrap"
+	"github.com/avaargsh/gpu-compute-platform/internal/platform/authn"
 	"github.com/avaargsh/gpu-compute-platform/internal/platform/httpapi"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	postgresstore "github.com/avaargsh/gpu-compute-platform/internal/store/postgres"
@@ -25,6 +26,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("unsafe Agent HTTPS configuration: %v", err)
 	}
+	humanListener, err := bootstrap.LoadHumanListener(os.Getenv, cfg.Profile)
+	if err != nil {
+		log.Fatalf("unsafe human HTTPS configuration: %v", err)
+	}
+	if humanListener.Enabled && agentListener.Enabled {
+		log.Fatal("human OAuth and Agent mTLS must not share the same listener")
+	}
 	store, placement, cleanup := buildStore(cfg.DatabaseURL)
 	defer cleanup()
 
@@ -33,7 +41,28 @@ func main() {
 		Addr:    cfg.ListenAddr,
 		Handler: handler,
 	}
-	if agentListener.Enabled {
+	if humanListener.Enabled {
+		secret, err := humanListener.ReadClientSecret()
+		if err != nil {
+			log.Fatalf("OAuth client credential: %v", err)
+		}
+		verifier, err := authn.NewIntrospector(
+			humanListener.Endpoint, humanListener.Issuer,
+			humanListener.Audience, humanListener.ClientID, secret, nil,
+		)
+		if err != nil {
+			log.Fatalf("OAuth introspection: %v", err)
+		}
+		// This PoC serves ONLY project-scoped GET and healthz. No Agent,
+		// administrative, global resource or mutation route is reachable.
+		handler, err = httpapi.NewProjectReadRouter(store, placement, store, verifier)
+		if err != nil {
+			log.Fatalf("project read API: %v", err)
+		}
+		server.Handler = handler
+		log.Printf("project-scoped HTTPS read API listening on %s", server.Addr)
+		err = server.ListenAndServeTLS(humanListener.ServerCert, humanListener.ServerKey)
+	} else if agentListener.Enabled {
 		// This listener only exposes the Agent protocol and /healthz.
 		// User/admin paths stay disabled until OIDC/RBAC is independently
 		// implemented. VerifiedChains comes from Go's TLS handshake.
