@@ -78,3 +78,24 @@ test('triage puts identity and read errors ahead of pending entries', () => {
   assert.equal(results[0].code, 'OBSERVATION_READ_FAILED')
   assert.equal(results[1].code, 'GENERATION_PENDING')
 })
+
+test('failed Job reaches Operations Inbox even with Ready False and synced generation', () => {
+  const w = row('run-failed')
+  w.state.conditions = [
+    { type: 'Ready', status: 'False', reason: 'JobFailed' },
+    { type: 'Failed', status: 'True', reason: 'ContainerExitNonZero' },
+  ]
+  const found = findingsFor(w)
+  assert.equal(found.length, 1)
+  assert.equal(found[0].code, 'JOB_FAILED')
+  assert.equal(found[0].severity, 'critical')
+  assert.equal(found[0].description, 'ContainerExitNonZero')
+})
+test('conflicting job terminal observations are critical findings', () => {
+  const w = row('run-conflict')
+  w.state.conditions = [
+    { type: 'Failed', status: 'True' },
+    { type: 'Succeeded', status: 'True' },
+  ]
+  assert.equal(findingsFor(w)[0].code, 'JOB_OBSERVATION_CONFLICT')
+})

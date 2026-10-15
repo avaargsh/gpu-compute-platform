@@ -1,4 +1,5 @@
 import type { ResourceRow } from './api'
+import { executionOf } from './execution-model'
 
 export type FindingSeverity = 'critical' | 'warning'
 
@@ -54,6 +55,20 @@ export function findingsFor(row: ResourceRow): Finding[] {
   }
   if (state.syncState === 'Inconsistent' || state.observedGeneration > desired.generation) {
     return [{ ...base, severity: 'critical', code: 'GENERATION_CONFLICT', description: '观察版本超前或不一致' }]
+  }
+  // Failed Jobs must reach Operations Inbox, not be hidden behind the
+  // earlier non-terminal Ready=False / Admitted=False condition checks.
+  // Execution classification rejects contradictory terminal Conditions.
+  if (desired.kind === 'Workload' && state.observedGeneration === desired.generation &&
+      state.syncState === 'Synced') {
+    const execution = executionOf(row)
+    if (execution.code === 'FAILED' || execution.code === 'OBSERVATION_CONFLICT') {
+      return [{
+        ...base, severity: 'critical',
+        code: execution.code === 'FAILED' ? 'JOB_FAILED' : 'JOB_OBSERVATION_CONFLICT',
+        description: execution.detail,
+      }]
+    }
   }
   const conditions = state.conditions ?? []
   const blocked = conditions.filter(c => (
