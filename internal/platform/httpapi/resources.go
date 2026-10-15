@@ -180,7 +180,7 @@ func projectWorkload(desired agent.DesiredResource) (workloadView, error) {
 		Image       string                    `json:"image"`
 		Command     []string                  `json:"command"`
 		Accelerator domain.AcceleratorRequest `json:"accelerator"`
-		Workspace   *domain.WorkspaceMount  `json:"workspace"`
+		Workspace   *domain.WorkspaceMount    `json:"workspace"`
 	}
 	if err := json.Unmarshal(raw, &projected); err != nil {
 		return workloadView{}, err

@@ -18,7 +18,7 @@ func TestWorkloadPVCMountedOnBothAllocationModes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			in := Job{
 				Generation: 1,
-				Name: "job-train", Namespace: "project-a", Image: "example/train:v1",
+				Name:       "job-train", Namespace: "project-a", Image: "example/train:v1",
 				Workspace: &domain.WorkspaceMount{ClaimName: "training-data-pvc"},
 				Resources: map[string]int64{"nvidia.com/gpu": 1},
 			}
@@ -50,9 +50,9 @@ func TestWorkspaceInvalidPVCFailsBeforeDRAApply(t *testing.T) {
 	projection := baseprovider.WorkloadProjection{
 		WorkloadID: "train-a", PoolID: "pool-a", Namespace: "project-a",
 		Generation: 1, Image: "example/train:v1",
-		Accelerator: domain.AcceleratorRequest{Class: "h100", Quota: 1},
+		Accelerator:        domain.AcceleratorRequest{Class: "h100", Quota: 1},
 		AcceleratorBinding: domain.AcceleratorBinding{Class: "h100", Flavor: "h100", ResourceName: "nvidia.com/gpu"},
-		Workspace: &domain.WorkspaceMount{ClaimName: "../outside"},
+		Workspace:          &domain.WorkspaceMount{ClaimName: "../outside"},
 	}
 	if _, err := ProjectWorkload(projection); err == nil {
 		t.Fatal("invalid PVC name admitted before Job and DRA side effects")
@@ -86,9 +86,9 @@ func TestProjectWorkloadCarriesWorkspaceToJob(t *testing.T) {
 	job, err := ProjectWorkload(baseprovider.WorkloadProjection{
 		WorkloadID: "train-a", PoolID: "pool-a", Namespace: "project-a",
 		Generation: 1, Image: "example/train:v1",
-		Accelerator: domain.AcceleratorRequest{Class: "h100", Quota: 1},
+		Accelerator:        domain.AcceleratorRequest{Class: "h100", Quota: 1},
 		AcceleratorBinding: domain.AcceleratorBinding{Class: "h100", Flavor: "h100", ResourceName: "nvidia.com/gpu"},
-		Workspace: &domain.WorkspaceMount{ClaimName: "ws-1"},
+		Workspace:          &domain.WorkspaceMount{ClaimName: "ws-1"},
 	})
 	if err != nil {
 		t.Fatal(err)

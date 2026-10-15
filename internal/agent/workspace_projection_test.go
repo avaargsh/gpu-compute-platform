@@ -9,7 +9,7 @@ import (
 func TestDecodeDesiredWorkloadWorkspaceIntoProvider(t *testing.T) {
 	var projection provider.WorkloadProjection
 	err := decodeSpec(map[string]any{
-		"image": "example/train:v1",
+		"image":     "example/train:v1",
 		"workspace": map[string]any{"claimName": "project-data"},
 	}, &projection)
 	if err != nil {
