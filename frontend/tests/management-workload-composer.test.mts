@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildAuthorizedWorkloadRequest, parseAuthorizedPool, poolForCurrentSession } from '../src/management/workload-composer.ts'
+import { buildAuthorizedWorkloadRequest, parseAuthorizedPool, poolForCurrentSession, isSessionActive } from '../src/management/workload-composer.ts'
 import type { DesiredView } from '../src/management/api.ts'
 
 const project = 'research'
@@ -89,4 +89,14 @@ test('verified ComputePool cannot be reused after logout, re-login, token expiry
   assert.equal(poolForCurrentSession(selection, login, true, cluster, 'other', verified.id), null)
   assert.equal(poolForCurrentSession(selection, login, true, cluster, project, 'other'), null)
   assert.equal(poolForCurrentSession(null, login, true, cluster, project, verified.id), null)
+})
+
+test('OIDC expiry is checked against the current clock, not a cached UI boolean', () => {
+  const session = { expiresAt: 1000 }
+  assert.equal(isSessionActive(session, 999), true)
+  assert.equal(isSessionActive(session, 1000), false)
+  assert.equal(isSessionActive(session, 1001), false)
+  assert.equal(isSessionActive(null, 999), false)
+  assert.equal(isSessionActive({ expiresAt: Number.POSITIVE_INFINITY }, 999), false)
+  assert.equal(isSessionActive({ expiresAt: NaN }, 999), false)
 })
