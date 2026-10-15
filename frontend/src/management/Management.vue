@@ -106,6 +106,9 @@
       <div class="management-actions">
         <button type="button" :disabled="!authenticated || busy" @click="receipt">查询已提交回执</button>
         <button type="button" :disabled="!operationId" @click="copyOperationId">复制操作 ID</button>
+        <button type="button" :disabled="!authenticated || !operationId || busy" @click="refreshEvidenceChain">
+          一键重新核对回执、Desired 与执行观察
+        </button>
         <button type="button" :disabled="!activeReceipt || busy" @click="readBackDesired">
           按回执核对当前 Desired
         </button>
@@ -114,6 +117,10 @@
           查询独立 Agent / Kueue 观察
         </button>
       </div>
+      <p v-if="activeEvidenceChecked" class="management-status" role="note">
+        上次完整证据核对：{{ activeEvidenceChecked.at }}。这是人工触发的一组独立读取，
+        不保证数据库事务快照一致；需要最新状态请再次核对。
+      </p>
       <div v-if="activeReadback" class="management-status" role="note">
         <strong>独立授权回读：{{ activeReadback.status }}</strong>
         <p>{{ activeReadback.detail }}</p>
@@ -152,6 +159,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
 import { readResource, writeResource, deleteResource, readReceipt, readExecution, listProjects, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, desiredMatchesScope, createOperationId } from './api'
 import { classifyScopedExecution, type ScopedExecution } from './execution'
+import { verifyEvidencePair } from './evidence-check'
 import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from './readback'
 import { rememberOperation, recoverOperation, forgetOperation, type OperationPointer } from './recovery'
 import { parseAuthorizedPool, buildAuthorizedWorkloadRequest, type AuthorizedPool } from './workload-composer'
@@ -194,6 +202,7 @@ const receiptData = ref<Receipt | null>(null)
 const receiptAnchor = ref('')
 const receiptReadback = ref<{ anchor: string; result: DesiredReadback } | null>(null)
 const executionReadback = ref<{ anchor: string; result: ScopedExecution } | null>(null)
+const evidenceChecked = ref<{ anchor: string; at: string } | null>(null)
 const operationId = ref('')
 const receiptSelector = computed(() => JSON.stringify([cluster.value, project.value, operationId.value]))
 const activeReceipt = computed(() => receiptAnchor.value === receiptSelector.value ? receiptData.value : null)
@@ -201,6 +210,8 @@ const activeReadback = computed(() =>
   receiptReadback.value?.anchor === receiptSelector.value ? receiptReadback.value.result : null)
 const activeExecution = computed(() =>
   executionReadback.value?.anchor === receiptSelector.value ? executionReadback.value.result : null)
+const activeEvidenceChecked = computed(() =>
+  evidenceChecked.value?.anchor === receiptSelector.value ? evidenceChecked.value : null)
 const recentOperation = ref<OperationPointer | null>(null)
 const busy = ref(false)
 const message = ref('')
@@ -219,6 +230,7 @@ function clearResult() {
   receiptAnchor.value = ''
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
 }
 function describeError(e: unknown) { error.value = e instanceof Error ? e.message : '未知请求失败' }
 
@@ -310,6 +322,7 @@ function signOut() {
   receiptAnchor.value = ''
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
   availableProjects.value = []
   projectListTruncated.value = false
   message.value = '本页访问令牌已清除；身份提供商 SSO 会话未注销'
@@ -341,6 +354,7 @@ function selectProject(item: ProjectAccess) {
   receiptAnchor.value = ''
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
   operationId.value = ''
   message.value = '已选择项目 ' + item.projectId + '（' + item.role + '），请重新选择资源'
   error.value = ''
@@ -363,6 +377,7 @@ function restoreOperation() {
   receiptAnchor.value = ''
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
   recentOperation.value = pointer
   message.value = '已恢复操作范围和 ID；请重新登录后查询服务端回执'
   error.value = ''
@@ -376,6 +391,7 @@ function discardOperation() {
   receiptAnchor.value = ''
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
   message.value = '本页操作记录已清除，服务端审计不受影响'
 }
 
@@ -451,6 +467,7 @@ async function readBackDesired() {
   const selected = receiptSelector.value
   receiptReadback.value = null
   executionReadback.value = null
+  evidenceChecked.value = null
   error.value = ''
   busy.value = true
   try {
@@ -478,6 +495,7 @@ async function readExecutionObservation() {
   if (!audit || audit.kind !== 'Workload' || !readback?.desired || busy.value) return
   const selected = receiptSelector.value
   executionReadback.value = null
+  evidenceChecked.value = null
   error.value = ''
   busy.value = true
   try {
@@ -489,6 +507,51 @@ async function readExecutionObservation() {
     const classified = classifyScopedExecution(result.value, audit)
     executionReadback.value = { anchor: selected, result: classified }
     message.value = '已读取授权范围内的独立 Agent/Kueue 观察；仅供诊断，并非实时 Kubernetes 状态证明'
+  } catch (e) { describeError(e) }
+  finally { busy.value = false }
+}
+
+// Manual read-only refresh: re-verify original audit ownership, then read
+// Desired and independent Agent state. These are NOT an atomic DB snapshot.
+// Publish only a coherent result; never automatically replay a mutation.
+async function refreshEvidenceChain() {
+  if (busy.value) return
+  clearResult()
+  busy.value = true
+  const selected = receiptSelector.value
+  const originalSession = session.value
+  const clusterId = cluster.value
+  const projectId = project.value
+  const requestId = operationId.value
+  try {
+    const access = token()
+    const receiptResult = await readReceipt(clusterId, projectId, requestId, access)
+    if (!receiptResult.value) throw new Error('服务端未返回原始审计回执')
+    const audit = receiptResult.value
+    const target = receiptResourceScope(audit, clusterId, projectId, requestId)
+    let current: DesiredView | null
+    try {
+      current = (await readResource(target, access)).value
+    } catch (e) {
+      if (!(e instanceof ManagementHTTPError) || e.status !== 404) throw e
+      current = null
+    }
+    const currentReadback = classifyDesiredReadback(audit, current)
+    let observed: Awaited<ReturnType<typeof readExecution>>['value'] = null
+    if (target.kind === 'Workload' && current &&
+        !['inconsistent', 'desired-advanced'].includes(currentReadback.status)) {
+      observed = (await readExecution(target, access)).value
+    }
+    const evidence = verifyEvidencePair(audit, current, observed)
+    if (receiptSelector.value !== selected || session.value !== originalSession) {
+      throw new Error('核对期间登录身份或操作范围已变化；已丢弃本次查询结果')
+    }
+    receiptData.value = audit
+    receiptAnchor.value = selected
+    receiptReadback.value = { anchor: selected, result: evidence.readback }
+    if (evidence.execution) executionReadback.value = { anchor: selected, result: evidence.execution }
+    evidenceChecked.value = { anchor: selected, at: new Date().toISOString() }
+    message.value = '原始操作回执、当前 Desired 和独立观察已完成分层核对；未发起写入或自动重试'
   } catch (e) { describeError(e) }
   finally { busy.value = false }
 }
