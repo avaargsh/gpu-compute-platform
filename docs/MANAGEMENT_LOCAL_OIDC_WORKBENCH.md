@@ -154,8 +154,18 @@ or add `Access-Control-Allow-Origin: *`.
    same-generation Desired, later Generation, visible delete request,
    inconsistent evidence and 404 (not visible/possibly no access).
    In particular **404 does not prove a write rolled back, deletion
-   finalized, or a Kubernetes Job succeeded**. The displayed receipt and
-   readback are bound to the selected cluster, project and operation ID;
+   finalized, or a Kubernetes Job succeeded**. For Workloads with a visible
+   Desired, click **查询独立 Agent / Kueue 观察** to read a separately stored,
+   project-scoped Agent Observation. The Go Management login has **NO direct
+   SELECT** on resource_observations: a DBA-owned fixed-query function
+   checks the live OIDC issuer/subject grant and Project/Cluster/Desired
+   identity before returning the bounded Condition snapshot. Missing,
+   stale, contradictory and future observations fail closed. This is a
+   historical read (not Kubernetes live API), and no lease owner, credentials
+   or arbitrary evidenceRefs are emitted by the endpoint. There is no
+   production ingress approval, GPU Job success assertion, or checkpoint
+   durability promise. The displayed receipt and readback are bound to the
+   selected cluster, project and operation ID;
    switching these invalidates the prior evidence. Neither read proves
    Kueue admission, Pod Ready or checkpoint durability.
 6. Use **训练 / 批量推理 Workload 向导** to enter a Pool ID, and click
