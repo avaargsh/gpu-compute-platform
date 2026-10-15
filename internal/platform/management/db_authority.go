@@ -35,6 +35,7 @@ func VerifyRuntimeDBPrivileges(ctx context.Context, db *sql.DB) error {
 	for _, signature := range []string{
 		"public.management_locked_project_role(text,text,text,text)",
 		"public.management_locked_pool_binding(text)",
+		"public.management_scoped_workload_observation(text,text,text,text,text)",
 	} {
 		var allowed bool
 		err = conn.QueryRowContext(ctx, `
