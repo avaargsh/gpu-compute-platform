@@ -48,9 +48,9 @@ const clusterAIdentity = "spiffe://platform.example/cluster/cluster-a/agent"
 func TestAgentMTLSRejectsMissingOrForgedIdentities(t *testing.T) {
 	router := protectedAgentRouter(t)
 	for _, tc := range []struct {
-		name    string
-		id      string
-		alter   func(*http.Request)
+		name  string
+		id    string
+		alter func(*http.Request)
 	}{
 		{"no-cert", "", nil},
 		{"different-trust-domain", "spiffe://bad.example/cluster/cluster-a/agent", nil},
