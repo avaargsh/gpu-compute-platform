@@ -141,6 +141,20 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await expect(page.getByRole('group', { name: '独立执行状态' })).toContainText('NOT_OBSERVED')
   await expect(page.getByRole('group', { name: '独立执行状态' })).toContainText('不等于 Kueue 已准入')
 
+  // Actual user entry: discover the previously created Workload through the
+  // same OIDC identity and live PostgreSQL Project grant, NOT a mock list.
+  await page.getByRole('button', { name: '查询项目 Workload 列表（每页 25 条）' }).click()
+  const inventory = page.getByRole('region', { name: '授权 Workload 列表' })
+  await expect(inventory).toContainText('job-a')
+  await expect(inventory).toContainText('Generation 1')
+  await expect(inventory).not.toContainText('example.invalid/ci:1')
+  await inventory.getByRole('button', { name: '选择 Workload job-a' }).click()
+  await expect(page.getByPlaceholder('pool-a')).toHaveValue('job-a')
+  // Selecting a row does not resurrect the previously stored operation ID or
+  // allow a blind DELETE: the operator must read current Desired again.
+  await expect(page.getByPlaceholder('原始 Idempotency-Key')).toHaveValue('')
+  await expect(page.getByRole('button', { name: '确认并发起删除请求' })).toBeDisabled()
+
   // Parent deletion must reject existing dependent Workload.
   await page.locator('select').first().selectOption('ComputePool')
   await page.getByPlaceholder('pool-a').fill('pool-a')
@@ -178,6 +192,8 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await expect(page.getByRole('button', { name: '使用 research (browser-ci) · viewer' })).toBeVisible()
   await expect(page.getByRole('button', { name: /operator/ })).toHaveCount(0)
   await page.getByRole('button', { name: '使用 research (browser-ci) · viewer' }).click()
+  await page.getByRole('button', { name: '查询项目 Workload 列表（每页 25 条）' }).click()
+  await expect(page.getByRole('region', { name: '授权 Workload 列表' })).toContainText('job-a')
   await page.locator('select').first().selectOption('ComputePool')
   await page.getByPlaceholder('pool-a').fill('pool-a')
   await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
