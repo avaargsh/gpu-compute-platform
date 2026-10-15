@@ -47,13 +47,15 @@ func TestManagementExecutionProjectAuthorizationAndGenerationWithPostgres(t *tes
 	resource := fmtID("exec-workload", time.Now().UnixNano())
 	defer func() {
 		// Only disposable fixture rows are removed; never touch another test.
-		for _, query := range []string{
-			"DELETE FROM resource_observations WHERE cluster_id=$1",
-			"DELETE FROM desired_resources WHERE cluster_id=$1",
-			"DELETE FROM management_project_grants WHERE project_id=$2",
-			"DELETE FROM project_bindings WHERE project_id=$2",
+		for _, item := range []struct{query string; arg string}{
+			{"DELETE FROM resource_observations WHERE cluster_id=$1", cluster},
+			{"DELETE FROM desired_resources WHERE cluster_id=$1", cluster},
+			{"DELETE FROM management_project_grants WHERE project_id=$1", project},
+			{"DELETE FROM project_bindings WHERE project_id=$1", project},
 		} {
-			_, _ = db.ExecContext(context.Background(), query, cluster, project)
+			if _, err := db.ExecContext(context.Background(), item.query, item.arg); err != nil {
+				t.Errorf("cleanup temporary execution fixture: %v", err)
+			}
 		}
 	}()
 	for _, item := range []struct{q string; args []any}{
