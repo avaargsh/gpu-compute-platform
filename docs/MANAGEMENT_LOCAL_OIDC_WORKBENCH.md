@@ -168,6 +168,15 @@ or add `Access-Control-Allow-Origin: *`.
    selected cluster, project and operation ID;
    switching these invalidates the prior evidence. Neither read proves
    Kueue admission, Pod Ready or checkpoint durability.
+   For Workloads, operators can instead click **一键重新核对回执、Desired 与执行观察**:
+   the UI re-queries the **original operation ID and current DB grant**, then
+   independently reads the same Desired and scoped Agent Observation. It
+   rejects conflicting Desired Generation or deletion stage between the two
+   reads, clears earlier success before attempting a refresh, and displays
+   the manual check timestamp. Missing/advanced/inconsistent Desired suppress
+   any execution-success claim. The reads are **not one database transaction**,
+   and this button never retries PUT or DELETE. Repeat manually when needed;
+   even a checked snapshot can become stale after the read.
 6. Use **训练 / 批量推理 Workload 向导** to enter a Pool ID, and click
    **读取并验证 ComputePool**. The browser performs a real, project-scoped
    Management GET with the current OIDC access token; it rejects a foreign,
