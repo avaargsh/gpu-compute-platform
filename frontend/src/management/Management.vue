@@ -106,10 +106,23 @@
       <div class="management-actions">
         <button type="button" :disabled="!authenticated || busy" @click="receipt">查询已提交回执</button>
         <button type="button" :disabled="!operationId" @click="copyOperationId">复制操作 ID</button>
+        <button type="button" :disabled="!activeReceipt || busy" @click="readBackDesired">
+          按回执核对当前 Desired
+        </button>
       </div>
+      <div v-if="activeReadback" class="management-status" role="note">
+        <strong>独立授权回读：{{ activeReadback.status }}</strong>
+        <p>{{ activeReadback.detail }}</p>
+        <p v-if="activeReadback.desired">
+          当前 Generation: {{ activeReadback.desired.generation }} · 删除请求:
+          {{ activeReadback.desired.deleting ? '已发起' : '未发起' }}
+        </p>
+      </div>
+      <p>回读只查询当前被授权的 Desired，并与服务端审计回执的资源范围及 Generation 比较。
+        找不到 Desired 并不代表任务成功删除、写入回滚或操作未提交；仍需独立的 Agent/Kueue 执行证据。</p>
       <p>发送写请求前会将最近一次操作 ID 与项目/资源范围保存到本标签 sessionStorage，最多保留 24 小时，绝不保存 Token、JSON 请求体或密码。刷新后重新登录，再恢复操作范围查询回执。仅保留最近一条，关闭标签、退出登录、存储失效或新操作都可能使其丢失；请另外安全保存关键操作 ID。</p>
       <p>不会自动重试；断网或 HTTP 503 后先查询回执。HTTP 404 不能证明不存在正在提交的事务。只有能恢复完全相同的原请求体、操作 ID 和 CAS 条件时，才能人工重发；不要利用新的 ID 猜测提交结果。</p>
-      <pre v-if="receiptData">{{ JSON.stringify(receiptData, null, 2) }}</pre>
+      <pre v-if="activeReceipt">{{ JSON.stringify(activeReceipt, null, 2) }}</pre>
     </section>
     <div v-if="message" class="management-feedback" role="status">{{ message }}</div>
     <div v-if="error" class="management-error" role="alert">{{ error }}</div>
@@ -119,7 +132,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
-import { readResource, writeResource, deleteResource, readReceipt, listProjects, type Kind, type DesiredView, type Receipt, type ProjectAccess, desiredMatchesScope, createOperationId } from './api'
+import { readResource, writeResource, deleteResource, readReceipt, listProjects, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, desiredMatchesScope, createOperationId } from './api'
+import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from './readback'
 import { rememberOperation, recoverOperation, forgetOperation, type OperationPointer } from './recovery'
 import { parseAuthorizedPool, buildAuthorizedWorkloadRequest, type AuthorizedPool } from './workload-composer'
 
@@ -158,7 +172,13 @@ const desired = ref<DesiredView | null>(null)
 const availableProjects = ref<ProjectAccess[]>([])
 const projectListTruncated = ref(false)
 const receiptData = ref<Receipt | null>(null)
+const receiptAnchor = ref('')
+const receiptReadback = ref<{ anchor: string; result: DesiredReadback } | null>(null)
 const operationId = ref('')
+const receiptSelector = computed(() => JSON.stringify([cluster.value, project.value, operationId.value]))
+const activeReceipt = computed(() => receiptAnchor.value === receiptSelector.value ? receiptData.value : null)
+const activeReadback = computed(() =>
+  receiptReadback.value?.anchor === receiptSelector.value ? receiptReadback.value.result : null)
 const recentOperation = ref<OperationPointer | null>(null)
 const busy = ref(false)
 const message = ref('')
@@ -170,7 +190,13 @@ function token() {
   return session.value.accessToken
 }
 function scope() { return { cluster: cluster.value, project: project.value, kind: kind.value, resource: resource.value } }
-function clearResult() { error.value = ''; message.value = ''; receiptData.value = null }
+function clearResult() {
+  error.value = ''
+  message.value = ''
+  receiptData.value = null
+  receiptAnchor.value = ''
+  receiptReadback.value = null
+}
 function describeError(e: unknown) { error.value = e instanceof Error ? e.message : '未知请求失败' }
 
 async function verifyWorkloadPool() {
@@ -258,6 +284,8 @@ function signOut() {
   operationId.value = ''
   desired.value = null
   receiptData.value = null
+  receiptAnchor.value = ''
+  receiptReadback.value = null
   availableProjects.value = []
   projectListTruncated.value = false
   message.value = '本页访问令牌已清除；身份提供商 SSO 会话未注销'
@@ -286,6 +314,8 @@ function selectProject(item: ProjectAccess) {
   kind.value = 'ComputePool'
   desired.value = null
   receiptData.value = null
+  receiptAnchor.value = ''
+  receiptReadback.value = null
   operationId.value = ''
   message.value = '已选择项目 ' + item.projectId + '（' + item.role + '），请重新选择资源'
   error.value = ''
@@ -305,6 +335,8 @@ function restoreOperation() {
   operationId.value = pointer.operationId
   desired.value = null
   receiptData.value = null
+  receiptAnchor.value = ''
+  receiptReadback.value = null
   recentOperation.value = pointer
   message.value = '已恢复操作范围和 ID；请重新登录后查询服务端回执'
   error.value = ''
@@ -314,6 +346,9 @@ function discardOperation() {
   forgetOperation(sessionStorage)
   recentOperation.value = null
   operationId.value = ''
+  receiptData.value = null
+  receiptAnchor.value = ''
+  receiptReadback.value = null
   message.value = '本页操作记录已清除，服务端审计不受影响'
 }
 
@@ -365,11 +400,47 @@ async function remove() {
   finally { busy.value = false }
 }
 async function receipt() {
-  clearResult(); busy.value = true
+  clearResult()
+  busy.value = true
+  const selected = receiptSelector.value
+  const clusterId = cluster.value
+  const projectId = project.value
+  const id = operationId.value
   try {
-    const result = await readReceipt(cluster.value, project.value, operationId.value, token())
+    const result = await readReceipt(clusterId, projectId, id, token())
+    if (receiptSelector.value !== selected) throw new Error('查询时操作范围已变化，请重新查询原始回执')
+    if (!result.value) throw new Error('服务端未返回有效的操作回执')
+    receiptResourceScope(result.value, clusterId, projectId, id)
     receiptData.value = result.value
+    receiptAnchor.value = selected
     message.value = '仅证明 Desired 写入和操作审计已提交，非 Workload 执行证明'
+  } catch (e) { describeError(e) }
+  finally { busy.value = false }
+}
+
+async function readBackDesired() {
+  const original = activeReceipt.value
+  if (!original || busy.value) return
+  const selected = receiptSelector.value
+  receiptReadback.value = null
+  error.value = ''
+  busy.value = true
+  try {
+    const target = receiptResourceScope(original, cluster.value, project.value, operationId.value)
+    const access = token()
+    let current: DesiredView | null
+    try {
+      const result = await readResource(target, access)
+      current = result.value
+    } catch (e) {
+      // A 404 may mean nonexistence OR absent current authorization.
+      // Neither is evidence of deletion/finalization or transaction rollback.
+      if (!(e instanceof ManagementHTTPError) || e.status !== 404) throw e
+      current = null
+    }
+    if (receiptSelector.value !== selected) throw new Error('回读期间操作范围已变化，请重新查询')
+    receiptReadback.value = { anchor: selected, result: classifyDesiredReadback(original, current) }
+    message.value = '操作回执与当前 Desired 已分开核对；没有 Kubernetes 执行或清理完成证明'
   } catch (e) { describeError(e) }
   finally { busy.value = false }
 }
