@@ -121,14 +121,57 @@ func requestClusterID(w http.ResponseWriter, r *http.Request) (string, int) {
 		return "", http.StatusRequestEntityTooLarge
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
-	var scope struct {
-		ClusterID string `json:"clusterId"`
-	}
-	if !json.Valid(body) || json.Unmarshal(body, &scope) != nil ||
-		!agentIDPattern.MatchString(scope.ClusterID) {
+	clusterID, valid := canonicalAgentClusterID(body)
+	if !valid {
 		return "", http.StatusBadRequest
 	}
-	return scope.ClusterID, 0
+	return clusterID, 0
+}
+
+// canonicalAgentClusterID ensures that the identity used for authorization
+// cannot differ from the clusterId decoded by downstream Agent handlers.
+// encoding/json otherwise accepts duplicate and case-insensitive field names.
+func canonicalAgentClusterID(body []byte) (string, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	first, err := decoder.Token()
+	if err != nil || first != json.Delim('{') {
+		return "", false
+	}
+	seen := make(map[string]struct{})
+	var clusterID string
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return "", false
+		}
+		key, ok := token.(string)
+		if !ok {
+			return "", false
+		}
+		normalized := strings.ToLower(key)
+		if _, exists := seen[normalized]; exists {
+			return "", false
+		}
+		seen[normalized] = struct{}{}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return "", false
+		}
+		if key == "clusterId" {
+			if err := json.Unmarshal(value, &clusterID); err != nil {
+				return "", false
+			}
+		}
+	}
+	last, err := decoder.Token()
+	if err != nil || last != json.Delim('}') {
+		return "", false
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return "", false
+	}
+	return clusterID, agentIDPattern.MatchString(clusterID)
 }
 
 // The HTTP server verifies certificate chains and the client-usage EKU

@@ -164,3 +164,21 @@ func TestAgentMTLSBodyIsPreservedForHandler(t *testing.T) {
 		t.Fatalf("body changed, got=%q status=%d", received, rec.Code)
 	}
 }
+
+
+func TestAgentMTLSRejectsAmbiguousJSONScope(t *testing.T) {
+	router := protectedAgentRouter(t)
+	for _, body := range []string{
+		`{"clusterId":"cluster-b","clusterId":"cluster-a","agentVersion":"dev"}`,
+		`{"clusterId":"cluster-b","ClusterId":"cluster-a","agentVersion":"dev"}`,
+		`{"ClusterId":"cluster-a","agentVersion":"dev"}`,
+		`{"clusterId":"cluster-a","agentVersion":"dev"}{"clusterId":"cluster-b"}`,
+		`["cluster-a"]`,
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, agentRequest(t, http.MethodPost, "/api/v1/agent/register", body, clusterAIdentity))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("ambiguous cluster scope accepted: body=%q status=%d", body, rec.Code)
+		}
+	}
+}
