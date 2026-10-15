@@ -44,8 +44,13 @@ bash scripts/e2e/management-static-tls-acceptance.sh
 The fixture creates **disposable Keycloak HTTPS, PostgreSQL 17
 verify-full TLS and DB roles**, starts the real guarded Go Management API,
 builds the real Vue bundle with a **public** OIDC Client ID and issuer
-(never server secrets), then launches a nonroot, read-only
-`caddy:2.11.6-alpine` container in a Linux **host-network CI sandbox**.
+(never server secrets), then builds a locally tagged CI-only Caddy derivative pinned to an
+upstream immutable SHA256, removing only the upstream executable's unnecessary
+`cap_net_bind_service` file capability. It starts a nonroot, read-only,
+`--cap-drop ALL --security-opt no-new-privileges` Caddy instance in a Linux
+**host-network CI sandbox**. The separate build is needed because official
+Caddy's file effective capability otherwise causes `execve EPERM` under full
+capability-drop, even though this gateway listens on unprivileged port 3443.
 The host-network exception is for **same-host numeric-loopback E2E only**,
 not a deployment recommendation.
 
