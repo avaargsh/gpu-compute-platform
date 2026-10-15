@@ -80,10 +80,17 @@ type Workload struct {
 	Status    ResourceStatus `json:"status"`
 }
 
+// WorkspaceMount references an existing PVC in the project's Kubernetes namespace.
+// PVC creation and deletion are never side effects of a Workload Job.
+type WorkspaceMount struct {
+	ClaimName string `json:"claimName"`
+}
+
 type WorkloadSpec struct {
 	Image       string             `json:"image"`
 	Command     []string           `json:"command,omitempty"`
 	Accelerator AcceleratorRequest `json:"accelerator"`
+	Workspace   *WorkspaceMount    `json:"workspace,omitempty"`
 }
 
 type Serving struct {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
@@ -86,6 +88,10 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "resource id must match path", http.StatusBadRequest)
 		return
 	}
+	if in.Spec.Workspace != nil && len(validation.IsDNS1123Subdomain(in.Spec.Workspace.ClaimName)) != 0 {
+		http.Error(w, "workspace claimName must be a valid Kubernetes PVC name", http.StatusBadRequest)
+		return
+	}
 	projectPlacement, err := a.placement.ResolveProject(r.Context(), in.ProjectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
@@ -109,6 +115,9 @@ func (a *ResourceAPI) UpsertWorkload(w http.ResponseWriter, r *http.Request) {
 		"image":       in.Spec.Image,
 		"command":     in.Spec.Command,
 		"accelerator": in.Spec.Accelerator,
+	}
+	if in.Spec.Workspace != nil {
+		spec["workspace"] = in.Spec.Workspace
 	}
 
 	// The Store owns replay, identity and parent-lifecycle admission as one
@@ -171,6 +180,7 @@ func projectWorkload(desired agent.DesiredResource) (workloadView, error) {
 		Image       string                    `json:"image"`
 		Command     []string                  `json:"command"`
 		Accelerator domain.AcceleratorRequest `json:"accelerator"`
+		Workspace   *domain.WorkspaceMount  `json:"workspace"`
 	}
 	if err := json.Unmarshal(raw, &projected); err != nil {
 		return workloadView{}, err
@@ -179,7 +189,7 @@ func projectWorkload(desired agent.DesiredResource) (workloadView, error) {
 		Metadata:  domain.Metadata{ID: desired.ID, Generation: desired.Generation},
 		ProjectID: projected.ProjectID,
 		PoolID:    projected.PoolID,
-		Spec:      domain.WorkloadSpec{Image: projected.Image, Command: projected.Command, Accelerator: projected.Accelerator},
+		Spec:      domain.WorkloadSpec{Image: projected.Image, Command: projected.Command, Accelerator: projected.Accelerator, Workspace: projected.Workspace},
 	}, nil
 }
 
