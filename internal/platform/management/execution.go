@@ -20,7 +20,8 @@ type executionCondition struct {
 
 func decodeExecutionConditions(raw []byte) ([]executionCondition, bool) {
 	var values []executionCondition
-	if len(raw) > 32768 || json.Unmarshal(raw, &values) != nil || len(values) > 48 {
+	if len(raw) == 0 || raw[0] != '[' || len(raw) > 32768 ||
+		json.Unmarshal(raw, &values) != nil || len(values) > 48 {
 		return nil, false
 	}
 	seen := make(map[string]struct{}, len(values))
