@@ -7,11 +7,15 @@ on:
     paths:
       - 'scripts/dev/apply_workload_draft.py'
       - 'scripts/dev/test_apply_workload_draft.py'
+      - 'scripts/dev/workspace_pvc.py'
+      - 'scripts/dev/test_workspace_pvc.py'
       - '.github/workflows/train-infer-dev.yml'
   pull_request:
     paths:
       - 'scripts/dev/apply_workload_draft.py'
       - 'scripts/dev/test_apply_workload_draft.py'
+      - 'scripts/dev/workspace_pvc.py'
+      - 'scripts/dev/test_workspace_pvc.py'
       - '.github/workflows/train-infer-dev.yml'
   workflow_dispatch:
 
@@ -24,5 +28,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Test local-only Workload draft submission
-        run: python3 -m unittest discover -s scripts/dev -p 'test_apply_workload_draft.py' -v
+      - name: Verify Workload and PVC bootstrap
+        run: python3 -m unittest discover -s scripts/dev -p 'test_*.py' -v
