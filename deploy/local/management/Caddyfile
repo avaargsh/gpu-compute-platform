@@ -1,0 +1,43 @@
+# Disposable single-host HTTPS acceptance gateway, NOT a production ingress.
+# No plaintext listener; no wildcard/LAN binds; no access to Agent API.
+{
+  admin off
+  auto_https off
+}
+
+https://127.0.0.1:3443 {
+  bind 127.0.0.1
+  tls /etc/management-tls/server.crt /etc/management-tls/server.key
+
+  header {
+    -Server
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+    Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    Cache-Control "no-store"
+    Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://127.0.0.1:8443; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+  }
+
+  # Explicit path allowlist, never reverse-proxy /api/v1/agent or /internal.
+  handle /api/v1/management/* {
+    reverse_proxy 127.0.0.1:8081 {
+      header_up -X-Forwarded-For
+      header_up -X-Forwarded-Host
+      header_up -X-Forwarded-Proto
+      header_up -X-Forwarded-Uri
+      header_up -Forwarded
+    }
+  }
+  handle /management.html {
+    root * /srv/management
+    file_server
+  }
+  handle /assets/* {
+    root * /srv/management
+    file_server
+  }
+  handle {
+    respond "Not Found" 404
+  }
+}

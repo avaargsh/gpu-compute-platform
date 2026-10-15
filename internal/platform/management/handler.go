@@ -92,17 +92,18 @@ func createRequestID() (string, error) {
 	return hex.EncodeToString(bytes[:]), nil
 }
 
-// For the isolated local preview, never enable wildcard, LAN or internet
-// Origins. Later production TLS ingress must be a separately reviewed path.
+// Restrict the pilot to an explicit numeric loopback Origin, including
+// a separately tested same-host HTTPS static gateway. Never treat a valid
+// HTTPS Origin as proof of safe public ingress, identity or authorization.
 func validateBrowserOrigin(origin string) error {
 	if origin == "" {
 		return nil // CLI only (no Origin header); browser writes remain blocked.
 	}
 	u, err := url.Parse(origin)
-	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" ||
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() != "127.0.0.1" ||
 		u.User != nil || u.Path != "" || u.RawPath != "" || u.RawQuery != "" || u.Fragment != "" ||
 		u.Port() == "" || u.String() != origin {
-		return errors.New("MANAGEMENT_BROWSER_ORIGIN must be exactly http://127.0.0.1:<port>")
+		return errors.New("MANAGEMENT_BROWSER_ORIGIN must be an exact http(s)://127.0.0.1:<port>")
 	}
 	port, err := strconv.Atoi(u.Port())
 	if err != nil || port < 1 || port > 65535 {
