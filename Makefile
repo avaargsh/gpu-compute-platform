@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: fmt fmt-check test vet build supply-chain-check acceptance-contract stage-b-volcano-contract kind-up install-kueue install-fake-gpu e2e-golden
+.PHONY: fmt fmt-check test test-parallel-isolated vet build supply-chain-check acceptance-contract stage-b-volcano-contract kind-up install-kueue install-fake-gpu e2e-golden
 
 fmt:
 	bash scripts/go-format.sh
@@ -9,9 +9,15 @@ fmt-check:
 	bash scripts/go-format.sh --check
 
 test:
-	# Packages share TEST_POSTGRES_DSN, and postgres contract fixtures TRUNCATE shared tables.
-	# Serialize packages until each package owns an isolated disposable database.
+	# Safe local default when one TEST_POSTGRES_DSN is shared across packages.
 	go test -p 1 ./...
+
+# CI provisions independent databases for Management and Store packages.
+# Do not use package-level concurrency with a shared DSN.
+test-parallel-isolated:
+	@printenv TEST_POSTGRES_DSN | grep -q . || (echo "TEST_POSTGRES_DSN is required" >&2; exit 1)
+	@printenv TEST_POSTGRES_STORE_DSN | grep -q . || (echo "TEST_POSTGRES_STORE_DSN is required" >&2; exit 1)
+	go test -p 4 ./...
 
 vet:
 	go vet ./...
