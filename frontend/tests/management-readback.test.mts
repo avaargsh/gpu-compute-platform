@@ -41,7 +41,9 @@ test('current same-generation Desired is a commit read-back only, never executio
   assert.equal(result.status, 'desired-visible')
   assert.match(result.detail, /不代表 Kueue/)
   assert.equal(classifyDesiredReadback(receipt, { ...desired, generation: 2 }).status, 'desired-advanced')
-  assert.equal(classifyDesiredReadback(receipt, { ...desired, generation: 0 }).status, 'inconsistent')
+  // An impossible/nonpositive Generation is malformed evidence, not a comparable state.
+  assert.throws(() => classifyDesiredReadback(receipt, { ...desired, generation: 0 }), /不匹配/)
+  assert.equal(classifyDesiredReadback({ ...receipt, resultingGeneration: 2 }, desired).status, 'inconsistent')
   assert.equal(classifyDesiredReadback(receipt, { ...desired, deleting: true }).status, 'deleting-after-commit')
 })
 
