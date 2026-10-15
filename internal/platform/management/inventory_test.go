@@ -159,11 +159,44 @@ VALUES($1,$2,$3,1,$4::jsonb)`,
 		len(foreignPage.Items) != 1 || foreignPage.Items[0].ID != "foreign-job" {
 		t.Fatalf("cross-project list leaked or omitted rows: %d %s", foreign.Code, foreign.Body.String())
 	}
+	// Pool discovery is separately scoped and excludes Workloads even when
+	// the caller has both viewer access and a valid Workload page cursor.
+	poolPath := strings.Replace(path, "/workloads", "/pools", 1)
+	poolPage := read("bob-token", poolPath)
+	var pools workloadInventoryPage
+	if poolPage.Code != 200 || json.Unmarshal(poolPage.Body.Bytes(), &pools) != nil ||
+		len(pools.Items) != 1 || pools.Items[0].ID != "pool-a" ||
+		pools.HasMore || pools.NextCursor != nil {
+		t.Fatalf("project-scoped ComputePool discovery invalid: status=%d body=%s", poolPage.Code, poolPage.Body.String())
+	}
+	for _, tc := range []struct {
+		token, url string
+		status     int
+	}{
+		{"", poolPath, 401},
+		{"revoked-token", poolPath, 401},
+		{"good-access-token", poolPath, 403},
+		{"bob-token", poolPath + "?limit=1000", 400},
+		{"bob-token", poolPath + "?after=../other", 400},
+		{"bob-token", poolPath + "?after=pool-a", 200},
+	} {
+		got := read(tc.token, tc.url)
+		if got.Code != tc.status {
+			t.Fatalf("ComputePool scoped negative test token=%s url=%s status=%d want=%d", tc.token, tc.url, got.Code, tc.status)
+		}
+	}
+	if rec := read("bob-token", poolPath+"?after=pool-a"); strings.Contains(rec.Body.String(), "pool-a") {
+		t.Fatal("ComputePool cursor repeated last seen identity")
+	}
+
 	// Revocation between pages cannot expose a previously authorized cursor.
 	if _, err := db.ExecContext(ctx, "DELETE FROM management_project_grants WHERE subject='bob' AND project_id=$1", project); err != nil {
 		t.Fatal(err)
 	}
 	if rec := read("bob-token", path+"?after=job-24"); rec.Code != 403 {
 		t.Fatalf("revoked Project grant still permitted second page: %d", rec.Code)
+	}
+	if rec := read("bob-token", poolPath); rec.Code != 403 {
+		t.Fatalf("revoked Project grant still permitted ComputePool discovery: %d", rec.Code)
 	}
 }
