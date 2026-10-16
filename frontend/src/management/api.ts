@@ -71,12 +71,13 @@ export interface RecentOperation {
   kind: Kind
   resourceId: string
   action: 'create' | 'update' | 'delete-request'
-  committedAt: string
+  recordedAt: string
 }
 
 export interface RecentOperationList {
   items: RecentOperation[]
-  truncated: boolean
+  nextCursor: string | null
+  hasMore: boolean
 }
 
 export interface Receipt {
@@ -223,10 +224,14 @@ export async function readExecution(scope: Scope, token: string): Promise<{ stat
 
 // A bounded subject-owned audit index is NOT a receipt, mutation replay
 // grant, or Kubernetes execution proof. Always re-read a selected receipt.
-export async function listRecentOperations(cluster: string, project: string, token: string): Promise<{ status: number; value: RecentOperationList | null }> {
+export async function listRecentOperations(cluster: string, project: string, token: string, after?: string): Promise<{ status: number; value: RecentOperationList | null }> {
   safe(cluster); safe(project)
+  if (after !== undefined && (!/^[a-zA-Z0-9_-]{1,256}$/.test(after))) {
+    throw new Error('无效的操作索引分页游标')
+  }
   return request<RecentOperationList>('/api/v1/management/clusters/' + cluster +
-    '/projects/' + project + '/operations', 'GET', token)
+    '/projects/' + project + '/operations' +
+    (after ? '?after=' + encodeURIComponent(after) : ''), 'GET', token)
 }
 
 export async function readReceipt(cluster: string, project: string, operationId: string, token: string): Promise<{ status: number; value: Receipt | null }> {
