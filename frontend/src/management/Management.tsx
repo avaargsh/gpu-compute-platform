@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -14,7 +14,7 @@ import { useAuth } from '@/management/hooks/useAuth'
 import { useProjects } from '@/management/hooks/useProjects'
 import { useInventory } from '@/management/hooks/useInventory'
 import { useResource } from '@/management/hooks/useResource'
-import { useReceipt } from '@/management/hooks/useReceipt'
+import { StaleReceiptReadError, useReceipt } from '@/management/hooks/useReceipt'
 import { useOperation } from '@/management/hooks/useOperation'
 import { useEvidence } from '@/management/hooks/useEvidence'
 import {
@@ -73,7 +73,7 @@ export function ManagementApp() {
     deleteResource: deleteResourceFn,
   } = useResource()
 
-  const { readReceipt: readReceiptFn } = useReceipt()
+  const { readReceipt: readReceiptFn, invalidate: invalidateReceipt } = useReceipt()
 
   const { pointer: operationPointer, remember, recover, forget } = useOperation()
 
@@ -116,14 +116,25 @@ export function ManagementApp() {
   const [feedback, setFeedback] = useState<Feedback>(null)
 
   const scope: Scope = { cluster, project, kind, resource }
+  // Updated on each render so a response for a superseded session/scope
+  // cannot repopulate a cleared receipt after a form or identity change.
+  const receiptContext = useRef({ session, authenticated, cluster, project, operationId })
+  receiptContext.current = { session, authenticated, cluster, project, operationId }
 
   // Vue 的 clearResult() 等价物：任何新的授权读取/回执查询都必须先作废旧的
   // 回执与证据状态，避免旧 note 与新 desired 区在 DOM 中同时出现。
   const clearResult = useCallback(() => {
+    invalidateReceipt()
     setActiveReceipt(null)
     setActiveEvidence(null)
     setFeedback(null)
-  }, [])
+  }, [invalidateReceipt])
+
+  // Typed scope edits, project selection and OIDC identity transitions also
+  // invalidate a pending read, even when the user does not click a new query.
+  useEffect(() => {
+    clearResult()
+  }, [session, authenticated, cluster, project, operationId, clearResult])
 
   // Load any one-tab recovery pointer from sessionStorage on mount so the
   // "恢复操作范围与 ID" button can appear after a reload + re-login.
@@ -136,12 +147,10 @@ export function ManagementApp() {
   }, [signIn])
 
   const handleSignOut = useCallback(() => {
+    clearResult()
     signOut()
-    setActiveReceipt(null)
-    setActiveEvidence(null)
-    setFeedback(null)
     setVerifiedSelection(null)
-  }, [signOut])
+  }, [clearResult, signOut])
 
   const handleLoadProjects = useCallback(async () => {
     try {
@@ -159,11 +168,9 @@ export function ManagementApp() {
     setKind('ComputePool')
     clearDesired()
     setOperationId('')
-    setActiveReceipt(null)
-    setActiveEvidence(null)
     setVerifiedSelection(null)
-    setFeedback(null)
-  }, [clearDesired])
+    clearResult()
+  }, [clearDesired, clearResult])
 
   const handleListWorkloads = useCallback(async (after?: string) => {
     try {
@@ -245,17 +252,29 @@ export function ManagementApp() {
   }, [scope, token, deleteResourceFn, desired, remember])
 
   const handleReceipt = useCallback(async () => {
-    // 镜像 Vue receipt() 的 clearResult()：先作废旧回执/证据，再查询。
+    const submitted = { session, cluster, project, operationId }
     clearResult()
+    const stillCurrent = () => {
+      const current = receiptContext.current
+      return current.authenticated &&
+        current.session === submitted.session &&
+        current.cluster === submitted.cluster &&
+        current.project === submitted.project &&
+        current.operationId === submitted.operationId
+    }
     try {
-      await token()
-      const { receipt, message: msg } = await readReceiptFn(cluster, project, operationId, token())
+      const accessToken = token()
+      const { receipt, message: msg } = await readReceiptFn(
+        cluster, project, operationId, accessToken
+      )
+      if (!stillCurrent()) return
       setActiveReceipt(receipt)
       setFeedback({ kind: 'status', text: msg })
     } catch (e) {
+      if (e instanceof StaleReceiptReadError || !stillCurrent()) return
       setFeedback({ kind: 'alert', text: errMsg(e, '查询回执失败') })
     }
-  }, [cluster, project, operationId, token, readReceiptFn, clearResult])
+  }, [session, cluster, project, operationId, token, readReceiptFn, clearResult])
 
   const handleReadBackCheck = useCallback(async () => {
     if (!activeReceipt) return
