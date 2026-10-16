@@ -66,6 +66,19 @@ export interface ExecutionView {
   conditions: Array<{ type: string; status: string; reason?: string; message?: string }>
 }
 
+export interface RecentOperation {
+  requestId: string
+  kind: Kind
+  resourceId: string
+  action: 'create' | 'update' | 'delete-request'
+  committedAt: string
+}
+
+export interface RecentOperationList {
+  items: RecentOperation[]
+  truncated: boolean
+}
+
 export interface Receipt {
   requestId: string
   status: 'desired-committed'
@@ -206,6 +219,14 @@ export async function readExecution(scope: Scope, token: string): Promise<{ stat
   const path = '/api/v1/management/clusters/' + scope.cluster +
     '/projects/' + scope.project + '/execution/workloads/' + scope.resource
   return request<ExecutionView>(path, 'GET', token)
+}
+
+// A bounded subject-owned audit index is NOT a receipt, mutation replay
+// grant, or Kubernetes execution proof. Always re-read a selected receipt.
+export async function listRecentOperations(cluster: string, project: string, token: string): Promise<{ status: number; value: RecentOperationList | null }> {
+  safe(cluster); safe(project)
+  return request<RecentOperationList>('/api/v1/management/clusters/' + cluster +
+    '/projects/' + project + '/operations', 'GET', token)
 }
 
 export async function readReceipt(cluster: string, project: string, operationId: string, token: string): Promise<{ status: number; value: Receipt | null }> {
