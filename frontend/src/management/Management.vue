@@ -142,7 +142,7 @@
         每页最多 25 条，按审计事务时间排序（不是严格提交顺序），分页不是事务快照。
         索引仅帮助找回原始 ID，不证明 GPU 执行、删除完成或允许盲目重试。</p>
       <button type="button" :disabled="!authenticated || busy || !cluster || !project"
-        @click="loadRecentOperations">查询本项目最近操作（只读）</button>
+        @click="loadRecentOperations()">查询本项目最近操作（只读）</button>
       <div v-if="activeServerOperations" class="management-status" role="region" aria-label="本人最近操作索引">
         <p v-if="!activeServerOperations.items.length">当前项目没有可见的本人操作记录；不代表没有进行中的未知操作。</p>
         <ul>
