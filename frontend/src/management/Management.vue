@@ -138,6 +138,20 @@
 
     <section class="management-card">
       <h2>5. 操作回执与恢复</h2>
+      <p>如果本标签的操作 ID 丢失，可按当前 OIDC 登录与项目授权查询最近 25 条本人操作索引。
+        索引仅帮助找回原始操作 ID；它不是写入回执，也不证明 GPU 执行或删除完成。</p>
+      <button type="button" :disabled="!authenticated || busy || !cluster || !project"
+        @click="loadRecentOperations">查询本项目最近操作（只读）</button>
+      <div v-if="activeServerOperations" class="management-status" role="region" aria-label="本人最近操作索引">
+        <p v-if="!activeServerOperations.items.length">当前项目没有可见的本人操作记录；不代表没有进行中的未知操作。</p>
+        <ul>
+          <li v-for="item in activeServerOperations.items" :key="item.requestId">
+            {{ item.kind }}/{{ item.resourceId }} · {{ item.action }} · {{ item.committedAt }}
+            <button type="button" :disabled="busy" @click="selectRecentOperation(item)">选择原操作 ID</button>
+          </li>
+        </ul>
+        <p v-if="activeServerOperations.truncated">只显示最近 25 条，历史不完整；旧操作仍需另外保存的 ID 查询。</p>
+      </div>
       <div v-if="recentOperation && authenticated" class="management-status">
         最近一次操作（仅当前浏览器标签）：
         <code>{{ recentOperation.method }} {{ recentOperation.project }}/{{ recentOperation.kind }}/{{ recentOperation.resource }}</code>
@@ -202,7 +216,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { beginLogin, clearPendingLogin, discover, finishLogin, type OAuthConfig, type AccessSession } from './auth'
-import { readResource, writeResource, deleteResource, readReceipt, readExecution, listProjects, listWorkloads, listComputePools, ManagementHTTPError, type Kind, type DesiredView, type Receipt, type ProjectAccess, type WorkloadInventoryItem, type WorkloadInventoryPage, desiredMatchesScope, createOperationId } from './api'
+import { readResource, writeResource, deleteResource, readReceipt, readExecution, listProjects, listWorkloads, listComputePools, listRecentOperations, ManagementHTTPError, type RecentOperation, type RecentOperationList, type Kind, type DesiredView, type Receipt, type ProjectAccess, type WorkloadInventoryItem, type WorkloadInventoryPage, desiredMatchesScope, createOperationId } from './api'
 import { classifyScopedExecution, type ScopedExecution } from './execution'
 import { verifyEvidencePair } from './evidence-check'
 import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from './readback'
@@ -271,6 +285,14 @@ const activeExecution = computed(() =>
 const activeEvidenceChecked = computed(() =>
   evidenceChecked.value?.anchor === receiptSelector.value ? evidenceChecked.value : null)
 const recentOperation = ref<OperationPointer | null>(null)
+const serverOperationIndex = ref<{ session: AccessSession; anchor: string; page: RecentOperationList } | null>(null)
+const operationIndexAnchor = computed(() => JSON.stringify([cluster.value, project.value]))
+const activeServerOperations = computed(() =>
+  serverOperationIndex.value?.session === session.value &&
+  serverOperationIndex.value?.anchor === operationIndexAnchor.value
+    ? serverOperationIndex.value.page : null)
+watch(() => [cluster.value, project.value], () => { serverOperationIndex.value = null })
+watch(session, () => { serverOperationIndex.value = null })
 const busy = ref(false)
 const message = ref('')
 const error = ref('')
@@ -306,6 +328,7 @@ function activeReadContext(
     projectListTruncated.value = false
     inventory.value = null
     poolInventory.value = null
+    serverOperationIndex.value = null
     desired.value = null
     clearResult()
     error.value = '本页 OIDC 访问令牌已过期，已清除授权读取结果；请重新登录后查询'
@@ -510,6 +533,7 @@ function signOut() {
   verifiedWorkloadPool.value = null
   inventory.value = null
   poolInventory.value = null
+  serverOperationIndex.value = null
   clearPendingLogin(sessionStorage)
   forgetOperation(sessionStorage)
   recentOperation.value = null
@@ -559,6 +583,46 @@ function selectProject(item: ProjectAccess) {
   operationId.value = ''
   message.value = '已选择项目 ' + item.projectId + '（' + item.role + '），请重新选择资源'
   error.value = ''
+}
+
+async function loadRecentOperations() {
+  if (busy.value) return
+  error.value = ''
+  message.value = ''
+  busy.value = true
+  const started = session.value
+  const anchor = operationIndexAnchor.value
+  const clusterId = cluster.value
+  const projectId = project.value
+  try {
+    const result = await listRecentOperations(clusterId, projectId, token())
+    if (!activeReadContext(started, session.value, anchor, operationIndexAnchor.value)) return
+    const page = result.value
+    if (!page || !Array.isArray(page.items) || page.items.length > 25 || typeof page.truncated !== 'boolean' ||
+        !page.items.every(item => /^[0-9a-f]{32}$/.test(item.requestId) &&
+          /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(item.resourceId) &&
+          (item.kind === 'Workload' || item.kind === 'ComputePool') &&
+          ['create', 'update', 'delete-request'].includes(item.action) &&
+          typeof item.committedAt === 'string')) {
+      throw new Error('操作索引格式无效，已拒绝使用')
+    }
+    serverOperationIndex.value = { session: started!, anchor, page }
+    message.value = '已读取本人最近操作索引；选择记录后仍需独立查询回执'
+  } catch (e) {
+    if (!activeReadContext(started, session.value, anchor, operationIndexAnchor.value)) return
+    serverOperationIndex.value = null
+    describeError(e)
+  } finally { busy.value = false }
+}
+
+function selectRecentOperation(item: RecentOperation) {
+  if (!isSessionActive(session.value) || !activeServerOperations.value?.items.some(r => r.requestId === item.requestId)) return
+  kind.value = item.kind
+  resource.value = item.resourceId
+  operationId.value = item.requestId
+  desired.value = null
+  clearResult()
+  message.value = '已选择原操作 ID；请查询服务端回执并独立核对 Desired/Agent 观察，切勿用新 ID 盲目重试'
 }
 
 function restoreOperation() {
