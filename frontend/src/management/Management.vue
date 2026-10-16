@@ -208,7 +208,7 @@ import { verifyEvidencePair } from './evidence-check'
 import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from './readback'
 import { rememberOperation, recoverOperation, forgetOperation, type OperationPointer } from './recovery'
 import { parseAuthorizedPool, buildAuthorizedWorkloadRequest, poolForCurrentSession, isSessionActive, type VerifiedPoolSelection } from './workload-composer'
-import { isSameReadContext } from './read-context'
+import { readContextStatus } from './read-context'
 
 const issuer = import.meta.env.VITE_MANAGEMENT_OIDC_ISSUER || ''
 const clientId = import.meta.env.VITE_MANAGEMENT_OIDC_CLIENT_ID || ''
@@ -291,6 +291,28 @@ function clearResult() {
   evidenceChecked.value = null
 }
 function describeError(e: unknown) { error.value = e instanceof Error ? e.message : '未知请求失败' }
+// Different login/scope: discard late responses without touching the new view.
+// Same login but expired: revoke page-local access and clear all protected
+// read projections, without erasing the original operation recovery pointer.
+function activeReadContext(
+  started: AccessSession | null, current: AccessSession | null,
+  selected: string, currentSelection: string,
+): boolean {
+  const status = readContextStatus(started, current, selected, currentSelection)
+  if (status === 'expired') {
+    session.value = null
+    verifiedWorkloadPool.value = null
+    availableProjects.value = []
+    projectListTruncated.value = false
+    inventory.value = null
+    poolInventory.value = null
+    desired.value = null
+    clearResult()
+    error.value = '本页 OIDC 访问令牌已过期，已清除授权读取结果；请重新登录后查询'
+  }
+  return status === 'current'
+}
+
 
 async function loadWorkloads(after?: string) {
   if (busy.value) return
@@ -314,7 +336,7 @@ async function loadWorkloads(after?: string) {
         (page.hasMore && !page.nextCursor) || (!page.hasMore && page.nextCursor !== null)) {
       throw new Error('服务端返回的 Workload 列表格式异常')
     }
-    if (!isSameReadContext(originalSession, session.value, selected, inventoryAnchor.value)) {
+    if (!activeReadContext(originalSession, session.value, selected, inventoryAnchor.value)) {
       throw new Error('列表查询期间授权身份或项目已变化，请重新查询')
     }
     const previous = after ? activeInventory.value?.items ?? [] : []
@@ -330,7 +352,7 @@ async function loadWorkloads(after?: string) {
     } }
     message.value = '已查询当前 OIDC 项目内 Workload Desired；只读、分页且不包含执行完成证明'
   } catch (e) {
-    if (!isSameReadContext(originalSession, session.value, selected, inventoryAnchor.value)) return
+    if (!activeReadContext(originalSession, session.value, selected, inventoryAnchor.value)) return
     inventory.value = null
     describeError(e)
   } finally { busy.value = false }
@@ -366,7 +388,7 @@ async function loadComputePools(after?: string) {
         (page.hasMore && !page.nextCursor) || (!page.hasMore && page.nextCursor !== null)) {
       throw new Error('服务端返回的 ComputePool 列表格式异常')
     }
-    if (!isSameReadContext(originalSession, session.value, selected, inventoryAnchor.value)) {
+    if (!activeReadContext(originalSession, session.value, selected, inventoryAnchor.value)) {
       throw new Error('Pool 查询期间授权身份或项目已变化；拒绝使用缓存结果')
     }
     const previous = after ? activePoolInventory.value?.items ?? [] : []
@@ -382,7 +404,7 @@ async function loadComputePools(after?: string) {
     } }
     message.value = '已读取项目授权 ComputePool 列表；请再单独验证选中的 Pool 绑定'
   } catch (e) {
-    if (!isSameReadContext(originalSession, session.value, selected, inventoryAnchor.value)) return
+    if (!activeReadContext(originalSession, session.value, selected, inventoryAnchor.value)) return
     poolInventory.value = null
     describeError(e)
   } finally { busy.value = false }
@@ -407,7 +429,7 @@ async function verifyWorkloadPool() {
       cluster: clusterId, project: projectId, kind: 'ComputePool', resource: poolId,
     }, token())
     if (!result.value) throw new Error('当前项目未读取到可用 ComputePool')
-    if (!isSameReadContext(originalSession, session.value,
+    if (!activeReadContext(originalSession, session.value,
         JSON.stringify([clusterId, projectId, poolId]),
         JSON.stringify([cluster.value, project.value, workloadPoolId.value]))) {
       throw new Error('读取期间 OIDC 登录会话或范围已改变或过期，请重新验证 ComputePool')
@@ -421,7 +443,7 @@ async function verifyWorkloadPool() {
     workloadQuota.value = 1
     message.value = '已读取并验证授权 ComputePool；尚未创建 Workload'
   } catch (e) {
-    if (isSameReadContext(originalSession, session.value,
+    if (activeReadContext(originalSession, session.value,
         JSON.stringify([clusterId, projectId, poolId]),
         JSON.stringify([cluster.value, project.value, workloadPoolId.value]))) describeError(e)
   } finally { busy.value = false }
@@ -509,12 +531,12 @@ async function loadProjects() {
   const initialSession = session.value
   try {
     const result = await listProjects(token())
-    if (!isSameReadContext(initialSession, session.value, 'projects', 'projects')) return
+    if (!activeReadContext(initialSession, session.value, 'projects', 'projects')) return
     availableProjects.value = result.value?.projects ?? []
     projectListTruncated.value = result.value?.truncated ?? false
     message.value = '服务端返回 ' + availableProjects.value.length + ' 个当前授权项目'
   } catch (e) {
-    if (!isSameReadContext(initialSession, session.value, 'projects', 'projects')) return
+    if (!activeReadContext(initialSession, session.value, 'projects', 'projects')) return
     availableProjects.value = []
     projectListTruncated.value = false
     describeError(e)
@@ -581,11 +603,11 @@ async function read() {
   const selected = JSON.stringify(target)
   try {
     const result = await readResource(target, token())
-    if (!isSameReadContext(initialSession, session.value, selected, JSON.stringify(scope()))) return
+    if (!activeReadContext(initialSession, session.value, selected, JSON.stringify(scope()))) return
     desired.value = result.value
     message.value = '读取到授权项目内的 Desired 资源'
   } catch (e) {
-    if (!isSameReadContext(initialSession, session.value, selected, JSON.stringify(scope()))) return
+    if (!activeReadContext(initialSession, session.value, selected, JSON.stringify(scope()))) return
     desired.value = null
     describeError(e)
   } finally { busy.value = false }
@@ -638,14 +660,14 @@ async function receipt() {
   const id = operationId.value
   try {
     const result = await readReceipt(clusterId, projectId, id, token())
-    if (!isSameReadContext(initialSession, session.value, selected, receiptSelector.value)) return
+    if (!activeReadContext(initialSession, session.value, selected, receiptSelector.value)) return
     if (!result.value) throw new Error('服务端未返回有效的操作回执')
     receiptResourceScope(result.value, clusterId, projectId, id)
     receiptData.value = result.value
     receiptAnchor.value = selected
     message.value = '仅证明 Desired 写入和操作审计已提交，非 Workload 执行证明'
   } catch (e) {
-    if (isSameReadContext(initialSession, session.value, selected, receiptSelector.value)) describeError(e)
+    if (activeReadContext(initialSession, session.value, selected, receiptSelector.value)) describeError(e)
   } finally { busy.value = false }
 }
 
@@ -672,11 +694,11 @@ async function readBackDesired() {
       if (!(e instanceof ManagementHTTPError) || e.status !== 404) throw e
       current = null
     }
-    if (!isSameReadContext(initialSession, session.value, selected, receiptSelector.value)) return
+    if (!activeReadContext(initialSession, session.value, selected, receiptSelector.value)) return
     receiptReadback.value = { anchor: selected, result: classifyDesiredReadback(original, current) }
     message.value = '操作回执与当前 Desired 已分开核对；没有 Kubernetes 执行或清理完成证明'
   } catch (e) {
-    if (isSameReadContext(initialSession, session.value, selected, receiptSelector.value)) describeError(e)
+    if (activeReadContext(initialSession, session.value, selected, receiptSelector.value)) describeError(e)
   } finally { busy.value = false }
 }
 async function readExecutionObservation() {
@@ -692,13 +714,13 @@ async function readExecutionObservation() {
   try {
     const target = receiptResourceScope(audit, cluster.value, project.value, operationId.value)
     const result = await readExecution(target, token())
-    if (!isSameReadContext(initialSession, session.value, selected, receiptSelector.value)) return
+    if (!activeReadContext(initialSession, session.value, selected, receiptSelector.value)) return
     if (!result.value) throw new Error('执行观察没有有效数据，请重新查询')
     const classified = classifyScopedExecution(result.value, audit)
     executionReadback.value = { anchor: selected, result: classified }
     message.value = '已读取授权范围内的独立 Agent/Kueue 观察；仅供诊断，并非实时 Kubernetes 状态证明'
   } catch (e) {
-    if (isSameReadContext(initialSession, session.value, selected, receiptSelector.value)) describeError(e)
+    if (activeReadContext(initialSession, session.value, selected, receiptSelector.value)) describeError(e)
   } finally { busy.value = false }
 }
 
@@ -734,7 +756,7 @@ async function refreshEvidenceChain() {
       observed = (await readExecution(target, access)).value
     }
     const evidence = verifyEvidencePair(audit, current, observed)
-    if (!isSameReadContext(originalSession, session.value, selected, receiptSelector.value)) return
+    if (!activeReadContext(originalSession, session.value, selected, receiptSelector.value)) return
     receiptData.value = audit
     receiptAnchor.value = selected
     receiptReadback.value = { anchor: selected, result: evidence.readback }
@@ -742,7 +764,7 @@ async function refreshEvidenceChain() {
     evidenceChecked.value = { anchor: selected, at: new Date().toISOString() }
     message.value = '原始操作回执、当前 Desired 和独立观察已完成分层核对；未发起写入或自动重试'
   } catch (e) {
-    if (isSameReadContext(originalSession, session.value, selected, receiptSelector.value)) describeError(e)
+    if (activeReadContext(originalSession, session.value, selected, receiptSelector.value)) describeError(e)
   } finally { busy.value = false }
 }
 
