@@ -110,12 +110,12 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,'Workload',$8,$9,0,1,$10,$11)`,
 	}
 	for _, tc := range []struct {
 		token, url string
-		status int
+		status     int
 	}{
 		{"", endpoint, 401},
 		{"revoked-token", endpoint, 401},
 		{"provider-unavailable", endpoint, 503},
-		{"good-access-token", endpoint+"?limit=999", 400},
+		{"good-access-token", endpoint + "?limit=999", 400},
 		{"good-access-token", strings.Replace(endpoint, "/projects/"+project+"/", "/projects/bad!id/", 1), 400},
 	} {
 		if got := call(tc.url, tc.token).Code; got != tc.status {
