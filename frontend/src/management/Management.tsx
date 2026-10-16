@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Button,
   Card,
@@ -9,11 +9,6 @@ import {
   CardTitle,
   Input,
   Label,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
 } from '@/components/ui'
 import { useAuth } from '@/management/hooks/useAuth'
 import { useProjects } from '@/management/hooks/useProjects'
@@ -21,15 +16,24 @@ import { useInventory } from '@/management/hooks/useInventory'
 import { useResource } from '@/management/hooks/useResource'
 import { useReceipt } from '@/management/hooks/useReceipt'
 import { useOperation } from '@/management/hooks/useOperation'
+import { useEvidence } from '@/management/hooks/useEvidence'
 import {
+  listRecentOperations,
+  createOperationId,
   type Scope,
   type Kind,
   type ProjectAccess,
+  type Receipt,
+  type WorkloadInventoryItem,
+  type RecentOperation,
 } from '@/management/api'
 import {
   parseAuthorizedPool,
   buildAuthorizedWorkloadRequest,
+  poolForCurrentSession,
+  type VerifiedPoolSelection,
 } from '@/management/workload-composer'
+import type { EvidenceCheck } from '@/management/evidence-check'
 
 const cardStyle: React.CSSProperties = {
   border: '1px solid',
@@ -38,14 +42,19 @@ const cardStyle: React.CSSProperties = {
   marginBottom: '24px',
 }
 
+function errMsg(e: unknown, fallback: string): string {
+  return e instanceof Error ? e.message : fallback
+}
+
+type Feedback = { kind: 'status' | 'alert'; text: string } | null
+
 export function ManagementApp() {
   const {
     issuer,
+    session,
     configured,
     authenticated,
     busy,
-    message,
-    error,
     signIn,
     signOut,
     token,
@@ -53,14 +62,8 @@ export function ManagementApp() {
 
   const { projects, truncated: projectListTruncated, loadProjects } = useProjects()
 
-  const {
-    items: inventoryItems,
-    nextCursor,
-    hasMore,
-    loadingMore,
-    listWorkloads,
-    listComputePools,
-  } = useInventory()
+  const workloadInv = useInventory()
+  const poolInv = useInventory()
 
   const {
     desired,
@@ -72,7 +75,12 @@ export function ManagementApp() {
 
   const { readReceipt: readReceiptFn } = useReceipt()
 
-  const { pointer: operationPointer, recover, forget } = useOperation()
+  const { pointer: operationPointer, remember, recover, forget } = useOperation()
+
+  const {
+    readBackDesired: readBackDesiredFn,
+    refreshEvidenceChain: refreshEvidenceChainFn,
+  } = useEvidence()
 
   const [cluster, setCluster] = useState('')
   const [project, setProject] = useState('')
@@ -101,11 +109,27 @@ export function ManagementApp() {
     )
   )
   const [operationId, setOperationId] = useState('')
-  const [activeReceipt, setActiveReceipt] = useState<any>(null)
-  const [activeReadback, setActiveReadback] = useState<any>(null)
-  const [activeExecution, setActiveExecution] = useState<any>(null)
+  const [activeReceipt, setActiveReceipt] = useState<Receipt | null>(null)
+  const [activeEvidence, setActiveEvidence] = useState<EvidenceCheck | null>(null)
+  const [verifiedSelection, setVerifiedSelection] = useState<VerifiedPoolSelection | null>(null)
+  const [recentOps, setRecentOps] = useState<RecentOperation[]>([])
+  const [feedback, setFeedback] = useState<Feedback>(null)
 
   const scope: Scope = { cluster, project, kind, resource }
+
+  // Vue 的 clearResult() 等价物：任何新的授权读取/回执查询都必须先作废旧的
+  // 回执与证据状态，避免旧 note 与新 desired 区在 DOM 中同时出现。
+  const clearResult = useCallback(() => {
+    setActiveReceipt(null)
+    setActiveEvidence(null)
+    setFeedback(null)
+  }, [])
+
+  // Load any one-tab recovery pointer from sessionStorage on mount so the
+  // "恢复操作范围与 ID" button can appear after a reload + re-login.
+  useEffect(() => {
+    recover()
+  }, [recover])
 
   const handleSignIn = useCallback(() => {
     signIn()
@@ -113,13 +137,18 @@ export function ManagementApp() {
 
   const handleSignOut = useCallback(() => {
     signOut()
+    setActiveReceipt(null)
+    setActiveEvidence(null)
+    setFeedback(null)
+    setVerifiedSelection(null)
   }, [signOut])
 
   const handleLoadProjects = useCallback(async () => {
     try {
-      await loadProjects(token())
-    } catch {
-      // error handled in hook
+      const msg = await loadProjects(token())
+      setFeedback({ kind: 'status', text: msg })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '查询项目失败') })
     }
   }, [loadProjects, token])
 
@@ -130,73 +159,202 @@ export function ManagementApp() {
     setKind('ComputePool')
     clearDesired()
     setOperationId('')
+    setActiveReceipt(null)
+    setActiveEvidence(null)
+    setVerifiedSelection(null)
+    setFeedback(null)
   }, [clearDesired])
 
   const handleListWorkloads = useCallback(async (after?: string) => {
     try {
-      await listWorkloads(cluster, project, token(), after)
-    } catch {
-      // error handled in hook
+      const msg = await workloadInv.listWorkloads(cluster, project, token(), after)
+      setFeedback({ kind: 'status', text: msg })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '查询资源失败') })
     }
-  }, [cluster, project, token, listWorkloads])
+  }, [cluster, project, token, workloadInv.listWorkloads])
 
   const handleListComputePools = useCallback(async (after?: string) => {
     try {
-      await listComputePools(cluster, project, token(), after)
-    } catch {
-      // error handled in hook
+      const msg = await poolInv.listComputePools(cluster, project, token(), after)
+      setFeedback({ kind: 'status', text: msg })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '查询 ComputePool 失败') })
     }
-  }, [cluster, project, token, listComputePools])
+  }, [cluster, project, token, poolInv.listComputePools])
 
   const handleRead = useCallback(async () => {
+    // 镜像 Vue read()：读取前清空回执与证据状态，保证 "Generation:" 等断言
+    // 在 DOM 中只有一个匹配元素（desired 区）。
+    clearResult()
     try {
-      await readResourceFn(scope, token())
-    } catch {
-      // error handled in hook
+      const { message: msg } = await readResourceFn(scope, token())
+      setFeedback({ kind: 'status', text: msg })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '读取资源失败') })
     }
-  }, [scope, token, readResourceFn])
+  }, [scope, token, readResourceFn, clearResult])
 
   const handleWrite = useCallback(async () => {
     try {
       JSON.parse(requestJSON)
-      // Generate a fresh idempotency key for each new mutation.
-      // The server binds a key to an identical operation digest and
-      // rejects mismatched reuse, so reuse is reserved for explicit retry.
+      if (
+        !window.confirm(
+          '确认向项目 ' + project + ' 提交 ' + kind + '/' + resource + ' Desired 变更？'
+        )
+      )
+        return
+      // Generate a fresh idempotency key for each new mutation. The server
+      // binds a key to an identical operation digest and rejects mismatched
+      // reuse, so reuse is reserved for explicit retry of an identical request.
       const opId = createOperationId()
+      // Persist the recovery pointer before dispatch so an ambiguous network
+      // outcome can still be resolved by re-reading the original ID.
+      remember(scope, 'PUT', opId)
       setOperationId(opId)
-      await writeResourceFn(scope, token(), requestJSON, opId)
-    } catch {
-      // error handled in hook
+      const msg = await writeResourceFn(scope, token(), requestJSON, opId)
+      setFeedback({ kind: 'status', text: msg })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '提交失败') })
     }
-  }, [scope, token, writeResourceFn, requestJSON])
+  }, [scope, token, writeResourceFn, requestJSON, remember, project, kind, resource])
 
   const handleRemove = useCallback(async () => {
     if (!desired) return
+    if (
+      !window.confirm(
+        '确认发起删除 ' +
+          desired.kind +
+          '/' +
+          desired.id +
+          '（Generation ' +
+          desired.generation +
+          '）？此操作不会立即删除真实 GPU 资源。'
+      )
+    )
+      return
     try {
-      await deleteResourceFn(scope, token(), desired.generation, createOperationId())
-    } catch {
-      // error handled in hook
+      const opId = createOperationId()
+      remember(scope, 'DELETE', opId)
+      setOperationId(opId)
+      const msg = await deleteResourceFn(scope, token(), desired.generation, opId)
+      setFeedback({ kind: 'status', text: msg })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '删除失败') })
     }
-  }, [scope, token, deleteResourceFn, desired])
+  }, [scope, token, deleteResourceFn, desired, remember])
 
   const handleReceipt = useCallback(async () => {
+    // 镜像 Vue receipt() 的 clearResult()：先作废旧回执/证据，再查询。
+    clearResult()
     try {
       await token()
-      const result = await readReceiptFn(cluster, project, operationId, token())
-      if (result) setActiveReceipt(result)
-    } catch {
-      // error handled in hook
+      const { receipt, message: msg } = await readReceiptFn(cluster, project, operationId, token())
+      setActiveReceipt(receipt)
+      setFeedback({ kind: 'status', text: msg })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '查询回执失败') })
     }
-  }, [cluster, project, operationId, token, readReceiptFn])
+  }, [cluster, project, operationId, token, readReceiptFn, clearResult])
+
+  const handleReadBackCheck = useCallback(async () => {
+    if (!activeReceipt) return
+    try {
+      await token()
+      const { check, message: msg } = await readBackDesiredFn(
+        activeReceipt, cluster, project, operationId, token()
+      )
+      setActiveEvidence(check)
+      setFeedback({ kind: 'status', text: msg })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '回读 Desired 失败') })
+    }
+  }, [activeReceipt, cluster, project, operationId, token, readBackDesiredFn])
+
+  const handleEvidenceRefresh = useCallback(async () => {
+    // 镜像 Vue refreshEvidenceChain()：不依赖本地 activeReceipt，按 operationId
+    // 从服务端重新读取回执。允许在读取 desired 之后（回执已被 clear）继续核对。
+    clearResult()
+    try {
+      await token()
+      const { check, message: msg } = await refreshEvidenceChainFn(
+        cluster, project, operationId, token()
+      )
+      setActiveEvidence(check)
+      setFeedback({ kind: 'status', text: msg })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '证据链核对失败') })
+    }
+  }, [cluster, project, operationId, token, refreshEvidenceChainFn, clearResult])
+
+  const handleListRecentOps = useCallback(async () => {
+    try {
+      await token()
+      const result = await listRecentOperations(cluster, project, token())
+      const items = result.value?.items ?? []
+      setRecentOps(items)
+      setFeedback({
+        kind: 'status',
+        text: '已读取 ' + items.length + ' 条本人历史操作；仅用于找回原始 ID，不证明执行或删除完成',
+      })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '查询最近操作失败') })
+    }
+  }, [cluster, project, token])
 
   const handleCopyOperationId = useCallback(async () => {
     await navigator.clipboard.writeText(operationId)
   }, [operationId])
 
-  const handleGenerateWorkload = useCallback(() => {
+  const handleSelectPoolRow = useCallback((item: WorkloadInventoryItem) => {
+    setWorkloadPoolId(item.id)
+    setVerifiedSelection(null)
+    clearDesired()
+    setOperationId('')
+    clearResult()
+  }, [clearDesired, clearResult])
+
+  const handleSelectWorkloadRow = useCallback((item: WorkloadInventoryItem) => {
+    setKind('Workload')
+    setResource(item.id)
+    setOperationId('')
+    clearDesired()
+    setVerifiedSelection(null)
+    clearResult()
+  }, [clearDesired, clearResult])
+
+  const handleVerifyPool = useCallback(async () => {
+    clearResult()
     try {
-      if (!desired) throw new Error('请先从 PostgreSQL 读取授权 ComputePool')
-      const pool = parseAuthorizedPool(cluster, project, desired)
+      if (!workloadPoolId) throw new Error('请先选择要验证的 ComputePool')
+      await token()
+      const verifyScope: Scope = { cluster, project, kind: 'ComputePool', resource: workloadPoolId }
+      const { desired: poolDesired } = await readResourceFn(verifyScope, token())
+      if (!poolDesired) throw new Error('未读取到授权 ComputePool')
+      const pool = parseAuthorizedPool(cluster, project, poolDesired)
+      setVerifiedSelection({ pool, session: session as object })
+      setWorkloadAcceleratorClass(pool.accelerators[0]?.class ?? '')
+      setWorkloadQuota(1)
+      // 反馈消息不能包含 "已确认 research/pool-a"：确认行本身已渲染该文本，
+      // 否则 Playwright getByText 会命中两个元素。
+      setFeedback({ kind: 'status', text: '已读取并验证授权 ComputePool；尚未创建 Workload' })
+    } catch (e) {
+      setVerifiedSelection(null)
+      setFeedback({ kind: 'alert', text: errMsg(e, '验证 ComputePool 失败') })
+    }
+  }, [cluster, project, workloadPoolId, session, token, readResourceFn, clearResult])
+
+  const handleGenerateWorkload = useCallback(() => {
+    // 镜像 Vue prepareWorkloadRequest()：清空旧回执/证据/desired 与旧操作 ID，
+    // 新请求将由下一次 PUT 生成全新幂等键。
+    clearResult()
+    clearDesired()
+    setOperationId('')
+    try {
+      const pool = poolForCurrentSession(
+        verifiedSelection, session, authenticated, cluster, project, workloadPoolId
+      )
+      if (!pool) throw new Error('请先读取并验证授权 ComputePool')
       const { target, requestJSON: json } = buildAuthorizedWorkloadRequest(
         pool,
         {
@@ -212,10 +370,15 @@ export function ManagementApp() {
       setKind(target.kind)
       setResource(target.resource)
       setRequestJSON(json)
-    } catch {
-      // error shown via UI state
+      setFeedback({ kind: 'status', text: '已生成 Workload 创建请求；请检查请求体后确认提交' })
+    } catch (e) {
+      setFeedback({ kind: 'alert', text: errMsg(e, '生成 Workload 请求失败') })
     }
-  }, [cluster, project, desired, workloadID, workloadImage, workloadAcceleratorClass, workloadQuota, workloadCommandJSON])
+  }, [
+    verifiedSelection, session, authenticated, cluster, project, workloadPoolId,
+    workloadID, workloadImage, workloadAcceleratorClass, workloadQuota, workloadCommandJSON,
+    clearResult, clearDesired,
+  ])
 
   const handleRestoreOperation = useCallback(() => {
     const p = recover()
@@ -231,10 +394,8 @@ export function ManagementApp() {
   const handleDiscardOperation = useCallback(() => {
     forget()
     setOperationId('')
-    setActiveReceipt(null)
-    setActiveReadback(null)
-    setActiveExecution(null)
-  }, [forget])
+    clearResult()
+  }, [forget, clearResult])
 
   return (
     <div className="management-shell max-w-[1040px] mx-auto pt-6 pb-20 px-4 text-sm font-sans text-[#20242a]">
@@ -353,27 +514,39 @@ export function ManagementApp() {
               查询项目 Workload 列表（每页 25 条）
             </Button>
           </div>
-          {inventoryItems.length > 0 && (
-            <div className="management-status text-sm text-[#34486b] bg-[#edf2fc] rounded p-3">
+          {workloadInv.items.length > 0 && (
+            <div
+              role="region"
+              aria-label="授权 Workload 列表"
+              className="management-status text-sm text-[#34486b] bg-[#edf2fc] rounded p-3"
+            >
               <p>
-                当前项目 {project} · {inventoryItems.length} 条已读取（仅 Desired 元数据）。
+                当前项目 {project} · {workloadInv.items.length} 条已读取（仅 Desired 元数据）。
                 不包含 Kueue 准入、Agent 状态或执行成功证明。
               </p>
-              {inventoryItems.length === 0 && (
-                <p>此页未找到任务；可能为空、已删除或项目授权发生变化。</p>
-              )}
               <ul className="mt-2 text-sm text-[#20242a]">
-                {inventoryItems.map((item) => (
+                {workloadInv.items.map((item) => (
                   <li key={item.id} className="flex items-center gap-2">
-                    {item.id} · Generation {item.generation} ·{' '}
-                    {item.deleting ? '删除请求已发起' : '未请求删除'}
+                    <span>
+                      {item.id} · Generation {item.generation} ·{' '}
+                      {item.deleting ? '删除请求已发起' : '未请求删除'}
+                    </span>
+                    <Button
+                      onClick={() => handleSelectWorkloadRow(item)}
+                      disabled={busy}
+                      variant="outline"
+                      size="sm"
+                      className="px-2 py-1 border"
+                    >
+                      选择 Workload {item.id}
+                    </Button>
                   </li>
                 ))}
               </ul>
-              {nextCursor && (
+              {workloadInv.nextCursor && (
                 <Button
-                  onClick={() => handleListWorkloads(nextCursor)}
-                  disabled={busy || loadingMore}
+                  onClick={() => handleListWorkloads(workloadInv.nextCursor ?? undefined)}
+                  disabled={busy || workloadInv.loadingMore}
                   variant="outline"
                   size="sm"
                   className="px-2 py-1 border"
@@ -381,7 +554,7 @@ export function ManagementApp() {
                   加载下一页 Workload
                 </Button>
               )}
-              {hasMore && (
+              {workloadInv.hasMore && (
                 <p className="text-xs text-[#66707a] mt-1">
                   尚有其他页面。游标翻页并非单个事务快照，列表不能证明已包含所有任务。
                 </p>
@@ -409,18 +582,15 @@ export function ManagementApp() {
             </div>
             <div className="flex flex-col">
               <Label htmlFor="kind-select">类型</Label>
-              <Select
+              <select
+                id="kind-select"
                 value={kind}
-                onValueChange={(v) => setKind(v as Kind)}
+                onChange={(e) => setKind(e.target.value as Kind)}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
-                <SelectTrigger>
-                  <SelectValue>{kind}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ComputePool">ComputePool</SelectItem>
-                  <SelectItem value="Workload">Workload</SelectItem>
-                </SelectContent>
-              </Select>
+                <option value="ComputePool">ComputePool</option>
+                <option value="Workload">Workload</option>
+              </select>
             </div>
             <div className="flex flex-col">
               <Label htmlFor="resource-id">资源 ID</Label>
@@ -470,15 +640,6 @@ export function ManagementApp() {
             先使用当前已登录身份读取项目内的 ComputePool，再按其真实加速器绑定生成任务请求。
             本向导不会自动提交，也不使用旧 Portal 开发双令牌接口。真实准入仍由 Kueue 决定。
           </p>
-          <div className="flex flex-col">
-            <Label htmlFor="workload-pool-id">已授权 ComputePool ID</Label>
-            <Input
-              id="workload-pool-id"
-              value={workloadPoolId}
-              onChange={(e) => setWorkloadPoolId(e.target.value)}
-              placeholder="用于训练的 ComputePool ID"
-            />
-          </div>
           <div className="management-actions flex gap-2">
             <Button
               onClick={() => handleListComputePools()}
@@ -488,6 +649,73 @@ export function ManagementApp() {
               查询项目 ComputePool 列表（每页 25 条）
             </Button>
           </div>
+          {poolInv.items.length > 0 && (
+            <div
+              role="region"
+              aria-label="授权 ComputePool 列表"
+              className="management-status text-sm text-[#34486b] bg-[#edf2fc] rounded p-3"
+            >
+              <p>
+                当前项目 {project} · {poolInv.items.length} 条已读取（仅 Desired 元数据）。
+              </p>
+              <ul className="mt-2 text-sm text-[#20242a]">
+                {poolInv.items.map((item) => (
+                  <li key={item.id} className="flex items-center gap-2">
+                    <span>
+                      {item.id} · Generation {item.generation} ·{' '}
+                      {item.deleting ? '删除请求已发起' : '未请求删除'}
+                    </span>
+                    <Button
+                      onClick={() => handleSelectPoolRow(item)}
+                      disabled={busy}
+                      variant="outline"
+                      size="sm"
+                      className="px-2 py-1 border"
+                    >
+                      选择 ComputePool {item.id}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+              {poolInv.nextCursor && (
+                <Button
+                  onClick={() => handleListComputePools(poolInv.nextCursor ?? undefined)}
+                  disabled={busy || poolInv.loadingMore}
+                  variant="outline"
+                  size="sm"
+                  className="px-2 py-1 border"
+                >
+                  加载下一页 ComputePool
+                </Button>
+              )}
+            </div>
+          )}
+          <div className="flex flex-col">
+            <Label htmlFor="workload-pool-id">已授权 ComputePool ID</Label>
+            <Input
+              id="workload-pool-id"
+              value={workloadPoolId}
+              onChange={(e) => {
+                setWorkloadPoolId(e.target.value)
+                setVerifiedSelection(null)
+              }}
+              placeholder="用于训练的 ComputePool ID"
+            />
+          </div>
+          <div className="management-actions flex gap-2">
+            <Button
+              onClick={handleVerifyPool}
+              disabled={!authenticated || busy || !workloadPoolId}
+              className="bg-[#357d73] text-white px-4 py-2 rounded-md"
+            >
+              读取并验证 ComputePool
+            </Button>
+          </div>
+          {verifiedSelection && (
+            <p className="text-sm text-[#20695f] bg-[#e6f2ef] rounded p-2">
+              已确认 {project}/{verifiedSelection.pool.id} · Generation {verifiedSelection.pool.generation}
+            </p>
+          )}
           <div className="management-fields grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
             <div className="flex flex-col">
               <Label htmlFor="workload-id">新 Workload ID</Label>
@@ -498,20 +726,23 @@ export function ManagementApp() {
                 placeholder="新的训练任务 ID"
               />
             </div>
-            <div className="flex flex-col">
-              <Label htmlFor="workload-accelerator-class">加速器类型</Label>
-              <Select
-                value={workloadAcceleratorClass}
-                onValueChange={(v) => setWorkloadAcceleratorClass(v as string)}
-              >
-                <SelectTrigger>
-                  <SelectValue>{workloadAcceleratorClass || '未选择'}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">未选择</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {verifiedSelection && (
+              <div className="flex flex-col">
+                <Label htmlFor="workload-accelerator-class">加速器类型</Label>
+                <select
+                  id="workload-accelerator-class"
+                  value={workloadAcceleratorClass}
+                  onChange={(e) => setWorkloadAcceleratorClass(e.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  {verifiedSelection.pool.accelerators.map((a) => (
+                    <option key={a.class} value={a.class}>
+                      {a.class}（配额 {a.quota}）
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex flex-col">
               <Label htmlFor="workload-quota">请求 GPU 数量</Label>
               <Input
@@ -543,13 +774,15 @@ export function ManagementApp() {
               className="w-full border border-[#e8eaee] rounded-md p-2 text-sm font-mono"
             />
           </div>
-          <Button
-            onClick={handleGenerateWorkload}
-            disabled={busy}
-            className="bg-[#357d73] text-white px-4 py-2 rounded-md"
-          >
-            生成受约束的 Workload PUT 请求
-          </Button>
+          {verifiedSelection && (
+            <Button
+              onClick={handleGenerateWorkload}
+              disabled={busy}
+              className="bg-[#357d73] text-white px-4 py-2 rounded-md"
+            >
+              生成受约束的 Workload PUT 请求
+            </Button>
+          )}
           <p className="text-xs text-[#66707a]">
             仅使用服务器读取的 Pool 信息生成草案；服务端提交时仍重新执行 OIDC、项目 RBAC、
             Pool 绑定和 Generation CAS。不会承诺 PVC 持久化、Pod Ready 或训练成功。
@@ -613,13 +846,33 @@ export function ManagementApp() {
           </p>
           <div className="management-actions flex gap-2">
             <Button
-              onClick={() => {}}
+              onClick={handleListRecentOps}
               disabled={!authenticated || busy || !cluster || !project}
               className="bg-[#357d73] text-white px-4 py-2 rounded-md"
             >
               查询本项目最近操作（只读）
             </Button>
           </div>
+          {recentOps.length > 0 && (
+            <ul className="text-sm text-[#20242a] bg-[#f0f1f3] rounded p-3 mt-2">
+              {recentOps.map((op) => (
+                <li key={op.requestId} className="flex items-center gap-2">
+                  <span className="font-mono text-xs">{op.requestId}</span>
+                  <span>
+                    {op.kind}/{op.resourceId} · {op.action} · {op.recordedAt}
+                  </span>
+                  <Button
+                    onClick={() => setOperationId(op.requestId)}
+                    variant="outline"
+                    size="sm"
+                    className="px-2 py-1 border"
+                  >
+                    使用该 ID
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
           <Label htmlFor="operation-id" className="text-xs font-semibold text-[#47566b] block mt-3">
             操作 ID（128 位随机十六进制；断连时必须使用原 ID）
           </Label>
@@ -645,14 +898,16 @@ export function ManagementApp() {
             >
               复制操作 ID
             </Button>
-            <Button
-              onClick={handleRestoreOperation}
-              disabled={busy}
-              variant="outline"
-              className="px-4 py-2 rounded-md border"
-            >
-              恢复操作范围与 ID
-            </Button>
+            {authenticated && operationPointer && (
+              <Button
+                onClick={handleRestoreOperation}
+                disabled={busy}
+                variant="outline"
+                className="px-4 py-2 rounded-md border"
+              >
+                恢复操作范围与 ID
+              </Button>
+            )}
             <Button
               onClick={handleDiscardOperation}
               disabled={!operationPointer}
@@ -667,22 +922,52 @@ export function ManagementApp() {
               <pre className="text-xs mt-1 overflow-auto">{JSON.stringify(activeReceipt, null, 2)}</pre>
             </div>
           )}
-          {activeReadback && (
-            <div className="management-status text-sm text-[#34486b] bg-[#edf2fc] rounded p-3 mt-3">
-              <strong>独立授权回读：{activeReadback.status}</strong>
-              <p>{activeReadback.detail}</p>
-              {activeReadback.desired && (
-                <p>
-                  当前 Generation: {activeReadback.desired.generation} · 删除请求:{' '}
-                  {activeReadback.desired.deleting ? '已发起' : '未发起'}
-                </p>
+          <div className="management-actions flex gap-2">
+            <Button
+              onClick={handleReadBackCheck}
+              disabled={!authenticated || busy || !activeReceipt}
+              variant="outline"
+              className="px-4 py-2 rounded-md border"
+            >
+              按回执核对当前 Desired
+            </Button>
+            <Button
+              onClick={handleEvidenceRefresh}
+              disabled={!authenticated || busy}
+              variant="outline"
+              className="px-4 py-2 rounded-md border"
+            >
+              一键重新核对回执、Desired 与执行观察
+            </Button>
+          </div>
+          {activeEvidence && (
+            <div className="management-evidence mt-3 space-y-2">
+              <p className="text-sm font-semibold text-[#47566b]">上次完整证据核对：</p>
+              <div
+                role="note"
+                className="text-sm text-[#34486b] bg-[#edf2fc] rounded p-3"
+              >
+                <strong>{activeEvidence.readback.status}</strong>
+                <p>{activeEvidence.readback.detail}</p>
+                {activeEvidence.readback.desired && (
+                  <p>
+                    当前 Generation: {activeEvidence.readback.desired.generation} · 删除请求:{' '}
+                    {activeEvidence.readback.desired.deleting ? '已发起' : '未发起'}
+                  </p>
+                )}
+              </div>
+              {activeEvidence.execution && (
+                <div
+                  role="group"
+                  aria-label="独立执行状态"
+                  className="text-sm text-[#34486b] bg-[#edf2fc] rounded p-3"
+                >
+                  <strong>
+                    {activeEvidence.execution.label}（{activeEvidence.execution.code}）
+                  </strong>
+                  <p>{activeEvidence.execution.detail}</p>
+                </div>
               )}
-            </div>
-          )}
-          {activeExecution && (
-            <div className="management-status text-sm text-[#34486b] bg-[#edf2fc] rounded p-3 mt-3">
-              <strong>独立执行状态：{activeExecution.label}（{activeExecution.code}）</strong>
-              <p>{activeExecution.detail}</p>
             </div>
           )}
           <p className="text-xs text-[#66707a]">
@@ -691,22 +976,22 @@ export function ManagementApp() {
         </CardContent>
       </Card>
 
-      {message && (
-        <div className="management-feedback mt-4 rounded bg-[#e6f2ef] text-[#20695f] p-3">
-          {message}
+      {feedback && feedback.kind === 'status' && (
+        <div
+          role="status"
+          className="management-feedback mt-4 rounded bg-[#e6f2ef] text-[#20695f] p-3"
+        >
+          {feedback.text}
         </div>
       )}
-      {error && (
-        <div className="management-error mt-4 rounded bg-[#fcecef] text-[#b84f56] p-3">
-          {error}
+      {feedback && feedback.kind === 'alert' && (
+        <div
+          role="alert"
+          className="management-error mt-4 rounded bg-[#fcecef] text-[#b84f56] p-3"
+        >
+          {feedback.text}
         </div>
       )}
     </div>
   )
-}
-
-function createOperationId(): string {
-  const bytes = new Uint8Array(16)
-  crypto.getRandomValues(bytes)
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }

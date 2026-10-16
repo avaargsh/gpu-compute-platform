@@ -82,7 +82,6 @@ describe('useEvidence', () => {
     const { result } = renderHook(() => useEvidence())
     await act(async () => {
       await result.current.refreshEvidenceChain(
-        mockReceipt as any,
         'cluster-a',
         'proj-a',
         'op-123',
@@ -101,7 +100,6 @@ describe('useEvidence', () => {
     const { result } = renderHook(() => useEvidence())
     await act(async () => {
       await result.current.refreshEvidenceChain(
-        {} as any,
         'cluster-a',
         'proj-a',
         'op-123',

@@ -15,8 +15,8 @@ export interface UseInventoryReturn {
   loadingMore: boolean
   message: string
   error: string
-  listWorkloads: (cluster: string, project: string, token: string, after?: string) => Promise<void>
-  listComputePools: (cluster: string, project: string, token: string, after?: string) => Promise<void>
+  listWorkloads: (cluster: string, project: string, token: string, after?: string) => Promise<string>
+  listComputePools: (cluster: string, project: string, token: string, after?: string) => Promise<string>
 }
 
 export function useInventory(): UseInventoryReturn {
@@ -46,9 +46,13 @@ export function useInventory(): UseInventoryReturn {
         setItems([...previous, ...page.items])
         setNextCursor(page.nextCursor ?? null)
         setHasMore(page.hasMore)
-        setMessage('已读取项目资源列表；只读、分页且不包含执行完成证明')
+        const msg = '已读取项目资源列表；只读、分页且不包含执行完成证明'
+        setMessage(msg)
+        return msg
       } catch (e) {
-        setError(e instanceof Error ? e.message : '查询资源失败')
+        const msg = e instanceof Error ? e.message : '查询资源失败'
+        setError(msg)
+        throw e instanceof Error ? e : new Error(msg)
       } finally {
         setLoading(false)
         setLoadingMore(false)
@@ -75,9 +79,13 @@ export function useInventory(): UseInventoryReturn {
         setItems([...previous, ...page.items])
         setNextCursor(page.nextCursor ?? null)
         setHasMore(page.hasMore)
-        setMessage('已读取项目 ComputePool 列表；请再单独验证选中的 Pool 绑定')
+        const msg = '已读取项目 ComputePool 列表；请再单独验证选中的 Pool 绑定'
+        setMessage(msg)
+        return msg
       } catch (e) {
-        setError(e instanceof Error ? e.message : '查询 ComputePool 失败')
+        const msg = e instanceof Error ? e.message : '查询 ComputePool 失败'
+        setError(msg)
+        throw e instanceof Error ? e : new Error(msg)
       } finally {
         setLoading(false)
         setLoadingMore(false)

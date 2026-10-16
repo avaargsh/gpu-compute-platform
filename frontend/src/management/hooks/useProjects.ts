@@ -10,7 +10,7 @@ export interface UseProjectsReturn {
   loading: boolean
   message: string
   error: string
-  loadProjects: (token: string) => Promise<void>
+  loadProjects: (token: string) => Promise<string>
 }
 
 export function useProjects(): UseProjectsReturn {
@@ -28,11 +28,15 @@ export function useProjects(): UseProjectsReturn {
       if (!result.value) throw new Error('服务端返回空项目列表')
       setProjects(result.value.projects ?? [])
       setTruncated(result.value.truncated ?? false)
-      setMessage('服务端返回 ' + result.value.projects.length + ' 个当前授权项目')
+      const msg = '服务端返回 ' + (result.value.projects ?? []).length + ' 个当前授权项目'
+      setMessage(msg)
+      return msg
     } catch (e) {
       setProjects([])
       setTruncated(false)
-      setError(e instanceof Error ? e.message : '查询项目失败')
+      const msg = e instanceof Error ? e.message : '查询项目失败'
+      setError(msg)
+      throw e instanceof Error ? e : new Error(msg)
     } finally {
       setLoading(false)
     }

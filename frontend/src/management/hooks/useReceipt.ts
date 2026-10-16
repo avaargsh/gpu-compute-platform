@@ -8,7 +8,12 @@ export interface UseReceiptReturn {
   loading: boolean
   message: string
   error: string
-  readReceipt: (cluster: string, project: string, operationId: string, token: string) => Promise<Receipt | null>
+  readReceipt: (
+    cluster: string,
+    project: string,
+    operationId: string,
+    token: string
+  ) => Promise<{ receipt: Receipt; message: string }>
 }
 
 export function useReceipt(): UseReceiptReturn {
@@ -18,18 +23,25 @@ export function useReceipt(): UseReceiptReturn {
   const [error, setError] = useState('')
 
   const readReceiptFn = useCallback(
-    async (cluster: string, project: string, operationId: string, token: string): Promise<Receipt | null> => {
+    async (
+      cluster: string,
+      project: string,
+      operationId: string,
+      token: string
+    ): Promise<{ receipt: Receipt; message: string }> => {
       setLoading(true)
       setError('')
       try {
         const result = await readReceipt(cluster, project, operationId, token)
         if (!result.value) throw new Error('服务端未返回有效的操作回执')
         setReceipt(result.value)
-        setMessage('仅证明 Desired 写入和操作审计已提交，非 Workload 执行证明')
-        return result.value
+        const msg = '仅证明 Desired 写入和操作审计已提交，非 Workload 执行证明'
+        setMessage(msg)
+        return { receipt: result.value, message: msg }
       } catch (e) {
-        setError(e instanceof Error ? e.message : '查询回执失败')
-        return null
+        const msg = e instanceof Error ? e.message : '查询回执失败'
+        setError(msg)
+        throw e instanceof Error ? e : new Error(msg)
       } finally {
         setLoading(false)
       }

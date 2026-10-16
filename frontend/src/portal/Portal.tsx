@@ -32,6 +32,8 @@ import {
 } from '@/components/ui'
 import { loadSnapshot, type PortalSnapshot, type ResourceRow } from './api'
 import { projectSummaries, triageFindings, type Finding } from './project-model'
+import { JobComposer } from './JobComposer'
+import { KServeComposer } from './KServeComposer'
 
 type View =
   | 'overview'
@@ -117,6 +119,35 @@ export function PortalApp() {
 
   const viewTitle = VIEW_TITLES[view]
 
+  // Vue 的 sync watch([clusterId, operatorToken]) 等价物：凭证或集群标识一变
+  // 立即作废旧库存清单，并丢弃在途的过期响应。
+  const resetSession = useCallback(() => {
+    sessionEpoch.current++
+    setSnapshot(null)
+    setSelected(null)
+    setDrawerOpen(false)
+    setProjectFilter('all')
+    setLoading(false)
+    setLoadingMore(false)
+    setError('')
+  }, [])
+
+  const handleClusterChange = useCallback(
+    (value: string) => {
+      setClusterId(value)
+      resetSession()
+    },
+    [resetSession]
+  )
+
+  const handleTokenChange = useCallback(
+    (value: string) => {
+      setOperatorToken(value)
+      resetSession()
+    },
+    [resetSession]
+  )
+
   const handleRefresh = useCallback(async () => {
     if (loading || !clusterId) return
     const epoch = ++sessionEpoch.current
@@ -159,7 +190,15 @@ export function PortalApp() {
       setSnapshot({ ...next, rows: [...old.rows, ...next.rows] })
     } catch (cause) {
       if (epoch === sessionEpoch.current) {
-        setError(cause instanceof Error ? cause.message : '加载资源失败')
+        const msg = cause instanceof Error ? cause.message : '加载资源失败'
+        setError(msg)
+        // 服务端判定翻页期间集合已变化（409）时必须整体失败关闭：
+        // 作废整个会话清单，回到重新授权读取，绝不展示混合代次的列表。
+        if (msg.includes('资源清单在翻页期间发生变化')) {
+          setSnapshot(null)
+          setSelected(null)
+          setDrawerOpen(false)
+        }
       }
     } finally {
       if (epoch === sessionEpoch.current) setLoadingMore(false)
@@ -168,11 +207,8 @@ export function PortalApp() {
 
   const handleLock = useCallback(() => {
     setOperatorToken('')
-    sessionEpoch.current++
-    setSnapshot(null)
-    setSelected(null)
-    setDrawerOpen(false)
-  }, [])
+    resetSession()
+  }, [resetSession])
 
   const handleShowFinding = (finding: Finding) => {
     const row = snapshot?.rows.find(
@@ -195,7 +231,7 @@ export function PortalApp() {
   return (
     <div className="portal-shell flex h-screen bg-background">
       {/* Sidebar */}
-      <aside className="portal-sidebar fixed left-0 top-0 bottom-0 w-64 border-r border-border bg-card">
+      <aside className="portal-sidebar w-64 flex-none border-r border-border bg-card overflow-y-auto">
         <div className="brand-mark flex items-center gap-2 p-6">
           <span className="brand-icon">◈</span>
           <div>
@@ -255,7 +291,7 @@ export function PortalApp() {
               <Input
                 id="cluster-id"
                 value={clusterId}
-                onChange={(e) => setClusterId(e.target.value)}
+                onChange={(e) => handleClusterChange(e.target.value)}
                 placeholder="已授权集群 ID"
                 className="cluster-input"
                 onKeyDown={(e) => e.key === 'Enter' && handleRefresh()}
@@ -267,7 +303,7 @@ export function PortalApp() {
                 id="operator-token"
                 type="password"
                 value={operatorToken}
-                onChange={(e) => setOperatorToken(e.target.value)}
+                onChange={(e) => handleTokenChange(e.target.value)}
                 showPassword
                 placeholder="本机只读访问凭证（不存储）"
                 className="cluster-input"
@@ -337,8 +373,15 @@ export function PortalApp() {
                 />
               )}
               {view === 'projects' && <ProjectsView projects={projects} />}
-              {view === 'resources' && <ResourcesView visibleRows={visibleRows} snapshot={snapshot} onLoadMore={handleLoadMore} kindFilter={kindFilter} setKindFilter={setKindFilter} keyword={keyword} setKeyword={setKeyword} />}
-              {view === 'jobs' && <JobsView visibleRows={visibleRows} />}
+              {view === 'resources' && <ResourcesView visibleRows={visibleRows} snapshot={snapshot} onLoadMore={handleLoadMore} kindFilter={kindFilter} setKindFilter={setKindFilter} keyword={keyword} setKeyword={setKeyword} onShowDetails={showDetails} />}
+              {view === 'jobs' && (
+                <JobsView
+                  visibleRows={visibleRows}
+                  clusterId={snapshot.agent.clusterId}
+                  readToken={operatorToken}
+                  onSubmitted={handleRefresh}
+                />
+              )}
               {view === 'serving' && <ServingView snapshot={snapshot} />}
               {view === 'diagnostics' && <DiagnosticsView findings={findings} onShowFinding={handleShowFinding} />}
               {view === 'integrations' && <IntegrationsView snapshot={snapshot} />}
@@ -355,9 +398,12 @@ export function PortalApp() {
               <DialogTitle>
                 {selected?.desired.id} <Badge>{selected?.desired.kind}</Badge>
               </DialogTitle>
+              <DialogDescription>
+                Desired State 与独立观察证据详情（只读，不代表执行成功）
+              </DialogDescription>
             </DialogHeader>
             {selected && (
-            <DialogDescription>
+            <div className="dialog-details">
               <div className="grid gap-2 text-sm">
                 <div>
                   <Label>Desired Generation</Label>
@@ -405,7 +451,7 @@ export function PortalApp() {
               ) : (
                 <div className="text-muted-foreground text-sm">尚无可读取的证据引用</div>
               )}
-            </DialogDescription>
+            </div>
             )}
           </DialogContent>
         </Dialog>
@@ -757,7 +803,7 @@ function ProjectsView({ projects }: { projects: any[] }) {
   )
 }
 
-function ResourcesView({ visibleRows, snapshot, onLoadMore, kindFilter, setKindFilter, keyword, setKeyword }: { visibleRows: ResourceRow[]; snapshot: PortalSnapshot | null; onLoadMore?: () => void; kindFilter?: string; setKindFilter?: (v: string) => void; keyword?: string; setKeyword?: (v: string) => void }) {
+function ResourcesView({ visibleRows, snapshot, onLoadMore, kindFilter, setKindFilter, keyword, setKeyword, onShowDetails }: { visibleRows: ResourceRow[]; snapshot: PortalSnapshot | null; onLoadMore?: () => void; kindFilter?: string; setKindFilter?: (v: string) => void; keyword?: string; setKeyword?: (v: string) => void; onShowDetails?: (row: ResourceRow) => void }) {
   return (
     <div className="space-y-6">
       <Card>
@@ -810,7 +856,11 @@ function ResourcesView({ visibleRows, snapshot, onLoadMore, kindFilter, setKindF
             </TableHeader>
             <TableBody>
               {visibleRows.map((row) => (
-                <TableRow key={row.desired.kind + '/' + row.desired.id}>
+                <TableRow
+                  key={row.desired.kind + '/' + row.desired.id}
+                  className="cursor-pointer"
+                  onClick={() => onShowDetails?.(row)}
+                >
                   <TableCell>{row.desired.kind}</TableCell>
                   <TableCell>{row.desired.id}</TableCell>
                   <TableCell>
@@ -983,11 +1033,17 @@ function IntegrationsView({ snapshot }: { snapshot: PortalSnapshot | null }) {
   )
 }
 
-function JobsView({ visibleRows }: { visibleRows: ResourceRow[] }) {
+function JobsView({ visibleRows, clusterId, readToken, onSubmitted }: { visibleRows: ResourceRow[]; clusterId: string; readToken: string; onSubmitted: () => void }) {
   const workloadRows = visibleRows.filter((row) => row.desired.kind === 'Workload')
 
   return (
     <div className="space-y-6">
+      <JobComposer
+        rows={visibleRows}
+        clusterId={clusterId}
+        readToken={readToken}
+        onSubmitted={onSubmitted}
+      />
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <div>
@@ -1055,7 +1111,8 @@ function JobsView({ visibleRows }: { visibleRows: ResourceRow[] }) {
         </CardContent>
       </Card>
       <p className="text-xs text-muted-foreground">
-        Workload 创建需通过管理工作台（Management）的 OIDC 项目授权流程完成；Portal 仅提供只读观测。
+        本表为已授权快照内的只读执行监控；Synced 只表示观察 Generation 与期望 Generation
+        一致，不代表 Kueue 准入、Pod Ready 或训练结果已持久化。
       </p>
     </div>
   )
@@ -1064,6 +1121,7 @@ function JobsView({ visibleRows }: { visibleRows: ResourceRow[] }) {
 function ServingView({ snapshot }: { snapshot: PortalSnapshot | null }) {
   return (
     <div className="space-y-6">
+      <KServeComposer rows={snapshot?.rows ?? []} />
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle>在线推理 / Serving</CardTitle>

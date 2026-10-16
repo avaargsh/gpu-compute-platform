@@ -22,9 +22,27 @@ export interface UseEvidenceReturn {
   loading: boolean
   message: string
   error: string
-  readBackDesired: (receipt: Receipt, cluster: string, project: string, operationId: string, token: string) => Promise<void>
-  readExecutionObservation: (audit: Receipt, readback: DesiredReadback, cluster: string, project: string, operationId: string, token: string) => Promise<void>
-  refreshEvidenceChain: (audit: Receipt, cluster: string, project: string, requestId: string, token: string) => Promise<void>
+  readBackDesired: (
+    receipt: Receipt,
+    cluster: string,
+    project: string,
+    operationId: string,
+    token: string
+  ) => Promise<{ check: EvidenceCheck; message: string }>
+  readExecutionObservation: (
+    audit: Receipt,
+    readback: DesiredReadback,
+    cluster: string,
+    project: string,
+    operationId: string,
+    token: string
+  ) => Promise<{ check: EvidenceCheck; message: string }>
+  refreshEvidenceChain: (
+    cluster: string,
+    project: string,
+    requestId: string,
+    token: string
+  ) => Promise<{ check: EvidenceCheck; message: string }>
 }
 
 export function useEvidence(): UseEvidenceReturn {
@@ -34,7 +52,13 @@ export function useEvidence(): UseEvidenceReturn {
   const [error, setError] = useState('')
 
   const readBackDesiredFn = useCallback(
-    async (receipt: Receipt, cluster: string, project: string, _operationId: string, token: string) => {
+    async (
+      receipt: Receipt,
+      cluster: string,
+      project: string,
+      _operationId: string,
+      token: string
+    ): Promise<{ check: EvidenceCheck; message: string }> => {
       setLoading(true)
       setError('')
       try {
@@ -48,16 +72,21 @@ export function useEvidence(): UseEvidenceReturn {
         let current
         try {
           const result = await readResource(target, access)
-          current = result.value
+          current = result.value ?? null
         } catch (e) {
           if ((e as { status?: number }).status !== 404) throw e
           current = null
         }
         const readback = classifyDesiredReadback(receipt, current)
-        setCheck({ readback, execution: null })
-        setMessage('操作回执与当前 Desired 已分开核对；没有 Kubernetes 执行或清理完成证明')
+        const newCheck: EvidenceCheck = { readback, execution: null }
+        setCheck(newCheck)
+        const msg = '操作回执与当前 Desired 已分开核对；没有 Kubernetes 执行或清理完成证明'
+        setMessage(msg)
+        return { check: newCheck, message: msg }
       } catch (e) {
-        setError(e instanceof Error ? e.message : '回读 Desired 失败')
+        const msg = e instanceof Error ? e.message : '回读 Desired 失败'
+        setError(msg)
+        throw e instanceof Error ? e : new Error(msg)
       } finally {
         setLoading(false)
       }
@@ -66,8 +95,18 @@ export function useEvidence(): UseEvidenceReturn {
   )
 
   const readExecutionObservationFn = useCallback(
-    async (audit: Receipt, readback: DesiredReadback, cluster: string, project: string, _operationId: string, token: string) => {
-      if (!audit || audit.kind !== 'Workload' || !readback?.desired) return
+    async (
+      audit: Receipt,
+      readback: DesiredReadback,
+      cluster: string,
+      project: string,
+      _operationId: string,
+      token: string
+    ): Promise<{ check: EvidenceCheck; message: string }> => {
+      if (!audit || audit.kind !== 'Workload' || !readback?.desired) {
+        const fallback = check ?? { readback, execution: null }
+        return { check: fallback, message: '' }
+      }
       setLoading(true)
       setError('')
       try {
@@ -80,19 +119,29 @@ export function useEvidence(): UseEvidenceReturn {
         const result = await readExecution(target, token)
         if (!result.value) throw new Error('执行观察没有有效数据，请重新查询')
         const classified = classifyScopedExecution(result.value, audit)
-        setCheck((prev) => prev ? { ...prev, execution: classified } : { readback: {} as any, execution: classified })
-        setMessage('已读取授权范围内的独立 Agent/Kueue 观察；仅供诊断，并非实时 Kubernetes 状态证明')
+        const newCheck: EvidenceCheck = { readback, execution: classified }
+        setCheck(newCheck)
+        const msg = '已读取授权范围内的独立 Agent/Kueue 观察；仅供诊断，并非实时 Kubernetes 状态证明'
+        setMessage(msg)
+        return { check: newCheck, message: msg }
       } catch (e) {
-        setError(e instanceof Error ? e.message : '读取执行观察失败')
+        const msg = e instanceof Error ? e.message : '读取执行观察失败'
+        setError(msg)
+        throw e instanceof Error ? e : new Error(msg)
       } finally {
         setLoading(false)
       }
     },
-    []
+    [check]
   )
 
   const refreshEvidenceChainFn = useCallback(
-    async (_audit: Receipt, cluster: string, project: string, requestId: string, token: string) => {
+    async (
+      cluster: string,
+      project: string,
+      requestId: string,
+      token: string
+    ): Promise<{ check: EvidenceCheck; message: string }> => {
       setLoading(true)
       setError('')
       try {
@@ -124,9 +173,13 @@ export function useEvidence(): UseEvidenceReturn {
         }
         const evidence = verifyEvidencePair(audit2, current, observed ?? null)
         setCheck(evidence)
-        setMessage('原始操作回执、当前 Desired 和独立观察已完成分层核对；未发起写入或自动重试')
+        const msg = '原始操作回执、当前 Desired 和独立观察已完成分层核对；未发起写入或自动重试'
+        setMessage(msg)
+        return { check: evidence, message: msg }
       } catch (e) {
-        setError(e instanceof Error ? e.message : '证据链核对失败')
+        const msg = e instanceof Error ? e.message : '证据链核对失败'
+        setError(msg)
+        throw e instanceof Error ? e : new Error(msg)
       } finally {
         setLoading(false)
       }
