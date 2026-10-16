@@ -104,3 +104,25 @@ Release evidence is not proof that a resource still exists. It is an audit point
 12. A changed Workload follows Delete -> provider cleanup -> Finalize -> Recreate with a generation higher than the tombstone. Internal desired-state/migration APIs remain lower-level mechanisms and are not the public replacement contract.
 
 These invariants define the v0.1 workload lifecycle boundary. Future DRA/HAMi/provider integrations must fit this contract rather than add a parallel lifecycle model.
+
+## Workload provider delete fencing (incremental)
+
+The Kueue adapter checks `ai.compute/generation` on an existing Job and
+ResourceClaim before issuing any DELETE, also checking `ai.compute/workload`
+ownership on both kinds. It sends Kubernetes DELETE preconditions for the
+*observed* UID and resourceVersion: a replacement or changed object must
+return an error/conflict rather than being removed by an old cleanup owner.
+A 404 observed on a second GET is required for `Gone`; ACK is not sufficient.
+The Job must be observed gone before any DRA Claim DELETE is attempted.
+
+New DRA ResourceClaims include a workload-ownership label. **Compatibility
+caveat:** pre-existing ResourceClaims created without that label are
+intentionally not auto-deleted. An explicit audited migration/remediation
+procedure is required; operators must not remove the label guard or force
+delete them merely to clear a finalizer. Source-unit tests and CI do not
+prove a production cluster Finalizer or Kubernetes admission outcome.
+
+The control plane Desired generation must correspond to the provider Job
+generation; if a delete request advances it independently, removal will
+fail closed. That storage semantics must be validated in live cleanup
+acceptance rather than silently bypassing the guard.

@@ -40,11 +40,11 @@ func (f *fakeClient) ApplyJob(_ context.Context, v Job) error {
 func (f *fakeClient) ObserveJob(_ context.Context, _, _ string) (JobObservation, error) {
 	return JobObservation{}, nil
 }
-func (f *fakeClient) DeleteJob(_ context.Context, namespace, name string) (bool, error) {
+func (f *fakeClient) DeleteJob(_ context.Context, namespace, name string, generation int64) (bool, error) {
 	f.order = append(f.order, "delete-job:"+namespace+"/"+name)
 	return true, nil
 }
-func (f *fakeClient) DeleteResourceClaim(_ context.Context, namespace, name string) (bool, error) {
+func (f *fakeClient) DeleteResourceClaim(_ context.Context, namespace, name, jobName string, generation int64) (bool, error) {
 	f.order = append(f.order, "delete-claim:"+namespace+"/"+name)
 	return true, nil
 }

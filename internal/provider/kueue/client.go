@@ -20,8 +20,8 @@ type Client interface {
 	ApplyResourceClaim(context.Context, Job) error
 	ApplyJob(context.Context, Job) error
 	ObserveJob(context.Context, string, string) (JobObservation, error)
-	DeleteJob(context.Context, string, string) (bool, error)
-	DeleteResourceClaim(context.Context, string, string) (bool, error)
+	DeleteJob(context.Context, string, string, int64) (bool, error)
+	DeleteResourceClaim(context.Context, string, string, string, int64) (bool, error)
 	DeleteResourceFlavor(context.Context, string) (bool, error)
 	DeleteClusterQueue(context.Context, string) (bool, error)
 	DeleteLocalQueue(context.Context, string, string) (bool, error)

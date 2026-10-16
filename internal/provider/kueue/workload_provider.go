@@ -146,8 +146,8 @@ func (p *Provider) DeleteWorkload(ctx context.Context, projection baseprovider.W
 	if p.client == nil {
 		return baseprovider.DeletionObservation{}, fmt.Errorf("kueue client is required")
 	}
-	if projection.WorkloadID == "" || projection.Namespace == "" {
-		return baseprovider.DeletionObservation{}, fmt.Errorf("workload and namespace are required")
+	if projection.WorkloadID == "" || projection.Namespace == "" || projection.Generation < 1 {
+		return baseprovider.DeletionObservation{}, fmt.Errorf("workload, namespace and positive generation are required")
 	}
 
 	jobName := resourceName("job", string(projection.WorkloadID))
@@ -155,7 +155,7 @@ func (p *Provider) DeleteWorkload(ctx context.Context, projection baseprovider.W
 		fmt.Sprintf("k8s://%s/namespaces/%s/jobs/%s", projection.ClusterID, projection.Namespace, jobName),
 	}
 
-	gone, err := p.client.DeleteJob(ctx, projection.Namespace, jobName)
+	gone, err := p.client.DeleteJob(ctx, projection.Namespace, jobName, projection.Generation)
 	if err != nil {
 		return baseprovider.DeletionObservation{}, fmt.Errorf("delete job: %w", classifyProviderError(err))
 	}
@@ -168,7 +168,7 @@ func (p *Provider) DeleteWorkload(ctx context.Context, projection baseprovider.W
 		evidenceRefs = append(evidenceRefs,
 			fmt.Sprintf("k8s://%s/namespaces/%s/resourceclaims/%s", projection.ClusterID, projection.Namespace, claimName),
 		)
-		claimGone, err := p.client.DeleteResourceClaim(ctx, projection.Namespace, claimName)
+		claimGone, err := p.client.DeleteResourceClaim(ctx, projection.Namespace, claimName, jobName, projection.Generation)
 		if err != nil {
 			return baseprovider.DeletionObservation{}, fmt.Errorf("delete resource claim: %w", classifyProviderError(err))
 		}
