@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.vue.bak
+src/**/*.vue
+src/management/**
+src/portal/**
+src/views/**
+src/router/index.ts
+src/main.ts
+src/App.vue
+src/services/api.ts
+src/services/websocket.ts
+src/stores/costStore.ts
+src/stores/gpuStore.ts
+src/stores/taskStore.ts
+src/stores/userStore.ts

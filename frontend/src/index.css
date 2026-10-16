@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 245 246 248;
+    --foreground: 32 36 42;
+    --card: 255 255 255;
+    --card-foreground: 32 36 42;
+    --popover: 255 255 255;
+    --popover-foreground: 32 36 42;
+    --primary: 53 125 115;
+    --primary-foreground: 255 255 255;
+    --secondary: 240 244 247;
+    --secondary-foreground: 32 36 42;
+    --muted: 144 153 163;
+    --muted-foreground: 102 112 122;
+    --accent: 53 125 115;
+    --accent-foreground: 255 255 255;
+    --destructive: 184 79 86;
+    --destructive-foreground: 255 255 255;
+    --border: 232 234 238;
+    --input: 232 234 238;
+    --ring: 53 125 115;
+    --radius: 0.75rem;
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .dark {
+    --background: 24 28 32;
+    --foreground: 233 238 237;
+    --card: 36 42 47;
+    --card-foreground: 233 238 237;
+    --popover: 29 34 38;
+    --popover-foreground: 233 238 237;
+    --primary: 122 198 182;
+    --primary-foreground: 24 28 32;
+    --secondary: 49 57 62;
+    --secondary-foreground: 233 238 237;
+    --muted: 131 145 142;
+    --muted-foreground: 181 193 191;
+    --accent: 122 198 182;
+    --accent-foreground: 24 28 32;
+    --destructive: 240 150 155;
+    --destructive-foreground: 24 28 32;
+    --border: 52 60 64;
+    --input: 52 60 64;
+    --ring: 122 198 182;
+  }
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.65;
+    letter-spacing: -0.01em;
+  }
+  h1 {
+    @apply text-h2 font-semibold tracking-tight;
+    letter-spacing: -0.6px;
+  }
+  h2 {
+    @apply text-xl font-semibold tracking-tight;
+    letter-spacing: -0.2px;
+  }
+  h3 {
+    @apply text-lg font-semibold tracking-tight;
+  }
+  button, input, select, textarea {
+    font: inherit;
+  }
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+  button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
