@@ -197,15 +197,40 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 	return out, nil
 }
 
-func (c *KubeClient) DeleteJob(ctx context.Context, namespace, name string) (bool, error) {
+// Guarded workload deletion verifies generation/ownership before applying
+// Kubernetes UID+resourceVersion compare-and-delete. The agent lease does not
+// fence an older already-in-flight provider DELETE.
+func (c *KubeClient) DeleteJob(ctx context.Context, namespace, name string, generation int64) (bool, error) {
 	if c.core == nil {
 		return false, fmt.Errorf("kubernetes client is required")
 	}
+	if namespace == "" || name == "" || generation < 1 {
+		return false, fmt.Errorf("job deletion requires namespace, name and positive generation")
+	}
 	jobs := c.core.BatchV1().Jobs(namespace)
-	err := jobs.Delete(ctx, name, metav1.DeleteOptions{})
+	current, err := jobs.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := validateProviderGeneration("job", name, current.Annotations, generation); err != nil {
+		return false, err
+	}
+	if current.Labels["ai.compute/workload"] != name {
+		return false, fmt.Errorf("job %s owner identity mismatch", name)
+	}
+	preconditions, err := workloadDeletePreconditions(string(current.UID), current.ResourceVersion)
+	if err != nil {
+		return false, fmt.Errorf("job %s: %w", name, err)
+	}
+	err = jobs.Delete(ctx, name, metav1.DeleteOptions{Preconditions: preconditions})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
+	// DELETE ACK alone is never proof of absence; a replacement with the
+	// same name must not be mistaken for this generation having completed.
 	_, err = jobs.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return true, nil
@@ -216,12 +241,34 @@ func (c *KubeClient) DeleteJob(ctx context.Context, namespace, name string) (boo
 	return false, nil
 }
 
-func (c *KubeClient) DeleteResourceClaim(ctx context.Context, namespace, name string) (bool, error) {
+// Claim deletion requires the same exact Job identity written by the reviewed
+// DRA projector. Legacy unlabeled claims are retained for manual migration.
+func (c *KubeClient) DeleteResourceClaim(ctx context.Context, namespace, name, jobName string, generation int64) (bool, error) {
 	if c.core == nil {
 		return false, fmt.Errorf("kubernetes client is required")
 	}
+	if namespace == "" || name == "" || jobName == "" || generation < 1 {
+		return false, fmt.Errorf("claim deletion requires namespace, name, job and positive generation")
+	}
 	claims := c.core.ResourceV1().ResourceClaims(namespace)
-	err := claims.Delete(ctx, name, metav1.DeleteOptions{})
+	current, err := claims.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := validateProviderGeneration("resource claim", name, current.Annotations, generation); err != nil {
+		return false, err
+	}
+	if current.Labels["ai.compute/workload"] != jobName {
+		return false, fmt.Errorf("resource claim %s owner identity mismatch", name)
+	}
+	preconditions, err := workloadDeletePreconditions(string(current.UID), current.ResourceVersion)
+	if err != nil {
+		return false, fmt.Errorf("resource claim %s: %w", name, err)
+	}
+	err = claims.Delete(ctx, name, metav1.DeleteOptions{Preconditions: preconditions})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
@@ -233,6 +280,14 @@ func (c *KubeClient) DeleteResourceClaim(ctx context.Context, namespace, name st
 		return false, err
 	}
 	return false, nil
+}
+
+func workloadDeletePreconditions(uid, version string) (*metav1.Preconditions, error) {
+	if uid == "" || version == "" {
+		return nil, fmt.Errorf("UID and resourceVersion are required for provider deletion")
+	}
+	id := types.UID(uid)
+	return &metav1.Preconditions{UID: &id, ResourceVersion: &version}, nil
 }
 
 func (c *KubeClient) DeleteResourceFlavor(ctx context.Context, name string) (bool, error) {

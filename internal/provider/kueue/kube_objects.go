@@ -161,6 +161,7 @@ func resourceClaimObject(in Job) (*resourcev1.ResourceClaim, error) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        in.DRA.ClaimName,
 			Namespace:   in.Namespace,
+			Labels:      map[string]string{"ai.compute/workload": in.Name},
 			Annotations: annotations,
 		},
 		Spec: resourcev1.ResourceClaimSpec{
