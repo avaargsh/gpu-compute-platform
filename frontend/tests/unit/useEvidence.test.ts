@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useEvidence } from '@/management/hooks/useEvidence'
+import { useEvidence, StaleEvidenceReadError } from '@/management/hooks/useEvidence'
 import {
   readReceipt,
   readResource,
@@ -33,7 +33,7 @@ vi.mock('@/management/evidence-check', () => ({
 
 describe('useEvidence', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
   })
 
   it('should refresh evidence chain successfully', async () => {
@@ -99,15 +99,113 @@ describe('useEvidence', () => {
 
     const { result } = renderHook(() => useEvidence())
     await act(async () => {
-      await result.current.refreshEvidenceChain(
+      await expect(result.current.refreshEvidenceChain(
         'cluster-a',
         'proj-a',
         'op-123',
         'token-123'
-      )
+      )).rejects.toThrow('Receipt not found')
     })
 
     expect(result.current.error).toBe('Receipt not found')
     expect(result.current.loading).toBe(false)
+  })
+
+  it('revoked scope discards an in-flight Desired read without resurrecting evidence', async () => {
+    let resolveOld!: (value: Awaited<ReturnType<typeof readResource>>) => void
+    vi.mocked(readResource).mockImplementationOnce(
+      () => new Promise(resolve => { resolveOld = resolve })
+    )
+    const { result } = renderHook(() => useEvidence())
+    let pending!: ReturnType<typeof result.current.readBackDesired>
+    act(() => {
+      pending = result.current.readBackDesired(
+        {} as any, 'cluster-a', 'proj-a', 'op-old', 'token-123'
+      )
+    })
+    expect(result.current.loading).toBe(true)
+    act(() => result.current.invalidate())
+    await act(async () => {
+      resolveOld({ status: 200, value: null })
+      await expect(pending).rejects.toBeInstanceOf(StaleEvidenceReadError)
+    })
+    expect(result.current.check).toBeNull()
+    expect(result.current.message).toBe('')
+    expect(result.current.error).toBe('')
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('after invalidation, an old multi-hop receipt cannot cause a further scoped request', async () => {
+    let resolveReceipt!: (value: Awaited<ReturnType<typeof readReceipt>>) => void
+    vi.mocked(readReceipt).mockImplementationOnce(
+      () => new Promise(resolve => { resolveReceipt = resolve })
+    )
+    const { result } = renderHook(() => useEvidence())
+    let pending!: ReturnType<typeof result.current.refreshEvidenceChain>
+    act(() => {
+      pending = result.current.refreshEvidenceChain(
+        'cluster-a', 'proj-a', 'op-old', 'token-123'
+      )
+    })
+    act(() => result.current.invalidate())
+    await act(async () => {
+      resolveReceipt({ status: 200, value: null })
+      await expect(pending).rejects.toBeInstanceOf(StaleEvidenceReadError)
+    })
+    expect(readResource).not.toHaveBeenCalled()
+    expect(readExecution).not.toHaveBeenCalled()
+    expect(result.current.check).toBeNull()
+  })
+
+  it('an older completed request cannot overwrite a newer successful readback', async () => {
+    const newReadback = { status: 'desired-visible' as const, detail: 'new', desired: { generation: 2 } }
+    vi.mocked(classifyDesiredReadback).mockReturnValue(newReadback as any)
+    let resolveOld!: (value: Awaited<ReturnType<typeof readResource>>) => void
+    vi.mocked(readResource)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+      .mockResolvedValueOnce({ status: 200, value: null })
+    const { result } = renderHook(() => useEvidence())
+    let pending!: ReturnType<typeof result.current.readBackDesired>
+    act(() => {
+      pending = result.current.readBackDesired(
+        {} as any, 'cluster-a', 'proj-a', 'op-old', 'token-123'
+      )
+    })
+    await act(async () => {
+      await result.current.readBackDesired(
+        {} as any, 'cluster-a', 'proj-a', 'op-new', 'token-123'
+      )
+    })
+    expect(result.current.check?.readback.detail).toBe('new')
+    await act(async () => {
+      resolveOld({ status: 200, value: null })
+      await expect(pending).rejects.toBeInstanceOf(StaleEvidenceReadError)
+    })
+    expect(result.current.check?.readback.detail).toBe('new')
+    expect(result.current.loading).toBe(false)
+  })
+
+  it('a denied new read clears an older previously successful evidence result', async () => {
+    vi.mocked(classifyDesiredReadback).mockReturnValue({
+      status: 'desired-visible', detail: 'old', desired: { generation: 1 },
+    } as any)
+    vi.mocked(readResource)
+      .mockResolvedValueOnce({ status: 200, value: null })
+      .mockRejectedValueOnce(new Error('membership revoked'))
+    const { result } = renderHook(() => useEvidence())
+    await act(async () => {
+      await result.current.readBackDesired(
+        {} as any, 'cluster-a', 'proj-a', 'op-a', 'token-123'
+      )
+    })
+    expect(result.current.check).not.toBeNull()
+    await act(async () => {
+      await expect(result.current.readBackDesired(
+        {} as any, 'cluster-a', 'proj-a', 'op-b', 'token-123'
+      )).rejects.toThrow('membership revoked')
+    })
+    expect(result.current.check).toBeNull()
+    expect(result.current.message).toBe('')
+    expect(result.current.error).toBe('membership revoked')
   })
 })
