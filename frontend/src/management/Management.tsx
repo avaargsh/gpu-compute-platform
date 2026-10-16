@@ -16,7 +16,7 @@ import { useInventory } from '@/management/hooks/useInventory'
 import { useResource } from '@/management/hooks/useResource'
 import { StaleReceiptReadError, useReceipt } from '@/management/hooks/useReceipt'
 import { useOperation } from '@/management/hooks/useOperation'
-import { useEvidence } from '@/management/hooks/useEvidence'
+import { StaleEvidenceReadError, useEvidence } from '@/management/hooks/useEvidence'
 import {
   listRecentOperations,
   createOperationId,
@@ -80,6 +80,7 @@ export function ManagementApp() {
   const {
     readBackDesired: readBackDesiredFn,
     refreshEvidenceChain: refreshEvidenceChainFn,
+    invalidate: invalidateEvidence,
   } = useEvidence()
 
   const [cluster, setCluster] = useState('')
@@ -125,10 +126,11 @@ export function ManagementApp() {
   // 回执与证据状态，避免旧 note 与新 desired 区在 DOM 中同时出现。
   const clearResult = useCallback(() => {
     invalidateReceipt()
+    invalidateEvidence()
     setActiveReceipt(null)
     setActiveEvidence(null)
     setFeedback(null)
-  }, [invalidateReceipt])
+  }, [invalidateReceipt, invalidateEvidence])
 
   // Typed scope edits, project selection and OIDC identity transitions also
   // invalidate a pending read, even when the user does not click a new query.
@@ -278,33 +280,51 @@ export function ManagementApp() {
 
   const handleReadBackCheck = useCallback(async () => {
     if (!activeReceipt) return
+    const submitted = { session, cluster, project, operationId }
+    const stillCurrent = () => {
+      const current = receiptContext.current
+      return current.authenticated && current.session === submitted.session &&
+        current.cluster === submitted.cluster && current.project === submitted.project &&
+        current.operationId === submitted.operationId
+    }
+    setActiveEvidence(null)
     try {
-      await token()
+      const accessToken = token()
       const { check, message: msg } = await readBackDesiredFn(
-        activeReceipt, cluster, project, operationId, token()
+        activeReceipt, cluster, project, operationId, accessToken
       )
+      if (!stillCurrent()) return
       setActiveEvidence(check)
       setFeedback({ kind: 'status', text: msg })
     } catch (e) {
+      if (e instanceof StaleEvidenceReadError || !stillCurrent()) return
       setFeedback({ kind: 'alert', text: errMsg(e, '回读 Desired 失败') })
     }
-  }, [activeReceipt, cluster, project, operationId, token, readBackDesiredFn])
+  }, [activeReceipt, session, cluster, project, operationId, token, readBackDesiredFn])
 
   const handleEvidenceRefresh = useCallback(async () => {
-    // 镜像 Vue refreshEvidenceChain()：不依赖本地 activeReceipt，按 operationId
-    // 从服务端重新读取回执。允许在读取 desired 之后（回执已被 clear）继续核对。
+    // Read the original audited operation on the server; no implicit retry.
+    const submitted = { session, cluster, project, operationId }
     clearResult()
+    const stillCurrent = () => {
+      const current = receiptContext.current
+      return current.authenticated && current.session === submitted.session &&
+        current.cluster === submitted.cluster && current.project === submitted.project &&
+        current.operationId === submitted.operationId
+    }
     try {
-      await token()
+      const accessToken = token()
       const { check, message: msg } = await refreshEvidenceChainFn(
-        cluster, project, operationId, token()
+        cluster, project, operationId, accessToken
       )
+      if (!stillCurrent()) return
       setActiveEvidence(check)
       setFeedback({ kind: 'status', text: msg })
     } catch (e) {
+      if (e instanceof StaleEvidenceReadError || !stillCurrent()) return
       setFeedback({ kind: 'alert', text: errMsg(e, '证据链核对失败') })
     }
-  }, [cluster, project, operationId, token, refreshEvidenceChainFn, clearResult])
+  }, [session, cluster, project, operationId, token, refreshEvidenceChainFn, clearResult])
 
   const handleListRecentOps = useCallback(async () => {
     try {
