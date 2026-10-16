@@ -34,16 +34,24 @@ func assertNoKubernetesDeletes(t *testing.T, client *kubefake.Clientset) {
 
 func TestInspectDRAClaimReadOnlyDecisions(t *testing.T) {
 	cases := []struct {
-		name string
-		claim *resourcev1.ResourceClaim
-		state string
+		name   string
+		claim  *resourcev1.ResourceClaim
+		state  string
 		reason string
 	}{
 		{name: "absent", state: ClaimDeletionAbsent},
 		{name: "matching", claim: ownedDeletionClaim(), state: ClaimDeletionReady},
 		{name: "legacy-unlabeled", claim: func() *resourcev1.ResourceClaim { c := ownedDeletionClaim(); c.Labels = nil; return c }(), state: ClaimDeletionManualReview, reason: "MissingWorkloadOwner"},
-		{name: "owner-mismatch", claim: func() *resourcev1.ResourceClaim { c := ownedDeletionClaim(); c.Labels["ai.compute/workload"] = "job-other"; return c }(), state: ClaimDeletionManualReview, reason: "WorkloadOwnerMismatch"},
-		{name: "generation-mismatch", claim: func() *resourcev1.ResourceClaim { c := ownedDeletionClaim(); c.Annotations[generationAnnotation] = "8"; return c }(), state: ClaimDeletionManualReview, reason: "GenerationMismatch"},
+		{name: "owner-mismatch", claim: func() *resourcev1.ResourceClaim {
+			c := ownedDeletionClaim()
+			c.Labels["ai.compute/workload"] = "job-other"
+			return c
+		}(), state: ClaimDeletionManualReview, reason: "WorkloadOwnerMismatch"},
+		{name: "generation-mismatch", claim: func() *resourcev1.ResourceClaim {
+			c := ownedDeletionClaim()
+			c.Annotations[generationAnnotation] = "8"
+			return c
+		}(), state: ClaimDeletionManualReview, reason: "GenerationMismatch"},
 		{name: "missing-uid", claim: func() *resourcev1.ResourceClaim { c := ownedDeletionClaim(); c.UID = ""; return c }(), state: ClaimDeletionManualReview, reason: "MissingKubernetesIdentity"},
 		{name: "missing-version", claim: func() *resourcev1.ResourceClaim { c := ownedDeletionClaim(); c.ResourceVersion = ""; return c }(), state: ClaimDeletionManualReview, reason: "MissingKubernetesIdentity"},
 	}
@@ -85,7 +93,7 @@ func TestDRADeletePreflightBlocksLegacyClaimBeforeRemovingJob(t *testing.T) {
 
 func TestDRADeletePreflightCannotAuthorizeWrongGenerationOrOwner(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		change func(*resourcev1.ResourceClaim)
 	}{
 		{"different-generation", func(c *resourcev1.ResourceClaim) { c.Annotations[generationAnnotation] = "8" }},
