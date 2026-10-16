@@ -1,19 +1,16 @@
 import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
+import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
-import AutoImport from 'unplugin-auto-import/vite'
-import Components from 'unplugin-vue-components/vite'
-import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
-    vue(),
-    AutoImport({
-      resolvers: [ElementPlusResolver()],
-    }),
-    Components({
-      resolvers: [ElementPlusResolver()],
+    react({
+      babel: {
+        plugins: [
+          ['babel-plugin-react-compiler', { target: '19' }],
+        ],
+      },
     }),
   ],
   resolve: {
@@ -31,6 +28,27 @@ export default defineConfig({
       '/ws': {
         target: 'ws://localhost:8000',
         ws: true,
+      },
+    },
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: true,
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        portal: resolve(__dirname, 'portal.html'),
+        management: resolve(__dirname, 'management.html'),
+      },
+      output: {
+        manualChunks: (id) => {
+          if (id.includes('echarts')) return 'echarts'
+          if (id.includes('react-router')) return 'router'
+          if (id.includes('@radix-ui')) return 'radix-ui'
+          if (id.includes('lucide-react') || id.includes('clsx') || id.includes('tailwind-merge') || id.includes('class-variance-authority')) return 'ui'
+          if (id.includes('@tanstack/react-query')) return 'query'
+          if (id.includes('react') || id.includes('react-dom')) return 'vendor'
+        },
       },
     },
   },

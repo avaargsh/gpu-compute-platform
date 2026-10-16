@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+tsconfig.tsbuildinfo
+dist/
+test-results/
+playwright-report/
+package.json.vue.bak
