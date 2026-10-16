@@ -155,6 +155,30 @@ func (p *Provider) DeleteWorkload(ctx context.Context, projection baseprovider.W
 		fmt.Sprintf("k8s://%s/namespaces/%s/jobs/%s", projection.ClusterID, projection.Namespace, jobName),
 	}
 
+	// Inspect DRA ownership *before* deleting its Job: older claims lack
+	// the new ownership label, and deleting the Job first would leave an
+	// orphan with a blocked Finalizer. This read is not an authorization
+	// token; DeleteResourceClaim rechecks metadata with UID/RV CAS.
+	if projection.AcceleratorBinding.AllocationMode == domain.AcceleratorAllocationDRA {
+		claimName := resourceName("accelerator", string(projection.WorkloadID))
+		assessment, inspectErr := p.client.InspectResourceClaim(
+			ctx, projection.Namespace, claimName, jobName, projection.Generation,
+		)
+		if inspectErr != nil {
+			return baseprovider.DeletionObservation{}, fmt.Errorf("inspect resource claim before deleting job: %w", classifyProviderError(inspectErr))
+		}
+		switch assessment.State {
+		case ClaimDeletionReady, ClaimDeletionAbsent:
+			// A 404 means no Claim needs removal; the Job can be cleaned up.
+		case ClaimDeletionManualReview:
+			return baseprovider.DeletionObservation{}, fmt.Errorf(
+				"resource claim %s needs operator review before deleting job: %s", claimName, assessment.Reason,
+			)
+		default:
+			return baseprovider.DeletionObservation{}, fmt.Errorf("resource claim preflight returned unsupported decision")
+		}
+	}
+
 	gone, err := p.client.DeleteJob(ctx, projection.Namespace, jobName, projection.Generation)
 	if err != nil {
 		return baseprovider.DeletionObservation{}, fmt.Errorf("delete job: %w", classifyProviderError(err))
