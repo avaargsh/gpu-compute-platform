@@ -39,6 +39,13 @@ ALTER TABLE management_operation_audit
 CREATE INDEX IF NOT EXISTS management_audit_project_time_idx
  ON management_operation_audit (project_id, created_at DESC);
 
+-- Subject-owned keyset discovery uses issuer+subject+project+cluster equality
+-- before the timestamp/ID sort. LIMIT 26 alone cannot bound database work.
+-- The time column is the audit transaction-start timestamp, not commit order.
+CREATE INDEX IF NOT EXISTS management_audit_owner_recent_idx
+ ON management_operation_audit
+ (issuer, subject, project_id, cluster_id, created_at DESC, request_id DESC);
+
 
 -- Read-only Management API login must not receive UPDATE on authorization
 -- tables. PostgreSQL SELECT ... FOR SHARE does require UPDATE privilege, so
