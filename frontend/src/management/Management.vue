@@ -138,19 +138,22 @@
 
     <section class="management-card">
       <h2>5. 操作回执与恢复</h2>
-      <p>如果本标签的操作 ID 丢失，可按当前 OIDC 登录与项目授权查询最近 25 条本人操作索引。
-        索引仅帮助找回原始操作 ID；它不是写入回执，也不证明 GPU 执行或删除完成。</p>
+      <p>如果本标签的操作 ID 丢失，可按当前 OIDC 登录和项目授权按页查询本人历史操作。
+        每页最多 25 条，按审计事务时间排序（不是严格提交顺序），分页不是事务快照。
+        索引仅帮助找回原始 ID，不证明 GPU 执行、删除完成或允许盲目重试。</p>
       <button type="button" :disabled="!authenticated || busy || !cluster || !project"
         @click="loadRecentOperations">查询本项目最近操作（只读）</button>
       <div v-if="activeServerOperations" class="management-status" role="region" aria-label="本人最近操作索引">
         <p v-if="!activeServerOperations.items.length">当前项目没有可见的本人操作记录；不代表没有进行中的未知操作。</p>
         <ul>
           <li v-for="item in activeServerOperations.items" :key="item.requestId">
-            {{ item.kind }}/{{ item.resourceId }} · {{ item.action }} · {{ item.committedAt }}
+            {{ item.kind }}/{{ item.resourceId }} · {{ item.action }} · 审计时间 {{ item.recordedAt }}
             <button type="button" :disabled="busy" @click="selectRecentOperation(item)">选择原操作 ID</button>
           </li>
         </ul>
-        <p v-if="activeServerOperations.truncated">只显示最近 25 条，历史不完整；旧操作仍需另外保存的 ID 查询。</p>
+        <button v-if="activeServerOperations.nextCursor" type="button" :disabled="busy"
+          @click="loadRecentOperations(activeServerOperations.nextCursor)">加载更早的操作（下一页）</button>
+        <p v-if="activeServerOperations.hasMore">尚有更早的记录；本页不是完整历史，晚提交但较早启动的事务也可能位于后续页。</p>
       </div>
       <div v-if="recentOperation && authenticated" class="management-status">
         最近一次操作（仅当前浏览器标签）：
@@ -585,7 +588,7 @@ function selectProject(item: ProjectAccess) {
   error.value = ''
 }
 
-async function loadRecentOperations() {
+async function loadRecentOperations(after?: string) {
   if (busy.value) return
   error.value = ''
   message.value = ''
@@ -595,19 +598,25 @@ async function loadRecentOperations() {
   const clusterId = cluster.value
   const projectId = project.value
   try {
-    const result = await listRecentOperations(clusterId, projectId, token())
+    if (after && (!activeServerOperations.value || activeServerOperations.value.nextCursor !== after)) {
+      throw new Error('原操作索引的分页游标已失效，请重新读取')
+    }
+    const result = await listRecentOperations(clusterId, projectId, token(), after)
     if (!activeReadContext(started, session.value, anchor, operationIndexAnchor.value)) return
     const page = result.value
-    if (!page || !Array.isArray(page.items) || page.items.length > 25 || typeof page.truncated !== 'boolean' ||
+    if (!page || !Array.isArray(page.items) || page.items.length > 25 ||
+        typeof page.hasMore !== 'boolean' ||
+        (page.hasMore && (!page.nextCursor || !/^[a-zA-Z0-9_-]{1,256}$/.test(page.nextCursor))) ||
+        (!page.hasMore && page.nextCursor !== null) ||
         !page.items.every(item => /^[0-9a-f]{32}$/.test(item.requestId) &&
           /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(item.resourceId) &&
           (item.kind === 'Workload' || item.kind === 'ComputePool') &&
           ['create', 'update', 'delete-request'].includes(item.action) &&
-          typeof item.committedAt === 'string')) {
+          typeof item.recordedAt === 'string')) {
       throw new Error('操作索引格式无效，已拒绝使用')
     }
     serverOperationIndex.value = { session: started!, anchor, page }
-    message.value = '已读取本人最近操作索引；选择记录后仍需独立查询回执'
+    message.value = '已读取本页操作索引；选择原操作后仍需独立查询服务端回执'
   } catch (e) {
     if (!activeReadContext(started, session.value, anchor, operationIndexAnchor.value)) return
     serverOperationIndex.value = null
