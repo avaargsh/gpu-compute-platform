@@ -1,11 +1,11 @@
 import { defineConfig } from 'vite'
-import vue from '@vitejs/plugin-vue'
+import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 
 // Developer-only standalone entry; never expose the unauthenticated Go API
 // through a public reverse proxy until control-plane RBAC is enforced.
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [react()],
   resolve: { alias: { '@': resolve(__dirname, 'src') } },
   server: {
     host: '127.0.0.1',

@@ -3,6 +3,8 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import { Plus } from '@/components/ui/icons'
+import { useTasksQuery } from '@/hooks/useTasks'
+import { Link } from 'react-router-dom'
 
 const statusColor = (status: string) => {
   switch (status) {
@@ -15,12 +17,7 @@ const statusColor = (status: string) => {
 }
 
 export function TaskListPage() {
-  const tasks = [
-    { id: '1', name: '单细胞扰动预测', status: 'running', gpu_usage: 65, created_at: '2024-01-15' },
-    { id: '2', name: 'RNA-seq 表达分析', status: 'completed', gpu_usage: 0, created_at: '2024-01-14' },
-    { id: '3', name: '蛋白-配体预测', status: 'failed', gpu_usage: 0, created_at: '2024-01-13' },
-    { id: '4', name: '基因组注释', status: 'pending', gpu_usage: 0, created_at: '2024-01-12' },
-  ]
+  const { data: tasks, isLoading, error } = useTasksQuery()
 
   return (
     <div className="space-y-6">
@@ -29,45 +26,55 @@ export function TaskListPage() {
           <CardTitle className="text-lg font-semibold">任务管理</CardTitle>
           <div className="flex items-center gap-2">
             <Button asChild>
-              <a href="/tasks/create">
+              <Link to="/tasks/create">
                 <Plus size={18} strokeWidth={2} /> 新建任务
-              </a>
+              </Link>
             </Button>
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[30%]">任务名称</TableHead>
-                  <TableHead className="w-[20%]">状态</TableHead>
-                  <TableHead className="w-[15%]">GPU 使用</TableHead>
-                  <TableHead className="w-[20%]">创建时间</TableHead>
-                  <TableHead className="text-right w-[15%]">操作</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {tasks.map((task) => (
-                  <TableRow key={task.id}>
-                    <TableCell>{task.name}</TableCell>
-                    <TableCell>
-                      <Badge variant={statusColor(task.status)}>
-                        {task.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{task.gpu_usage}%</TableCell>
-                    <TableCell>{task.created_at}</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="outline" size="sm" asChild>
-                        <a href={`/tasks/${task.id}`}>详情</a>
-                      </Button>
-                    </TableCell>
+          {isLoading ? (
+            <div className="text-muted text-sm py-8 text-center">加载中…</div>
+          ) : error ? (
+            <div className="text-destructive text-sm py-8 text-center">
+              加载任务列表失败：{error instanceof Error ? error.message : '未知错误'}
+            </div>
+          ) : !tasks?.length ? (
+            <div className="text-muted text-sm py-8 text-center">暂无任务</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[30%]">任务名称</TableHead>
+                    <TableHead className="w-[20%]">状态</TableHead>
+                    <TableHead className="w-[15%]">GPU 使用</TableHead>
+                    <TableHead className="w-[20%]">创建时间</TableHead>
+                    <TableHead className="text-right w-[15%]">操作</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {tasks.map((task) => (
+                    <TableRow key={task.id}>
+                      <TableCell>{task.name}</TableCell>
+                      <TableCell>
+                        <Badge variant={statusColor(task.status)}>
+                          {task.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{task.gpu_usage}%</TableCell>
+                      <TableCell>{task.created_at}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="outline" size="sm" asChild>
+                          <Link to={`/tasks/${task.id}`}>详情</Link>
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

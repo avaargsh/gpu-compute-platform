@@ -56,9 +56,9 @@ TableRow.displayName = 'TableRow'
 
 const TableCell = React.forwardRef<
   HTMLTableCellElement,
-  React.HTMLAttributes<HTMLTableCellElement>
+  React.TdHTMLAttributes<HTMLTableCellElement>
 >(({ className, ...props }, ref) => (
-  <th
+  <td
     ref={ref}
     className={cn('p-4 align-middle [&_span]:align-baseline', className)}
     {...props}

@@ -14,7 +14,6 @@ import {
 } from '@/management/readback'
 import {
   classifyScopedExecution,
-  type ScopedExecution,
 } from '@/management/execution'
 import { verifyEvidencePair, type EvidenceCheck } from '@/management/evidence-check'
 
@@ -35,7 +34,7 @@ export function useEvidence(): UseEvidenceReturn {
   const [error, setError] = useState('')
 
   const readBackDesiredFn = useCallback(
-    async (receipt: Receipt, cluster: string, project: string, operationId: string, token: string) => {
+    async (receipt: Receipt, cluster: string, project: string, _operationId: string, token: string) => {
       setLoading(true)
       setError('')
       try {
@@ -51,7 +50,7 @@ export function useEvidence(): UseEvidenceReturn {
           const result = await readResource(target, access)
           current = result.value
         } catch (e) {
-          if (!(e as { status?: number }).status === 404) throw e
+          if ((e as { status?: number }).status !== 404) throw e
           current = null
         }
         const readback = classifyDesiredReadback(receipt, current)
@@ -67,7 +66,7 @@ export function useEvidence(): UseEvidenceReturn {
   )
 
   const readExecutionObservationFn = useCallback(
-    async (audit: Receipt, readback: DesiredReadback, cluster: string, project: string, operationId: string, token: string) => {
+    async (audit: Receipt, readback: DesiredReadback, cluster: string, project: string, _operationId: string, token: string) => {
       if (!audit || audit.kind !== 'Workload' || !readback?.desired) return
       setLoading(true)
       setError('')
@@ -93,7 +92,7 @@ export function useEvidence(): UseEvidenceReturn {
   )
 
   const refreshEvidenceChainFn = useCallback(
-    async (audit: Receipt, cluster: string, project: string, requestId: string, token: string) => {
+    async (_audit: Receipt, cluster: string, project: string, requestId: string, token: string) => {
       setLoading(true)
       setError('')
       try {
@@ -109,9 +108,9 @@ export function useEvidence(): UseEvidenceReturn {
         } as Scope
         let current
         try {
-          current = (await readResource(target, access)).value
+          current = (await readResource(target, access)).value ?? null
         } catch (e) {
-          if (!(e as { status?: number }).status === 404) throw e
+          if ((e as { status?: number }).status !== 404) throw e
           current = null
         }
         const currentReadback = classifyDesiredReadback(audit2, current)
@@ -121,9 +120,9 @@ export function useEvidence(): UseEvidenceReturn {
           current &&
           !['inconsistent', 'desired-advanced'].includes(currentReadback.status)
         ) {
-          observed = (await readExecution(target, access)).value
+          observed = (await readExecution(target, access)).value ?? null
         }
-        const evidence = verifyEvidencePair(audit2, current, observed)
+        const evidence = verifyEvidencePair(audit2, current, observed ?? null)
         setCheck(evidence)
         setMessage('原始操作回执、当前 Desired 和独立观察已完成分层核对；未发起写入或自动重试')
       } catch (e) {

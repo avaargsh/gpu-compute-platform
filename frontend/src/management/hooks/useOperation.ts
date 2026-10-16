@@ -20,7 +20,7 @@ export function useOperation(): UseOperationReturn {
   const [pointer, setPointer] = useState<OperationPointer | null>(null)
 
   const remember = useCallback(
-    (scope, method, operationId) => {
+    (scope: { cluster: string; project: string; kind: 'ComputePool' | 'Workload'; resource: string }, method: 'PUT' | 'DELETE', operationId: string) => {
       const p = rememberOperation(sessionStorage, scope, method, operationId)
       setPointer(p)
       return p

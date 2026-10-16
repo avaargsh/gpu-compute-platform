@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import {
   Button,
   Card,
@@ -9,16 +9,6 @@ import {
   CardTitle,
   Input,
   Label,
-  Badge,
-  Alert,
-  AlertTitle,
-  AlertDescription,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
   Select,
   SelectContent,
   SelectItem,
@@ -30,16 +20,16 @@ import { useProjects } from '@/management/hooks/useProjects'
 import { useInventory } from '@/management/hooks/useInventory'
 import { useResource } from '@/management/hooks/useResource'
 import { useReceipt } from '@/management/hooks/useReceipt'
-import { useEvidence } from '@/management/hooks/useEvidence'
 import { useOperation } from '@/management/hooks/useOperation'
 import {
-  readResource,
-  writeResource,
-  deleteResource,
   type Scope,
   type Kind,
   type ProjectAccess,
 } from '@/management/api'
+import {
+  parseAuthorizedPool,
+  buildAuthorizedWorkloadRequest,
+} from '@/management/workload-composer'
 
 const cardStyle: React.CSSProperties = {
   border: '1px solid',
@@ -51,18 +41,13 @@ const cardStyle: React.CSSProperties = {
 export function ManagementApp() {
   const {
     issuer,
-    setIssuer,
-    clientId,
-    setClientId,
     configured,
-    session,
     authenticated,
     busy,
     message,
     error,
     signIn,
     signOut,
-    handleOAuthCallback,
     token,
   } = useAuth()
 
@@ -72,7 +57,6 @@ export function ManagementApp() {
     items: inventoryItems,
     nextCursor,
     hasMore,
-    loading: inventoryLoading,
     loadingMore,
     listWorkloads,
     listComputePools,
@@ -80,19 +64,15 @@ export function ManagementApp() {
 
   const {
     desired,
-    loading: resourceLoading,
     clearDesired,
     readResource: readResourceFn,
     writeResource: writeResourceFn,
     deleteResource: deleteResourceFn,
   } = useResource()
 
-  const { receipt, loading: receiptLoading, readReceipt: readReceiptFn } = useReceipt()
+  const { readReceipt: readReceiptFn } = useReceipt()
 
-  const { check: evidenceCheck, loading: evidenceLoading, refreshEvidenceChain } =
-    useEvidence()
-
-  const { pointer: operationPointer, remember, recover, forget } = useOperation()
+  const { pointer: operationPointer, recover, forget } = useOperation()
 
   const [cluster, setCluster] = useState('')
   const [project, setProject] = useState('')
@@ -179,13 +159,16 @@ export function ManagementApp() {
   const handleWrite = useCallback(async () => {
     try {
       JSON.parse(requestJSON)
-      const opId = operationId || createOperationId()
+      // Generate a fresh idempotency key for each new mutation.
+      // The server binds a key to an identical operation digest and
+      // rejects mismatched reuse, so reuse is reserved for explicit retry.
+      const opId = createOperationId()
       setOperationId(opId)
       await writeResourceFn(scope, token(), requestJSON, opId)
     } catch {
       // error handled in hook
     }
-  }, [scope, token, writeResourceFn, requestJSON, operationId])
+  }, [scope, token, writeResourceFn, requestJSON])
 
   const handleRemove = useCallback(async () => {
     if (!desired) return
@@ -199,26 +182,40 @@ export function ManagementApp() {
   const handleReceipt = useCallback(async () => {
     try {
       await token()
-      await readReceiptFn(cluster, project, operationId, token())
-      setActiveReceipt(receipt)
+      const result = await readReceiptFn(cluster, project, operationId, token())
+      if (result) setActiveReceipt(result)
     } catch {
       // error handled in hook
     }
-  }, [cluster, project, operationId, token, readReceiptFn, receipt])
+  }, [cluster, project, operationId, token, readReceiptFn])
 
   const handleCopyOperationId = useCallback(async () => {
     await navigator.clipboard.writeText(operationId)
   }, [operationId])
 
-  const handleReadBackDesired = useCallback(async () => {
-    if (!activeReceipt) return
+  const handleGenerateWorkload = useCallback(() => {
     try {
-      await token()
-      setActiveReadback({ status: 'desired-visible', detail: '回读完成', desired })
+      if (!desired) throw new Error('请先从 PostgreSQL 读取授权 ComputePool')
+      const pool = parseAuthorizedPool(cluster, project, desired)
+      const { target, requestJSON: json } = buildAuthorizedWorkloadRequest(
+        pool,
+        {
+          id: workloadID,
+          image: workloadImage,
+          acceleratorClass: workloadAcceleratorClass,
+          quota: workloadQuota,
+          commandJSON: workloadCommandJSON,
+        },
+        cluster,
+        project
+      )
+      setKind(target.kind)
+      setResource(target.resource)
+      setRequestJSON(json)
     } catch {
-      // error handled
+      // error shown via UI state
     }
-  }, [activeReceipt, token, desired])
+  }, [cluster, project, desired, workloadID, workloadImage, workloadAcceleratorClass, workloadQuota, workloadCommandJSON])
 
   const handleRestoreOperation = useCallback(() => {
     const p = recover()
@@ -413,10 +410,8 @@ export function ManagementApp() {
             <div className="flex flex-col">
               <Label htmlFor="kind-select">类型</Label>
               <Select
-                id="kind-select"
                 value={kind}
                 onValueChange={(v) => setKind(v as Kind)}
-                className="w-full"
               >
                 <SelectTrigger>
                   <SelectValue>{kind}</SelectValue>
@@ -506,10 +501,8 @@ export function ManagementApp() {
             <div className="flex flex-col">
               <Label htmlFor="workload-accelerator-class">加速器类型</Label>
               <Select
-                id="workload-accelerator-class"
                 value={workloadAcceleratorClass}
                 onValueChange={(v) => setWorkloadAcceleratorClass(v as string)}
-                className="w-full"
               >
                 <SelectTrigger>
                   <SelectValue>{workloadAcceleratorClass || '未选择'}</SelectValue>
@@ -551,7 +544,7 @@ export function ManagementApp() {
             />
           </div>
           <Button
-            onClick={() => {}}
+            onClick={handleGenerateWorkload}
             disabled={busy}
             className="bg-[#357d73] text-white px-4 py-2 rounded-md"
           >

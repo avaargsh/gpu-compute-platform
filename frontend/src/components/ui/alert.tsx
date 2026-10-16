@@ -52,21 +52,29 @@ AlertDialogDescription.displayName = AlertDialogPrimitive.Description.displayNam
 
 // 简易 Alert 组件（非模态，用于消息提示）
 interface AlertProps extends React.HTMLAttributes<HTMLDivElement> {
-  variant?: 'default' | 'destructive'
+  variant?: 'default' | 'destructive' | 'warning'
+  type?: string
+  title?: string
+  closable?: boolean
+  showIcon?: boolean
 }
 
 const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
-  ({ className, variant = 'default', ...props }, ref) => {
+  ({ className, variant = 'default', type: _type, title, closable: _closable, showIcon: _showIcon, children, ...props }, ref) => {
     const variants = {
       default: 'border border-border bg-background text-foreground',
       destructive: 'border border-destructive/50 bg-destructive/10 text-destructive',
+      warning: 'border border-warning/50 bg-warning/10 text-warning',
     }
     return (
       <div
         ref={ref}
         className={cn('rounded-lg p-4', variants[variant], className)}
         {...props}
-      />
+      >
+        {title && <div className="font-medium">{title}</div>}
+        {children}
+      </div>
     )
   }
 )

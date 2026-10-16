@@ -8,7 +8,7 @@ export interface UseReceiptReturn {
   loading: boolean
   message: string
   error: string
-  readReceipt: (cluster: string, project: string, operationId: string, token: string) => Promise<void>
+  readReceipt: (cluster: string, project: string, operationId: string, token: string) => Promise<Receipt | null>
 }
 
 export function useReceipt(): UseReceiptReturn {
@@ -18,7 +18,7 @@ export function useReceipt(): UseReceiptReturn {
   const [error, setError] = useState('')
 
   const readReceiptFn = useCallback(
-    async (cluster: string, project: string, operationId: string, token: string) => {
+    async (cluster: string, project: string, operationId: string, token: string): Promise<Receipt | null> => {
       setLoading(true)
       setError('')
       try {
@@ -26,8 +26,10 @@ export function useReceipt(): UseReceiptReturn {
         if (!result.value) throw new Error('服务端未返回有效的操作回执')
         setReceipt(result.value)
         setMessage('仅证明 Desired 写入和操作审计已提交，非 Workload 执行证明')
+        return result.value
       } catch (e) {
         setError(e instanceof Error ? e.message : '查询回执失败')
+        return null
       } finally {
         setLoading(false)
       }

@@ -8,19 +8,22 @@ import {
   clearPendingLogin,
   type OAuthConfig,
   type AccessSession,
-  type Discovery,
 } from '@/management/auth'
 import { isSessionActive } from '@/management/workload-composer'
 
 export interface UseAuthReturn {
   issuer: string
+  setIssuer: (v: string) => void
   clientId: string
+  setClientId: (v: string) => void
   configured: boolean
   session: AccessSession | null
   authenticated: boolean
   busy: boolean
   message: string
+  setMessage: (v: string) => void
   error: string
+  setError: (v: string) => void
   signIn: () => Promise<void>
   signOut: () => void
   handleOAuthCallback: () => Promise<void>
@@ -84,7 +87,8 @@ export function useAuth(): UseAuthReturn {
       setError('回调失败：未配置身份提供商')
       return
     }
-    const params = new URLSearchParams(window.location.search)
+    const callbackSearch = window.location.search
+    const params = new URLSearchParams(callbackSearch)
     if (!params.has('code') && !params.has('error')) return
     window.history.replaceState({}, '', window.location.pathname)
     setBusy(true)
@@ -94,7 +98,7 @@ export function useAuth(): UseAuthReturn {
       const newSession = await finishLogin(
         config,
         discovery,
-        window.location.search,
+        callbackSearch,
         redirectUri,
         sessionStorage
       )

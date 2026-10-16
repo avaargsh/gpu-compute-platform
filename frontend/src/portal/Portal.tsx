@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -12,7 +12,6 @@ import {
   Badge,
   Alert,
   AlertTitle,
-  AlertDescription,
   Table,
   TableBody,
   TableCell,
@@ -33,7 +32,6 @@ import {
 } from '@/components/ui'
 import { loadSnapshot, type PortalSnapshot, type ResourceRow } from './api'
 import { projectSummaries, triageFindings, type Finding } from './project-model'
-import { isSafeSegment } from './api'
 
 type View =
   | 'overview'
@@ -176,13 +174,6 @@ export function PortalApp() {
     setDrawerOpen(false)
   }, [])
 
-  const handleOpenProject = (id: string) => {
-    setProjectFilter(id)
-    setKindFilter('all')
-    setKeyword('')
-    setView('resources')
-  }
-
   const handleShowFinding = (finding: Finding) => {
     const row = snapshot?.rows.find(
       (x) => x.desired.kind === finding.kind && x.desired.id === finding.resourceId
@@ -193,10 +184,6 @@ export function PortalApp() {
   const showDetails = (row: ResourceRow) => {
     setSelected(row)
     setDrawerOpen(true)
-  }
-
-  const handleSelectView = (nextView: View) => {
-    setView(nextView)
   }
 
   const localFormatTime = useCallback((value?: string | null): string => {
@@ -332,7 +319,7 @@ export function PortalApp() {
                 没有模拟数据，也不允许在这里创建或删除资源。
               </p>
               <div className="welcome-hint mt-4 text-xs text-muted-foreground flex flex-col gap-1">
-                <code>GET /api/v1/operator/clusters/{{clusterID}}/snapshot</code>
+                <code>GET /api/v1/operator/clusters/{'{clusterId}'}/snapshot</code>
                 <span>· Read-only / scoped</span>
               </div>
             </div>
@@ -349,9 +336,9 @@ export function PortalApp() {
                   formatTime={localFormatTime}
                 />
               )}
-              {view === 'projects' && <ProjectsView projects={projects} findings={findings} />}
-              {view === 'resources' && <ResourcesView visibleRows={visibleRows} snapshot={snapshot} />}
-              {view === 'jobs' && <JobsView visibleRows={visibleRows} snapshot={snapshot} />}
+              {view === 'projects' && <ProjectsView projects={projects} />}
+              {view === 'resources' && <ResourcesView visibleRows={visibleRows} snapshot={snapshot} onLoadMore={handleLoadMore} kindFilter={kindFilter} setKindFilter={setKindFilter} keyword={keyword} setKeyword={setKeyword} />}
+              {view === 'jobs' && <JobsView visibleRows={visibleRows} />}
               {view === 'serving' && <ServingView snapshot={snapshot} />}
               {view === 'diagnostics' && <DiagnosticsView findings={findings} onShowFinding={handleShowFinding} />}
               {view === 'integrations' && <IntegrationsView snapshot={snapshot} />}
@@ -369,6 +356,7 @@ export function PortalApp() {
                 {selected?.desired.id} <Badge>{selected?.desired.kind}</Badge>
               </DialogTitle>
             </DialogHeader>
+            {selected && (
             <DialogDescription>
               <div className="grid gap-2 text-sm">
                 <div>
@@ -418,6 +406,7 @@ export function PortalApp() {
                 <div className="text-muted-foreground text-sm">尚无可读取的证据引用</div>
               )}
             </DialogDescription>
+            )}
           </DialogContent>
         </Dialog>
       </main>
@@ -691,7 +680,7 @@ function OverviewView({
                   </TableCell>
                 </TableRow>
               ))}
-              {snapshot.rows.length === 0 && (
+              {snapshot?.rows.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center text-muted-foreground">
                     当前集群无 ComputePool / Workload
@@ -706,7 +695,7 @@ function OverviewView({
   )
 }
 
-function ProjectsView({ projects, findings }: { projects: any[]; findings: Finding[] }) {
+function ProjectsView({ projects }: { projects: any[] }) {
   return (
     <div className="space-y-6">
       <Card>
@@ -768,7 +757,7 @@ function ProjectsView({ projects, findings }: { projects: any[]; findings: Findi
   )
 }
 
-function ResourcesView({ visibleRows, snapshot }: { visibleRows: ResourceRow[]; snapshot: PortalSnapshot | null }) {
+function ResourcesView({ visibleRows, snapshot, onLoadMore, kindFilter, setKindFilter, keyword, setKeyword }: { visibleRows: ResourceRow[]; snapshot: PortalSnapshot | null; onLoadMore?: () => void; kindFilter?: string; setKindFilter?: (v: string) => void; keyword?: string; setKeyword?: (v: string) => void }) {
   return (
     <div className="space-y-6">
       <Card>
@@ -780,7 +769,7 @@ function ResourcesView({ visibleRows, snapshot }: { visibleRows: ResourceRow[]; 
             </p>
           </div>
           <div className="flex gap-2">
-            <Select defaultValue="all" onValueChange={(v) => {}}>
+            <Select defaultValue="all" onValueChange={() => {}}>
               <SelectTrigger className="w-[165px]">
                 <SelectValue placeholder="按项目筛选" />
               </SelectTrigger>
@@ -788,7 +777,7 @@ function ResourcesView({ visibleRows, snapshot }: { visibleRows: ResourceRow[]; 
                 <SelectItem value="all">所有项目</SelectItem>
               </SelectContent>
             </Select>
-            <Select defaultValue="all" onValueChange={(v) => {}}>
+            <Select defaultValue="all" value={kindFilter} onValueChange={(v) => setKindFilter?.(v)}>
               <SelectTrigger className="w-[155px]">
                 <SelectValue placeholder="全部类型" />
               </SelectTrigger>
@@ -798,7 +787,7 @@ function ResourcesView({ visibleRows, snapshot }: { visibleRows: ResourceRow[]; 
                 <SelectItem value="Workload">Workload</SelectItem>
               </SelectContent>
             </Select>
-            <Input placeholder="搜索资源 ID" className="w-[190px]" />
+            <Input placeholder="搜索资源 ID" className="w-[190px]" value={keyword} onChange={(e) => setKeyword?.(e.target.value)} />
           </div>
         </CardHeader>
         {snapshot?.truncated && (
@@ -861,7 +850,7 @@ function ResourcesView({ visibleRows, snapshot }: { visibleRows: ResourceRow[]; 
         </CardContent>
         {snapshot?.nextCursor && (
           <div className="paging-controls flex items-center gap-2 pt-4">
-            <Button variant="outline" size="sm" onClick={() => {}}>
+            <Button variant="outline" size="sm" onClick={onLoadMore}>
               继续加载下一页
             </Button>
             <span className="text-sm text-muted-foreground">
@@ -994,7 +983,7 @@ function IntegrationsView({ snapshot }: { snapshot: PortalSnapshot | null }) {
   )
 }
 
-function JobsView({ visibleRows, snapshot }: { visibleRows: ResourceRow[]; snapshot: PortalSnapshot | null }) {
+function JobsView({ visibleRows }: { visibleRows: ResourceRow[] }) {
   const workloadRows = visibleRows.filter((row) => row.desired.kind === 'Workload')
 
   return (
@@ -1030,7 +1019,7 @@ function JobsView({ visibleRows, snapshot }: { visibleRows: ResourceRow[]; snaps
                 const accelerator = spec.accelerator as { class?: string; quota?: number } | undefined
                 return (
                   <TableRow key={row.desired.kind + '/' + row.desired.id}>
-                    <TableCell>{row.desired.spec.projectID ?? '—'}</TableCell>
+                    <TableCell>{String(row.desired.spec.projectID ?? '—')}</TableCell>
                     <TableCell>{row.desired.id}</TableCell>
                     <TableCell>{accelerator?.class ?? '—'}</TableCell>
                     <TableCell>{accelerator?.quota ?? '—'}</TableCell>
