@@ -16,6 +16,9 @@ test('GET result cannot reappear after selector edits or a clock-only expiry', (
   assert.equal(isSameReadContext(current, current, 'project-a', 'project-b', 1999), false)
   assert.equal(isSameReadContext(current, current, 'same', 'same', 2000), false)
   assert.equal(isSameReadContext(current, current, 'same', 'same', 2001), false)
-  assert.equal(isSameReadContext({ expiresAt: Number.NaN }, { expiresAt: Number.NaN }, 'a', 'a', 0), false)
+  const invalid = { expiresAt: Number.NaN }
+  const infinite = { expiresAt: Number.POSITIVE_INFINITY }
+  assert.equal(isSameReadContext(invalid, invalid, 'a', 'a', 0), false)
+  assert.equal(isSameReadContext(infinite, infinite, 'a', 'a', 0), false)
   assert.equal(isSameReadContext(current, current, 'same', 'same', 1999), true)
 })
