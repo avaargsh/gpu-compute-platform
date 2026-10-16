@@ -89,6 +89,9 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,'Workload',$8,$9,0,1,$10,$11)`,
 		key := insert("alice", project, fmtID("job", int64(i+1)), action, origin.Add(time.Duration(i)*time.Minute))
 		own = append(own, key)
 	}
+	// A late-committed transaction can have an older transaction-start
+	// timestamp. The second page must still recover that operation ID.
+	lateID := insert("alice", project, "late-commit", "create", origin.Add(-time.Minute))
 	bobID := insert("bob", project, "bob-private", "create", origin.Add(40*time.Minute))
 	foreignID := insert("alice", otherProject, "foreign-project", "create", origin.Add(41*time.Minute))
 	auth, idp := oidcFixture(t)
@@ -116,6 +119,8 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,'Workload',$8,$9,0,1,$10,$11)`,
 		{"revoked-token", endpoint, 401},
 		{"provider-unavailable", endpoint, 503},
 		{"good-access-token", endpoint + "?limit=999", 400},
+		{"good-access-token", endpoint + "?after=!", 400},
+		{"good-access-token", endpoint + "?after=abc&after=def", 400},
 		{"good-access-token", strings.Replace(endpoint, "/projects/"+project+"/", "/projects/bad!id/", 1), 400},
 	} {
 		if got := call(tc.url, tc.token).Code; got != tc.status {
@@ -131,9 +136,22 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,'Workload',$8,$9,0,1,$10,$11)`,
 	if err := json.Unmarshal(result.Body.Bytes(), &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Items) != 25 || !list.Truncated || list.Items[0].RequestID != own[27] ||
-		list.Items[24].RequestID != own[3] {
+	if len(list.Items) != 25 || !list.HasMore || list.NextCursor == nil ||
+		list.Items[0].RequestID != own[27] || list.Items[24].RequestID != own[3] {
 		t.Fatalf("bounded own-operation order: %+v", list)
+	}
+	second := call(endpoint+"?after="+*list.NextCursor, "good-access-token")
+	if second.Code != 200 {
+		t.Fatalf("older audit page=%d: %s", second.Code, second.Body.String())
+	}
+	var older recentOperationList
+	if err := json.Unmarshal(second.Body.Bytes(), &older); err != nil {
+		t.Fatal(err)
+	}
+	if len(older.Items) != 4 || older.HasMore || older.NextCursor != nil ||
+		older.Items[0].RequestID != own[2] || older.Items[2].RequestID != own[0] ||
+		older.Items[3].RequestID != lateID {
+		t.Fatalf("late-committed older transaction-start row could not be recovered: %+v", older)
 	}
 	body := result.Body.String()
 	for _, secret := range []string{bobID, foreignID, "requestDigest", "priorSpec", "resultingSpec", "issuer", "subject"} {
