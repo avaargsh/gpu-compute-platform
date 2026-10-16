@@ -38,13 +38,13 @@ func TestRecentOperationsCurrentSubjectProjectAndLimitPostgres(t *testing.T) {
 	now := time.Now().UnixNano()
 	cluster, project := fmtID("audit-cluster", now), fmtID("audit-project", now)
 	otherProject := fmtID("audit-foreign", now)
-	t.Cleanup(func() {
+	defer func() {
 		for _, p := range []string{project, otherProject} {
 			_, _ = db.ExecContext(context.Background(), "DELETE FROM management_operation_audit WHERE project_id=$1", p)
 			_, _ = db.ExecContext(context.Background(), "DELETE FROM management_project_grants WHERE project_id=$1", p)
 			_, _ = db.ExecContext(context.Background(), "DELETE FROM project_bindings WHERE project_id=$1", p)
 		}
-	})
+	}()
 	for _, p := range []string{project, otherProject} {
 		if _, err := db.ExecContext(ctx,
 			"INSERT INTO project_bindings(project_id,cluster_id,namespace) VALUES($1,$2,$3)", p, cluster, p); err != nil {
@@ -116,7 +116,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,'Workload',$8,$9,0,1,$10,$11)`,
 		{"revoked-token", endpoint, 401},
 		{"provider-unavailable", endpoint, 503},
 		{"good-access-token", endpoint+"?limit=999", 400},
-		{"good-access-token", strings.Replace(endpoint, "/projects/"+project+"/", "/projects/../", 1), 404},
+		{"good-access-token", strings.Replace(endpoint, "/projects/"+project+"/", "/projects/bad!id/", 1), 400},
 	} {
 		if got := call(tc.url, tc.token).Code; got != tc.status {
 			t.Fatalf("token=%q url=%s status=%d want=%d", tc.token, tc.url, got, tc.status)
