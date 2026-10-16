@@ -10,14 +10,14 @@ test('recent own-audit discovery uses scoped same-origin bearer GET only', async
       calls.push({ url, opts })
       return Response.json({
         items: [{ requestId: '0123456789abcdef0123456789abcdef', kind: 'Workload',
-          resourceId: 'train-1', action: 'create', committedAt: '2026-10-16T01:00:00Z' }],
-        truncated: true,
+          resourceId: 'train-1', action: 'create', recordedAt: '2026-10-16T01:00:00Z' }],
+        hasMore: true, nextCursor: 'YWJj',
       })
     }
     const result = await listRecentOperations('cluster-a', 'project-a', 'valid-access-token')
     assert.equal(result.status, 200)
     assert.equal(result.value?.items[0]?.resourceId, 'train-1')
-    assert.equal(result.value?.truncated, true)
+    assert.equal(result.value?.hasMore, true)
     assert.equal(calls.length, 1)
     assert.equal(calls[0]?.url, '/api/v1/management/clusters/cluster-a/projects/project-a/operations')
     assert.equal(calls[0]?.opts.method, 'GET')
@@ -30,6 +30,10 @@ test('recent own-audit discovery uses scoped same-origin bearer GET only', async
     await assert.rejects(listRecentOperations('../foreign', 'project-a', 'valid-access-token'), /无效/)
     await assert.rejects(listRecentOperations('cluster-a', 'project/a', 'valid-access-token'), /无效/)
     assert.equal(calls.length, 1)
+    await listRecentOperations('cluster-a', 'project-a', 'valid-access-token', 'YWJj')
+    assert.equal(calls[1]?.url, '/api/v1/management/clusters/cluster-a/projects/project-a/operations?after=YWJj')
+    await assert.rejects(listRecentOperations('cluster-a', 'project-a', 'valid-access-token', '!'), /游标/)
+    assert.equal(calls.length, 2)
     globalThis.fetch = async () => new Response('', { status: 403 })
     await assert.rejects(listRecentOperations('cluster-a', 'project-a', 'valid-access-token'),
       e => e instanceof ManagementHTTPError && e.status === 403)
