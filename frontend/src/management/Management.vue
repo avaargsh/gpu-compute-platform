@@ -314,7 +314,7 @@ async function loadWorkloads(after?: string) {
         (page.hasMore && !page.nextCursor) || (!page.hasMore && page.nextCursor !== null)) {
       throw new Error('服务端返回的 Workload 列表格式异常')
     }
-    if (selected !== inventoryAnchor.value || originalSession !== session.value) {
+    if (!isSameReadContext(originalSession, session.value, selected, inventoryAnchor.value)) {
       throw new Error('列表查询期间授权身份或项目已变化，请重新查询')
     }
     const previous = after ? activeInventory.value?.items ?? [] : []
@@ -330,6 +330,7 @@ async function loadWorkloads(after?: string) {
     } }
     message.value = '已查询当前 OIDC 项目内 Workload Desired；只读、分页且不包含执行完成证明'
   } catch (e) {
+    if (!isSameReadContext(originalSession, session.value, selected, inventoryAnchor.value)) return
     inventory.value = null
     describeError(e)
   } finally { busy.value = false }
@@ -365,7 +366,7 @@ async function loadComputePools(after?: string) {
         (page.hasMore && !page.nextCursor) || (!page.hasMore && page.nextCursor !== null)) {
       throw new Error('服务端返回的 ComputePool 列表格式异常')
     }
-    if (selected !== inventoryAnchor.value || originalSession !== session.value) {
+    if (!isSameReadContext(originalSession, session.value, selected, inventoryAnchor.value)) {
       throw new Error('Pool 查询期间授权身份或项目已变化；拒绝使用缓存结果')
     }
     const previous = after ? activePoolInventory.value?.items ?? [] : []
@@ -381,6 +382,7 @@ async function loadComputePools(after?: string) {
     } }
     message.value = '已读取项目授权 ComputePool 列表；请再单独验证选中的 Pool 绑定'
   } catch (e) {
+    if (!isSameReadContext(originalSession, session.value, selected, inventoryAnchor.value)) return
     poolInventory.value = null
     describeError(e)
   } finally { busy.value = false }
@@ -405,8 +407,10 @@ async function verifyWorkloadPool() {
       cluster: clusterId, project: projectId, kind: 'ComputePool', resource: poolId,
     }, token())
     if (!result.value) throw new Error('当前项目未读取到可用 ComputePool')
-    if (session.value !== originalSession || !isSessionActive(session.value)) {
-      throw new Error('读取期间 OIDC 登录会话已改变或过期，请重新验证 ComputePool')
+    if (!isSameReadContext(originalSession, session.value,
+        JSON.stringify([clusterId, projectId, poolId]),
+        JSON.stringify([cluster.value, project.value, workloadPoolId.value]))) {
+      throw new Error('读取期间 OIDC 登录会话或范围已改变或过期，请重新验证 ComputePool')
     }
     if (cluster.value !== clusterId || project.value !== projectId || workloadPoolId.value !== poolId) {
       throw new Error('项目或 Pool 已变化，请重新读取')
@@ -416,8 +420,11 @@ async function verifyWorkloadPool() {
     workloadAcceleratorClass.value = pool.accelerators[0]?.class ?? ''
     workloadQuota.value = 1
     message.value = '已读取并验证授权 ComputePool；尚未创建 Workload'
-  } catch (e) { describeError(e) }
-  finally { busy.value = false }
+  } catch (e) {
+    if (isSameReadContext(originalSession, session.value,
+        JSON.stringify([clusterId, projectId, poolId]),
+        JSON.stringify([cluster.value, project.value, workloadPoolId.value]))) describeError(e)
+  } finally { busy.value = false }
 }
 
 function prepareWorkloadRequest() {
