@@ -9,7 +9,9 @@ import (
 )
 
 type fakeClient struct {
-	order []string
+	order      []string
+	assessment ClaimDeletionPreflight
+	inspectErr error
 }
 
 func (f *fakeClient) ApplyResourceFlavor(_ context.Context, v ResourceFlavor) error {
@@ -39,6 +41,16 @@ func (f *fakeClient) ApplyJob(_ context.Context, v Job) error {
 
 func (f *fakeClient) ObserveJob(_ context.Context, _, _ string) (JobObservation, error) {
 	return JobObservation{}, nil
+}
+func (f *fakeClient) InspectResourceClaim(_ context.Context, namespace, claimName, jobName string, generation int64) (ClaimDeletionPreflight, error) {
+	f.order = append(f.order, "inspect-claim:"+namespace+"/"+claimName)
+	if f.inspectErr != nil {
+		return ClaimDeletionPreflight{}, f.inspectErr
+	}
+	if f.assessment.State != "" {
+		return f.assessment, nil
+	}
+	return ClaimDeletionPreflight{State: ClaimDeletionReady}, nil
 }
 func (f *fakeClient) DeleteJob(_ context.Context, namespace, name string, generation int64) (bool, error) {
 	f.order = append(f.order, "delete-job:"+namespace+"/"+name)
@@ -162,6 +174,7 @@ func TestDeleteDRAWorkloadReleasesClaimAndPreservesAuditEvidence(t *testing.T) {
 	}
 
 	wantOrder := []string{
+		"inspect-claim:project-1/accelerator-train-1",
 		"delete-job:project-1/job-train-1",
 		"delete-claim:project-1/accelerator-train-1",
 	}

@@ -126,3 +126,38 @@ The control plane Desired generation must correspond to the provider Job
 generation; if a delete request advances it independently, removal will
 fail closed. That storage semantics must be validated in live cleanup
 acceptance rather than silently bypassing the guard.
+
+## DRA deletion preflight and legacy migration evidence
+
+The Kueue adapter now performs a **GET-only ResourceClaim preflight before
+deleting the workload Job**. Its decisions are `Ready` (matching generation,
+workload owner label, UID and resourceVersion), `Absent` (Kubernetes 404), or
+`ManualReview` with a stable reason:
+`GenerationMismatch`, `MissingWorkloadOwner`,
+`WorkloadOwnerMismatch`, or `MissingKubernetesIdentity`. A failed
+Kubernetes GET (including Forbidden/timeout) is an error, **never** absence.
+No Kubernetes DELETE, PATCH, label adoption, or Job teardown is permitted
+when preflight returns `ManualReview`. Even after `Ready`, the guarded
+Claim DELETE independently re-reads the object and applies UID/RV
+preconditions; a preflight verdict is not reusable deletion authority.
+
+For a preexisting unlabeled DRA Claim, first **record** the desired Workload
+ID, generation, project namespace and cluster identity from the durable
+control plane. In the target cluster, collect **read-only**:
+```sh
+kubectl -n <namespace> get job <job-name> -o json
+kubectl -n <namespace> get resourceclaim <claim-name> -o json
+```
+Inspect UID, resourceVersion, `ai.compute/generation`, owner references,
+actual Pod/Job claim references and audit history. A matching generation
+**alone does not prove ownership**; explicit operator review is still
+required. Preserve snapshots and the reconciliation error in the issue or
+release evidence, with credentials redacted. Do **not** bypass or force-delete
+the finalizer, mutate annotations/labels, or automate adoption of legacy
+claims based on matching names. An independently reviewed remediation plan
+must prove the claim is not shared or in use before authorizing any
+separate mutation. This PR does not provide a migration writer.
+
+The protected behavior can be tested with Kubernetes fake clients; a real
+kind + Kueue Golden Path by itself does **not** establish acceptance for
+production legacy DRA migration or recovery after a controller crash.
