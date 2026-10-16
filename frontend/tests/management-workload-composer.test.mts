@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildAuthorizedWorkloadRequest, parseAuthorizedPool } from '../src/management/workload-composer.ts'
+import { buildAuthorizedWorkloadRequest, parseAuthorizedPool, poolForCurrentSession, isSessionActive } from '../src/management/workload-composer.ts'
 import type { DesiredView } from '../src/management/api.ts'
 
 const project = 'research'
@@ -74,4 +74,29 @@ test('invalid Workload identity, quota, image, command and stale project prevent
   }
   assert.throws(() => buildAuthorizedWorkloadRequest(verified, form, cluster, 'foreign'))
   assert.throws(() => buildAuthorizedWorkloadRequest(verified, form, 'foreign', project))
+})
+
+test('verified ComputePool cannot be reused after logout, re-login, token expiry, or scope change', () => {
+  const verified = parseAuthorizedPool(cluster, project, pool)
+  const login = { token: 'first-login' }
+  const anotherLogin = { token: 'another-login' }
+  const selection = { pool: verified, session: login }
+  assert.equal(poolForCurrentSession(selection, login, true, cluster, project, verified.id), verified)
+  assert.equal(poolForCurrentSession(selection, null, false, cluster, project, verified.id), null)
+  assert.equal(poolForCurrentSession(selection, anotherLogin, true, cluster, project, verified.id), null)
+  assert.equal(poolForCurrentSession(selection, login, false, cluster, project, verified.id), null)
+  assert.equal(poolForCurrentSession(selection, login, true, 'other', project, verified.id), null)
+  assert.equal(poolForCurrentSession(selection, login, true, cluster, 'other', verified.id), null)
+  assert.equal(poolForCurrentSession(selection, login, true, cluster, project, 'other'), null)
+  assert.equal(poolForCurrentSession(null, login, true, cluster, project, verified.id), null)
+})
+
+test('OIDC expiry is checked against the current clock, not a cached UI boolean', () => {
+  const session = { expiresAt: 1000 }
+  assert.equal(isSessionActive(session, 999), true)
+  assert.equal(isSessionActive(session, 1000), false)
+  assert.equal(isSessionActive(session, 1001), false)
+  assert.equal(isSessionActive(null, 999), false)
+  assert.equal(isSessionActive({ expiresAt: Number.POSITIVE_INFINITY }, 999), false)
+  assert.equal(isSessionActive({ expiresAt: NaN }, 999), false)
 })
