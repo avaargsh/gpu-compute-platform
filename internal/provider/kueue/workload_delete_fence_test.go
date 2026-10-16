@@ -21,7 +21,7 @@ func ownedDeletionJob() *batchv1.Job {
 		Name: "job-train-1", Namespace: "project-1",
 		UID: types.UID("job-uid-7"), ResourceVersion: "73",
 		Annotations: map[string]string{generationAnnotation: "7"},
-		Labels: map[string]string{"ai.compute/workload": "job-train-1"},
+		Labels:      map[string]string{"ai.compute/workload": "job-train-1"},
 	}}
 }
 
@@ -30,7 +30,7 @@ func ownedDeletionClaim() *resourcev1.ResourceClaim {
 		Name: "accelerator-train-1", Namespace: "project-1",
 		UID: types.UID("claim-uid-7"), ResourceVersion: "81",
 		Annotations: map[string]string{generationAnnotation: "7"},
-		Labels: map[string]string{"ai.compute/workload": "job-train-1"},
+		Labels:      map[string]string{"ai.compute/workload": "job-train-1"},
 	}}
 }
 
@@ -60,7 +60,7 @@ func TestGuardedDeleteJobUsesActualKubernetesUIDAndResourceVersion(t *testing.T)
 
 func TestGuardedDeleteJobFailsClosedOnGenerationOwnerOrIdentityDrift(t *testing.T) {
 	cases := []struct {
-		name string
+		name   string
 		change func(*batchv1.Job)
 	}{
 		{"higher-generation-replacement", func(job *batchv1.Job) { job.Annotations[generationAnnotation] = "8" }},
@@ -138,7 +138,7 @@ func TestGuardedDeleteDRAClaimRequiresGenerationOwnerAndUID(t *testing.T) {
 
 func TestGuardedDeleteDRAClaimRejectsOldUnlabeledAndNewerClaim(t *testing.T) {
 	cases := []struct {
-		name string
+		name   string
 		change func(*resourcev1.ResourceClaim)
 	}{
 		{"legacy-unlabeled", func(claim *resourcev1.ResourceClaim) { claim.Labels = nil }},
