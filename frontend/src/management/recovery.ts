@@ -34,6 +34,26 @@ export function rememberOperation(storage: Storage, scope: Scope, method: 'PUT' 
     kind: scope.kind, resource: scope.resource, method, issuedAt: now,
   }
   if (!valid(pointer, now)) throw new Error('无效的操作记录，拒绝发送写请求')
+  // A previous request may have committed even when its HTTP ACK was lost.
+  // A single tab has only one durable recovery pointer: never overwrite a
+  // live different operation without an explicit operator decision.
+  // Read before writing, so disabled storage cannot silently hide a pointer.
+  const stored = storage.getItem(KEY)
+  if (stored !== null) {
+    const previous = recoverOperation(storage, now)
+    if (previous) {
+      if (previous.operationId === pointer.operationId &&
+          previous.cluster === pointer.cluster &&
+          previous.project === pointer.project &&
+          previous.kind === pointer.kind &&
+          previous.resource === pointer.resource &&
+          previous.method === pointer.method) {
+        // Idempotent access must not renew the original 24h recovery TTL.
+        return previous
+      }
+      throw new Error('已有尚未核对的操作 ID；请先恢复该操作、查询授权回执并保留记录。确认处理后手动清除此记录，才能发起新写入。')
+    }
+  }
   // If storage is disabled or full, fail closed BEFORE network dispatch:
   // there would be no reliable way to recover after an ambiguous response.
   storage.setItem(KEY, JSON.stringify(pointer))
