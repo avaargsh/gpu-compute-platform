@@ -100,6 +100,10 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await page.getByRole('button', { name: '查询已提交回执' }).click()
   await expect(page.getByRole('status')).toContainText('仅证明 Desired 写入和操作审计已提交')
   await expect(page.locator('pre').last()).toContainText(poolRequestID)
+  // Fresh authorized receipt retires exactly this pointer; the receipt is
+  // still visible, and its original ID stays in the form for audit.
+  expect(await page.evaluate(() => sessionStorage.getItem('gpu-management-operation-pointer-v1'))).toBeNull()
+  await expect(page.getByPlaceholder('原始 Idempotency-Key')).toHaveValue(poolRequestID)
   // This is an independent, same-subject, scoped Desired GET inferred
   // from the committed audit receipt — not a proof of Kueue success.
   await page.getByRole('button', { name: '按回执核对当前 Desired' }).click()
@@ -146,6 +150,7 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   // and independent Observation without issuing another PUT or DELETE.
   await page.getByRole('button', { name: '一键重新核对回执、Desired 与执行观察' }).click()
   await expect(page.getByRole('status')).toContainText('未发起写入或自动重试')
+  expect(await page.evaluate(() => sessionStorage.getItem('gpu-management-operation-pointer-v1'))).toBeNull()
   await expect(page.getByText('上次完整证据核对：', { exact: false })).toBeVisible()
   await expect(page.getByRole('group', { name: '独立执行状态' })).toContainText('NOT_OBSERVED')
   await expect(page.getByRole('group', { name: '独立执行状态' })).toContainText('不等于 Kueue 已准入')
@@ -177,6 +182,10 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await page.getByRole('button', { name: '从 PostgreSQL 读取' }).click()
   await page.getByRole('button', { name: '确认并发起删除请求' }).click()
   await expect(page.getByRole('alert')).toContainText('资源版本已变化、资源仍被占用')
+  // A 409 can be an idempotency conflict; don't silently erase its key.
+  // After inspecting this denial the operator explicitly discards it.
+  await page.getByRole('button', { name: '清除此操作记录' }).click()
+  await expect(page.getByPlaceholder('原始 Idempotency-Key')).toHaveValue('')
 
   // Workload deletion is a Finalizer request, not physical provider deletion.
   await page.locator('select').first().selectOption('Workload')

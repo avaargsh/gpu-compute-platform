@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { rememberOperation, recoverOperation, forgetOperation } from '../src/management/recovery.ts'
+import { rememberOperation, recoverOperation, hasUnresolvedRecoveryRecord, retireOperation, forgetOperation } from '../src/management/recovery.ts'
 
 const scope = { cluster: 'browser-ci', project: 'research', kind: 'ComputePool', resource: 'pool-a' }
 const operationId = '0123456789abcdef0123456789abcdef'
@@ -35,6 +35,67 @@ test('one-tab recovery records only scope + ID before an ambiguous write', () =>
   assert.equal(recoverOperation(storage, now + 2000), null)
 })
 
+test('an unresolved operation ID cannot be replaced by a later mutation', () => {
+  const storage = memoryStorage()
+  const original = rememberOperation(storage, scope, 'PUT', operationId, now)
+  const snapshot = JSON.stringify(storage.dump())
+  const secondId = 'abcdef0123456789abcdef0123456789'
+  assert.throws(
+    () => rememberOperation(storage, { ...scope, resource: 'pool-b' }, 'PUT', secondId, now + 1000),
+    /尚未核对的操作 ID/,
+  )
+  assert.throws(
+    () => rememberOperation(storage, scope, 'DELETE', operationId, now + 1000),
+    /尚未核对的操作 ID/,
+  )
+  assert.equal(JSON.stringify(storage.dump()), snapshot, 'failed dispatch cannot lose recovery ID')
+  assert.deepEqual(recoverOperation(storage, now + 1000), original)
+  const same = rememberOperation(storage, scope, 'PUT', operationId, now + 1000)
+  assert.deepEqual(same, original, 'identical operation is idempotent')
+  assert.equal(JSON.stringify(storage.dump()), snapshot, 'same ID must not renew recovery TTL')
+  forgetOperation(storage)
+  assert.equal(rememberOperation(storage, scope, 'PUT', secondId, now + 2000).operationId, secondId)
+})
+
+test('verified receipt retirement requires exact scope, method and original ID', () => {
+  const storage = memoryStorage()
+  const original = rememberOperation(storage, scope, 'PUT', operationId, now)
+  assert.equal(retireOperation(storage, scope, 'DELETE', operationId, now + 200), false)
+  assert.equal(retireOperation(storage, { ...scope, project: 'foreign' }, 'PUT', operationId, now + 200), false)
+  assert.equal(retireOperation(storage, scope, 'PUT', 'abcdef0123456789abcdef0123456789', now + 200), false)
+  assert.deepEqual(recoverOperation(storage, now + 200), original)
+  assert.equal(retireOperation(storage, scope, 'PUT', operationId, now + 200), true)
+  assert.equal(recoverOperation(storage, now + 200), null)
+  assert.equal(retireOperation(storage, scope, 'PUT', operationId, now + 300), false)
+})
+
+test('readable but non-removable pointer does not throw during verified receipt cleanup', () => {
+  const storage = memoryStorage()
+  const pointer = rememberOperation(storage, scope, 'PUT', operationId, now)
+  const blockedCleanup = {
+    getItem: storage.getItem,
+    setItem: storage.setItem,
+    removeItem() { throw Error('browser denied pointer cleanup') },
+  }
+  assert.equal(retireOperation(blockedCleanup, scope, 'PUT', operationId, now + 1), false)
+  assert.deepEqual(recoverOperation(storage, now + 1), pointer)
+  assert.throws(
+    () => rememberOperation(storage, scope, 'PUT', 'abcdef0123456789abcdef0123456789', now + 2),
+    /尚未核对的操作 ID/,
+  )
+})
+
+test('inaccessible recovery storage denies writes before a new pointer is dispatched', () => {
+  let writes = 0
+  const storage = {
+    getItem() { throw Error('storage reads denied') },
+    setItem() { writes++; },
+    removeItem() {},
+  }
+  assert.throws(() => rememberOperation(storage, scope, 'PUT', operationId, now), /storage reads denied/)
+  assert.equal(writes, 0)
+})
+
 test('invalid, injected, malformed and expired pointers are fail closed', () => {
   const storage = memoryStorage()
   const valid = rememberOperation(storage, scope, 'DELETE', operationId, now)
@@ -54,6 +115,46 @@ test('invalid, injected, malformed and expired pointers are fail closed', () => 
   const restored = recoverOperation(storage, now + 500)
   assert.equal('accessToken' in restored, false)
   assert.equal(restored.operationId, operationId)
+})
+
+
+test('expired or corrupt recovery markers never disappear or permit a new write', () => {
+  const nextId = 'abcdef0123456789abcdef0123456789'
+  const storage = memoryStorage()
+  const original = rememberOperation(storage, scope, 'PUT', operationId, now)
+  const expiredAt = now + 24 * 60 * 60 * 1000
+  const raw = storage.getItem('gpu-management-operation-pointer-v1')
+  assert.equal(recoverOperation(storage, expiredAt), null)
+  assert.equal(hasUnresolvedRecoveryRecord(storage, expiredAt), true)
+  assert.equal(storage.getItem('gpu-management-operation-pointer-v1'), raw)
+  assert.throws(
+    () => rememberOperation(storage, scope, 'PUT', nextId, expiredAt),
+    /已过期或损坏的操作记录/,
+  )
+  assert.equal(storage.getItem('gpu-management-operation-pointer-v1'), raw)
+  for (const malformed of ['{', 'x'.repeat(1025), JSON.stringify({ ...original, operationId: 'bad' })]) {
+    storage.setItem('gpu-management-operation-pointer-v1', malformed)
+    assert.equal(recoverOperation(storage, now + 1), null)
+    assert.equal(hasUnresolvedRecoveryRecord(storage, now + 1), true)
+    assert.throws(
+      () => rememberOperation(storage, scope, 'PUT', nextId, now + 2),
+      /已过期或损坏的操作记录/,
+    )
+    assert.equal(storage.getItem('gpu-management-operation-pointer-v1'), malformed)
+  }
+  forgetOperation(storage)
+  assert.equal(hasUnresolvedRecoveryRecord(storage, now + 3), false)
+  assert.equal(rememberOperation(storage, scope, 'PUT', nextId, now + 3).operationId, nextId)
+})
+
+test('unreadable recovery storage never authorizes another dispatch', () => {
+  const inaccessible = {
+    getItem() { throw Error('storage denied') },
+    setItem() { throw Error('writes denied') },
+    removeItem() { throw Error('cleanup denied') },
+  }
+  assert.equal(hasUnresolvedRecoveryRecord(inaccessible, now), true)
+  assert.throws(() => rememberOperation(inaccessible, scope, 'PUT', operationId, now), /storage denied/)
 })
 
 test('storage failure blocks write before operation dispatch', () => {

@@ -111,6 +111,16 @@ export class ManagementHTTPError extends Error {
   }
 }
 
+// The server's PUT=204 and DELETE=202 are exact commit-ack contracts.
+// Any other 2xx, 5xx, timeout or connection loss may have committed. Keep
+// the original Idempotency-Key and recover the authorized receipt first.
+export class ManagementMutationUncertainError extends Error {
+  constructor() {
+    super('操作结果未知：响应未能证明 Desired 事务提交或回滚。请保留原操作 ID，先查询授权回执，禁止直接使用新 ID 重试。')
+    this.name = 'ManagementMutationUncertainError'
+  }
+}
+
 function safe(segment: string): void {
   if (!SEGMENT.test(segment)) throw new Error('无效的集群、项目或资源标识符')
 }
@@ -150,10 +160,23 @@ async function request<T>(path: string, method: Method, token: string, payload?:
     if (!Number.isSafeInteger(generation) || (generation ?? 0) < 1) throw new Error('删除需要准确的 Generation')
     headers['If-Match'] = '"' + generation + '"'
   }
-  const resp = await fetch(path, {
-    method, headers, body: payload, credentials: 'omit', redirect: 'error', cache: 'no-store',
-    signal: AbortSignal.timeout(15000),
-  })
+  const mutation = method === 'PUT' || method === 'DELETE'
+  let resp: Response
+  try {
+    resp = await fetch(path, {
+      method, headers, body: payload, credentials: 'omit', redirect: 'error', cache: 'no-store',
+      signal: AbortSignal.timeout(15000),
+    })
+  } catch (e) {
+    if (mutation) throw new ManagementMutationUncertainError()
+    throw e
+  }
+  // A generic response.ok is not proof of our canonical mutation contract.
+  // A successful proxy/202/200 or an HTTP 5xx cannot settle a lost ACK.
+  if (mutation && (resp.status === 408 || resp.status >= 500 ||
+      (resp.ok && resp.status !== (method === 'PUT' ? 204 : 202)))) {
+    throw new ManagementMutationUncertainError()
+  }
   if (!resp.ok) {
     const reasons: Record<number, string> = {
       400: '请求参数无效',
