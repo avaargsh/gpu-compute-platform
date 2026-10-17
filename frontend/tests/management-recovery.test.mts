@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { rememberOperation, recoverOperation, retireOperation, forgetOperation } from '../src/management/recovery.ts'
+import { rememberOperation, recoverOperation, hasUnresolvedRecoveryRecord, retireOperation, forgetOperation } from '../src/management/recovery.ts'
 
 const scope = { cluster: 'browser-ci', project: 'research', kind: 'ComputePool', resource: 'pool-a' }
 const operationId = '0123456789abcdef0123456789abcdef'
@@ -115,6 +115,46 @@ test('invalid, injected, malformed and expired pointers are fail closed', () => 
   const restored = recoverOperation(storage, now + 500)
   assert.equal('accessToken' in restored, false)
   assert.equal(restored.operationId, operationId)
+})
+
+
+test('expired or corrupt recovery markers never disappear or permit a new write', () => {
+  const nextId = 'abcdef0123456789abcdef0123456789'
+  const storage = memoryStorage()
+  const original = rememberOperation(storage, scope, 'PUT', operationId, now)
+  const expiredAt = now + 24 * 60 * 60 * 1000
+  const raw = storage.getItem('gpu-management-operation-pointer-v1')
+  assert.equal(recoverOperation(storage, expiredAt), null)
+  assert.equal(hasUnresolvedRecoveryRecord(storage, expiredAt), true)
+  assert.equal(storage.getItem('gpu-management-operation-pointer-v1'), raw)
+  assert.throws(
+    () => rememberOperation(storage, scope, 'PUT', nextId, expiredAt),
+    /已过期或损坏的操作记录/,
+  )
+  assert.equal(storage.getItem('gpu-management-operation-pointer-v1'), raw)
+  for (const malformed of ['{', 'x'.repeat(1025), JSON.stringify({ ...original, operationId: 'bad' })]) {
+    storage.setItem('gpu-management-operation-pointer-v1', malformed)
+    assert.equal(recoverOperation(storage, now + 1), null)
+    assert.equal(hasUnresolvedRecoveryRecord(storage, now + 1), true)
+    assert.throws(
+      () => rememberOperation(storage, scope, 'PUT', nextId, now + 2),
+      /已过期或损坏的操作记录/,
+    )
+    assert.equal(storage.getItem('gpu-management-operation-pointer-v1'), malformed)
+  }
+  forgetOperation(storage)
+  assert.equal(hasUnresolvedRecoveryRecord(storage, now + 3), false)
+  assert.equal(rememberOperation(storage, scope, 'PUT', nextId, now + 3).operationId, nextId)
+})
+
+test('unreadable recovery storage never authorizes another dispatch', () => {
+  const inaccessible = {
+    getItem() { throw Error('storage denied') },
+    setItem() { throw Error('writes denied') },
+    removeItem() { throw Error('cleanup denied') },
+  }
+  assert.equal(hasUnresolvedRecoveryRecord(inaccessible, now), true)
+  assert.throws(() => rememberOperation(inaccessible, scope, 'PUT', operationId, now), /storage denied/)
 })
 
 test('storage failure blocks write before operation dispatch', () => {
