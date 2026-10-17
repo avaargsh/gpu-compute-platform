@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react'
 import { readReceipt, readResource, readExecution, type Receipt, type Scope } from '@/management/api'
-import { classifyDesiredReadback, type DesiredReadback } from '@/management/readback'
+import { classifyDesiredReadback, receiptResourceScope, type DesiredReadback } from '@/management/readback'
 import { classifyScopedExecution } from '@/management/execution'
 import { verifyEvidencePair, type EvidenceCheck } from '@/management/evidence-check'
 
@@ -30,7 +30,7 @@ export interface UseEvidenceReturn {
   ) => Promise<{ check: EvidenceCheck; message: string }>
   refreshEvidenceChain: (
     cluster: string, project: string, requestId: string, token: string
-  ) => Promise<{ check: EvidenceCheck; message: string }>
+  ) => Promise<{ check: EvidenceCheck; message: string; receipt: Receipt }>
 }
 
 export function useEvidence(): UseEvidenceReturn {
@@ -121,14 +121,15 @@ export function useEvidence(): UseEvidenceReturn {
 
   const refreshEvidenceChainFn = useCallback(async (
     cluster: string, project: string, requestId: string, token: string
-  ) => perform(async assertCurrent => {
+  ) => {
+    let verifiedReceipt: Receipt | null = null
+    const result = await perform(async assertCurrent => {
     const receiptResult = await readReceipt(cluster, project, requestId, token)
     assertCurrent()
     if (!receiptResult.value) throw new Error('服务端未返回原始审计回执')
     const audit = receiptResult.value
-    const target: Scope = {
-      cluster, project, kind: audit.kind, resource: audit.resourceId,
-    }
+    const target = receiptResourceScope(audit, cluster, project, requestId)
+    verifiedReceipt = audit
     let current
     try {
       const result = await readResource(target, token)
@@ -148,7 +149,10 @@ export function useEvidence(): UseEvidenceReturn {
       observed = result.value ?? null
     }
     return verifyEvidencePair(audit, current, observed)
-  }, '原始操作回执、当前 Desired 和独立观察已完成分层核对；未发起写入或自动重试'), [perform])
+    }, '原始操作回执、当前 Desired 和独立观察已完成分层核对；未发起写入或自动重试')
+    if (!verifiedReceipt) throw new Error('未取得可信的原始操作回执')
+    return { ...result, receipt: verifiedReceipt }
+  }, [perform])
 
   return {
     check, loading, message, error, invalidate,
