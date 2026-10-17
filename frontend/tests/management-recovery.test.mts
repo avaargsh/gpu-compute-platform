@@ -35,6 +35,39 @@ test('one-tab recovery records only scope + ID before an ambiguous write', () =>
   assert.equal(recoverOperation(storage, now + 2000), null)
 })
 
+test('an unresolved operation ID cannot be replaced by a later mutation', () => {
+  const storage = memoryStorage()
+  const original = rememberOperation(storage, scope, 'PUT', operationId, now)
+  const snapshot = JSON.stringify(storage.dump())
+  const secondId = 'abcdef0123456789abcdef0123456789'
+  assert.throws(
+    () => rememberOperation(storage, { ...scope, resource: 'pool-b' }, 'PUT', secondId, now + 1000),
+    /尚未核对的操作 ID/,
+  )
+  assert.throws(
+    () => rememberOperation(storage, scope, 'DELETE', operationId, now + 1000),
+    /尚未核对的操作 ID/,
+  )
+  assert.equal(JSON.stringify(storage.dump()), snapshot, 'failed dispatch cannot lose recovery ID')
+  assert.deepEqual(recoverOperation(storage, now + 1000), original)
+  const same = rememberOperation(storage, scope, 'PUT', operationId, now + 1000)
+  assert.deepEqual(same, original, 'identical operation is idempotent')
+  assert.equal(JSON.stringify(storage.dump()), snapshot, 'same ID must not renew recovery TTL')
+  forgetOperation(storage)
+  assert.equal(rememberOperation(storage, scope, 'PUT', secondId, now + 2000).operationId, secondId)
+})
+
+test('inaccessible recovery storage denies writes before a new pointer is dispatched', () => {
+  let writes = 0
+  const storage = {
+    getItem() { throw Error('storage reads denied') },
+    setItem() { writes++; },
+    removeItem() {},
+  }
+  assert.throws(() => rememberOperation(storage, scope, 'PUT', operationId, now), /storage reads denied/)
+  assert.equal(writes, 0)
+})
+
 test('invalid, injected, malformed and expired pointers are fail closed', () => {
   const storage = memoryStorage()
   const valid = rememberOperation(storage, scope, 'DELETE', operationId, now)
