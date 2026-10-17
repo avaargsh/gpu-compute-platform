@@ -69,6 +69,22 @@ test('verified receipt retirement requires exact scope, method and original ID',
   assert.equal(retireOperation(storage, scope, 'PUT', operationId, now + 300), false)
 })
 
+test('readable but non-removable pointer does not throw during verified receipt cleanup', () => {
+  const storage = memoryStorage()
+  const pointer = rememberOperation(storage, scope, 'PUT', operationId, now)
+  const blockedCleanup = {
+    getItem: storage.getItem,
+    setItem: storage.setItem,
+    removeItem() { throw Error('browser denied pointer cleanup') },
+  }
+  assert.equal(retireOperation(blockedCleanup, scope, 'PUT', operationId, now + 1), false)
+  assert.deepEqual(recoverOperation(storage, now + 1), pointer)
+  assert.throws(
+    () => rememberOperation(storage, scope, 'PUT', 'abcdef0123456789abcdef0123456789', now + 2),
+    /尚未核对的操作 ID/,
+  )
+})
+
 test('inaccessible recovery storage denies writes before a new pointer is dispatched', () => {
   let writes = 0
   const storage = {
