@@ -34,6 +34,7 @@ import {
   type VerifiedPoolSelection,
 } from '@/management/workload-composer'
 import type { EvidenceCheck } from '@/management/evidence-check'
+import { receiptResourceScope } from '@/management/readback'
 
 const cardStyle: React.CSSProperties = {
   border: '1px solid',
@@ -75,7 +76,7 @@ export function ManagementApp() {
 
   const { readReceipt: readReceiptFn, invalidate: invalidateReceipt } = useReceipt()
 
-  const { pointer: operationPointer, remember, recover, forget } = useOperation()
+  const { pointer: operationPointer, remember, recover, retire, forget } = useOperation()
 
   const {
     readBackDesired: readBackDesiredFn,
@@ -270,13 +271,17 @@ export function ManagementApp() {
         cluster, project, operationId, accessToken
       )
       if (!stillCurrent()) return
+      // This is a fresh OIDC+RBAC-authorized receipt; only its exact scope,
+      // method and ID may retire the tab's previous unresolved pointer.
+      const verified = receiptResourceScope(receipt, cluster, project, operationId)
+      retire(verified, receipt.action === 'delete-request' ? 'DELETE' : 'PUT', operationId)
       setActiveReceipt(receipt)
       setFeedback({ kind: 'status', text: msg })
     } catch (e) {
       if (e instanceof StaleReceiptReadError || !stillCurrent()) return
       setFeedback({ kind: 'alert', text: errMsg(e, '查询回执失败') })
     }
-  }, [session, cluster, project, operationId, token, readReceiptFn, clearResult])
+  }, [session, cluster, project, operationId, token, readReceiptFn, clearResult, retire])
 
   const handleReadBackCheck = useCallback(async () => {
     if (!activeReceipt) return
@@ -314,17 +319,21 @@ export function ManagementApp() {
     }
     try {
       const accessToken = token()
-      const { check, message: msg } = await refreshEvidenceChainFn(
+      const { check, message: msg, receipt } = await refreshEvidenceChainFn(
         cluster, project, operationId, accessToken
       )
       if (!stillCurrent()) return
+      if (check.readback.status !== 'inconsistent') {
+        const verified = receiptResourceScope(receipt, cluster, project, operationId)
+        retire(verified, receipt.action === 'delete-request' ? 'DELETE' : 'PUT', operationId)
+      }
       setActiveEvidence(check)
       setFeedback({ kind: 'status', text: msg })
     } catch (e) {
       if (e instanceof StaleEvidenceReadError || !stillCurrent()) return
       setFeedback({ kind: 'alert', text: errMsg(e, '证据链核对失败') })
     }
-  }, [session, cluster, project, operationId, token, refreshEvidenceChainFn, clearResult])
+  }, [session, cluster, project, operationId, token, refreshEvidenceChainFn, clearResult, retire])
 
   const handleListRecentOps = useCallback(async () => {
     try {
