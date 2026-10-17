@@ -149,6 +149,10 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await expect(page.getByText('上次完整证据核对：', { exact: false })).toBeVisible()
   await expect(page.getByRole('group', { name: '独立执行状态' })).toContainText('NOT_OBSERVED')
   await expect(page.getByRole('group', { name: '独立执行状态' })).toContainText('不等于 Kueue 已准入')
+  await expect(page.getByTestId('evidence-check-time')).toContainText('浏览器时钟')
+  await expect(page.getByTestId('evidence-check-time')).not.toContainText('未记录')
+  await expect(page.getByTestId('observation-provenance')).toContainText('Agent 最后上报时间：未上报')
+  await expect(page.getByTestId('observation-provenance')).toContainText('不能证明此刻仍在运行')
 
   // Actual user entry: discover the previously created Workload through the
   // same OIDC identity and live PostgreSQL Project grant, NOT a mock list.
@@ -159,6 +163,9 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await expect(inventory).not.toContainText('example.invalid/ci:1')
   await inventory.getByRole('button', { name: '选择 Workload job-a' }).click()
   await expect(page.getByPlaceholder('pool-a')).toHaveValue('job-a')
+  // Switching scope invalidates both the previous projection and its check clock.
+  await expect(page.getByTestId('evidence-check-time')).toHaveCount(0)
+  await expect(page.getByTestId('observation-provenance')).toHaveCount(0)
   // Selecting a row does not resurrect the previously stored operation ID or
   // allow a blind DELETE: the operator must read current Desired again.
   await expect(page.getByPlaceholder('原始 Idempotency-Key')).toHaveValue('')
