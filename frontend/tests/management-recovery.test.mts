@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { rememberOperation, recoverOperation, forgetOperation } from '../src/management/recovery.ts'
+import { rememberOperation, recoverOperation, retireOperation, forgetOperation } from '../src/management/recovery.ts'
 
 const scope = { cluster: 'browser-ci', project: 'research', kind: 'ComputePool', resource: 'pool-a' }
 const operationId = '0123456789abcdef0123456789abcdef'
@@ -55,6 +55,18 @@ test('an unresolved operation ID cannot be replaced by a later mutation', () => 
   assert.equal(JSON.stringify(storage.dump()), snapshot, 'same ID must not renew recovery TTL')
   forgetOperation(storage)
   assert.equal(rememberOperation(storage, scope, 'PUT', secondId, now + 2000).operationId, secondId)
+})
+
+test('verified receipt retirement requires exact scope, method and original ID', () => {
+  const storage = memoryStorage()
+  const original = rememberOperation(storage, scope, 'PUT', operationId, now)
+  assert.equal(retireOperation(storage, scope, 'DELETE', operationId, now + 200), false)
+  assert.equal(retireOperation(storage, { ...scope, project: 'foreign' }, 'PUT', operationId, now + 200), false)
+  assert.equal(retireOperation(storage, scope, 'PUT', 'abcdef0123456789abcdef0123456789', now + 200), false)
+  assert.deepEqual(recoverOperation(storage, now + 200), original)
+  assert.equal(retireOperation(storage, scope, 'PUT', operationId, now + 200), true)
+  assert.equal(recoverOperation(storage, now + 200), null)
+  assert.equal(retireOperation(storage, scope, 'PUT', operationId, now + 300), false)
 })
 
 test('inaccessible recovery storage denies writes before a new pointer is dispatched', () => {
