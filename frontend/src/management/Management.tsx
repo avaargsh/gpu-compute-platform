@@ -76,7 +76,7 @@ export function ManagementApp() {
 
   const { readReceipt: readReceiptFn, invalidate: invalidateReceipt } = useReceipt()
 
-  const { pointer: operationPointer, remember, recover, retire, forget } = useOperation()
+  const { pointer: operationPointer, recoveryBlocked, remember, recover, retire, forget } = useOperation()
 
   const {
     readBackDesired: readBackDesiredFn,
@@ -440,10 +440,13 @@ export function ManagementApp() {
   }, [recover])
 
   const handleDiscardOperation = useCallback(() => {
+    if (recoveryBlocked && !window.confirm(
+      '检测到已过期或损坏的操作身份记录。此操作可能已经提交且尚未对账。请先查看服务器授权操作历史并保留必要证据。确认仍要清除本地原始记录？'
+    )) return
     forget()
     setOperationId('')
     clearResult()
-  }, [forget, clearResult])
+  }, [forget, clearResult, recoveryBlocked])
 
   return (
     <div className="management-shell max-w-[1040px] mx-auto pt-6 pb-20 px-4 text-sm font-sans text-[#20242a]">
@@ -956,9 +959,14 @@ export function ManagementApp() {
                 恢复操作范围与 ID
               </Button>
             )}
+            {recoveryBlocked && (
+              <p role="alert" className="w-full text-sm text-amber-800">
+                本页存在已过期、损坏或无法读取的操作记录。禁止创建新操作；请核对授权历史回执，必要时经确认手动清除。不能把记录过期视为回滚或操作未提交。
+              </p>
+            )}
             <Button
               onClick={handleDiscardOperation}
-              disabled={!operationPointer}
+              disabled={!operationPointer && !recoveryBlocked}
               variant="outline"
               className="px-4 py-2 rounded-md border"
             >
