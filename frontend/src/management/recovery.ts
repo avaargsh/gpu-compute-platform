@@ -85,6 +85,22 @@ export function recoverOperation(storage: Storage, now = Date.now()): OperationP
   }
 }
 
+// Successful authorized receipt verification may retire only its own
+// tab-local pointer. A concurrent/newer write or different project must
+// never be erased by a late response from a previous request.
+export function retireOperation(
+  storage: Storage, scope: Scope, method: 'PUT' | 'DELETE', operationId: string,
+  now = Date.now(),
+): boolean {
+  const previous = recoverOperation(storage, now)
+  if (!previous || previous.operationId !== operationId ||
+      previous.method !== method || previous.cluster !== scope.cluster ||
+      previous.project !== scope.project || previous.kind !== scope.kind ||
+      previous.resource !== scope.resource) return false
+  storage.removeItem(KEY)
+  return true
+}
+
 export function forgetOperation(storage: Storage): void {
   storage.removeItem(KEY)
 }
