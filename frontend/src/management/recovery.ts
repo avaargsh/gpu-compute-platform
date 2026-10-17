@@ -97,8 +97,15 @@ export function retireOperation(
       previous.method !== method || previous.cluster !== scope.cluster ||
       previous.project !== scope.project || previous.kind !== scope.kind ||
       previous.resource !== scope.resource) return false
-  storage.removeItem(KEY)
-  return true
+  // A browser may revoke storage writes between dispatch and receipt
+  // verification. Cleanup failure must not turn a verified server receipt
+  // into a UI error; the still-present pointer continues to block new writes.
+  try {
+    storage.removeItem(KEY)
+    return storage.getItem(KEY) === null
+  } catch {
+    return false
+  }
 }
 
 export function forgetOperation(storage: Storage): void {
