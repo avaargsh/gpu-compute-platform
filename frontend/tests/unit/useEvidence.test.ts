@@ -8,6 +8,7 @@ import {
 } from '@/management/api'
 import {
   classifyDesiredReadback,
+  receiptResourceScope,
 } from '@/management/readback'
 import {
   classifyScopedExecution,
@@ -23,6 +24,7 @@ vi.mock('@/management/api', () => ({
 }))
 vi.mock('@/management/readback', () => ({
   classifyDesiredReadback: vi.fn(),
+  receiptResourceScope: vi.fn(),
 }))
 vi.mock('@/management/execution', () => ({
   classifyScopedExecution: vi.fn(),
@@ -69,6 +71,9 @@ describe('useEvidence', () => {
       newerThanReceipt: false,
     }
 
+    vi.mocked(receiptResourceScope).mockReturnValue({
+      cluster: 'cluster-a', project: 'proj-a', kind: 'Workload', resource: 'wl-1',
+    })
     vi.mocked(readReceipt).mockResolvedValue({ status: 200, value: mockReceipt })
     vi.mocked(readResource).mockResolvedValue({ status: 200, value: { generation: 1 } })
     vi.mocked(readExecution).mockResolvedValue({ status: 200, value: {} as any })
@@ -81,14 +86,16 @@ describe('useEvidence', () => {
 
     const { result } = renderHook(() => useEvidence())
     await act(async () => {
-      await result.current.refreshEvidenceChain(
+      const resolved = await result.current.refreshEvidenceChain(
         'cluster-a',
         'proj-a',
         'op-123',
         'token-123'
       )
+      expect(resolved.receipt).toEqual(mockReceipt)
     })
 
+    expect(receiptResourceScope).toHaveBeenCalledWith(mockReceipt, 'cluster-a', 'proj-a', 'op-123')
     expect(readReceipt).toHaveBeenCalledWith('cluster-a', 'proj-a', 'op-123', 'token-123')
     expect(verifyEvidencePair).toHaveBeenCalled()
     expect(result.current.loading).toBe(false)
