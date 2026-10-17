@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readResource, writeResource, deleteResource, readReceipt, ManagementHTTPError, desiredMatchesScope, listProjects } from '../src/management/api.ts'
+import { readResource, writeResource, deleteResource, readReceipt, ManagementHTTPError, ManagementMutationUncertainError, desiredMatchesScope, listProjects } from '../src/management/api.ts'
 
 const scope = { cluster: 'gpu-cluster', project: 'research', kind: 'ComputePool', resource: 'pool-a' }
 const token = 'valid-test-oidc-access-token'
@@ -63,13 +63,55 @@ test('unsafe resource IDs, invalid Generation and invalid receipt key never reac
 test('negative responses fail closed and preserve exact HTTP class for operator handling', async () => {
   const original = globalThis.fetch
   try {
-    for (const status of [401, 403, 404, 409, 428, 503]) {
+    for (const status of [401, 403, 404, 409, 428]) {
       globalThis.fetch = async () => new Response('', { status })
       await assert.rejects(
         () => writeResource(scope, token, '{"expectedGeneration":0,"spec":{}}', key),
         e => e instanceof ManagementHTTPError && e.status === status,
       )
     }
+  } finally { globalThis.fetch = original }
+})
+
+test('unexpected success, 5xx and dropped write ACK are uncertain, never committed', async () => {
+  const original = globalThis.fetch
+  try {
+    for (const [method, accepted] of [['PUT', 204], ['DELETE', 202]] as const) {
+      for (const status of [200, 201, 202, 204, 206, 408, 500, 502, 503]) {
+        if (status === accepted) continue
+        let dispatched = 0
+        globalThis.fetch = async () => {
+          dispatched++
+          return new Response(null, { status })
+        }
+        const call = method === 'PUT'
+          ? writeResource(scope, token, '{"expectedGeneration":0,"spec":{}}', key)
+          : deleteResource(scope, token, 1, key)
+        await assert.rejects(call, (err: unknown) => {
+          assert.ok(err instanceof ManagementMutationUncertainError, method + ': HTTP ' + status)
+          assert.match(err.message, /操作结果未知/)
+          assert.doesNotMatch(err.message, /valid-test-oidc-access-token/)
+          return true
+        })
+        assert.equal(dispatched, 1, 'never auto-replay the ' + method + ' on HTTP ' + status)
+      }
+      for (const rejection of [new TypeError('offline'), new DOMException('timeout', 'TimeoutError')]) {
+        let dispatched = 0
+        globalThis.fetch = async () => {
+          dispatched++
+          throw rejection
+        }
+        const call = method === 'PUT'
+          ? writeResource(scope, token, '{"expectedGeneration":0,"spec":{}}', key)
+          : deleteResource(scope, token, 1, key)
+        await assert.rejects(call, ManagementMutationUncertainError)
+        assert.equal(dispatched, 1)
+      }
+    }
+    globalThis.fetch = async () => new Response('', { status: 503 })
+    await assert.rejects(readResource(scope, token), (e: unknown) => (
+      e instanceof ManagementHTTPError && e.status === 503
+    ))
   } finally { globalThis.fetch = original }
 })
 
