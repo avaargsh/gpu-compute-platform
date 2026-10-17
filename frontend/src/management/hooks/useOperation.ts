@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react'
 import {
   rememberOperation,
   recoverOperation,
+  retireOperation,
   forgetOperation,
   type OperationPointer,
 } from '@/management/recovery'
@@ -13,6 +14,7 @@ export interface UseOperationReturn {
   setPointer: (pointer: OperationPointer | null) => void
   remember: (scope: { cluster: string; project: string; kind: 'ComputePool' | 'Workload'; resource: string }, method: 'PUT' | 'DELETE', operationId: string) => OperationPointer
   recover: () => OperationPointer | null
+  retire: (scope: { cluster: string; project: string; kind: 'ComputePool' | 'Workload'; resource: string }, method: 'PUT' | 'DELETE', operationId: string) => boolean
   forget: () => void
 }
 
@@ -34,6 +36,14 @@ export function useOperation(): UseOperationReturn {
     return p
   }, [])
 
+  const retire = useCallback(
+    (scope: { cluster: string; project: string; kind: 'ComputePool' | 'Workload'; resource: string }, method: 'PUT' | 'DELETE', operationId: string) => {
+      const removed = retireOperation(sessionStorage, scope, method, operationId)
+      if (removed) setPointer(null)
+      return removed
+    }, []
+  )
+
   const forget = useCallback(() => {
     forgetOperation(sessionStorage)
     setPointer(null)
@@ -44,6 +54,7 @@ export function useOperation(): UseOperationReturn {
     setPointer,
     remember,
     recover,
+    retire,
     forget,
   }
 }
