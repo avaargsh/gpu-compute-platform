@@ -21,11 +21,9 @@ make fmt-check
 make vet
 make test
 make build
-make acceptance-contract
-make supply-chain-check
 ```
 
-这些命令验证 Go 代码格式、静态检查、单元测试、构建、v0.1 生命周期/恢复合同和生产镜像策略。
+DEV 阶段优先只跑格式、静态检查、单元测试和构建。v0.1 正式发布合同、生产镜像策略与完整环境联调属于 RELEASE/TEST 门禁；不阻塞普通开发。
 
 ## 3. 启动 Control Plane
 
@@ -152,3 +150,21 @@ go run ./cmd/cluster-agent
 - `docs/PROVIDER_ADAPTER_SPI.md`
 - `docs/RELEASE_ACCEPTANCE_V0_1.md`
 - `docs/CAPABILITY_RELEASE_MATRIX.md`
+
+## 开发、联调、发布三档门禁
+
+- **DEV**：PR 继续执行 Go/Python 单测、PostgreSQL 隔离回归、
+  Portal/Management 单测与构建、授权/CAS 等安全检查。
+  默认不要求 kind/Kueue、真实 Chromium 或多个生产镜像构建通过。
+- **TEST**：手动触发 `Go Control Plane` 与
+  `Management Full Stack Real OIDC Acceptance` 的
+  `workflow_dispatch`，在临时 kind、Keycloak、PostgreSQL、
+  Chromium 中跑端到端联调，并标注真实依赖与结果。
+- **RELEASE**：创建 `v*` tag 自动跑上述完整门禁；
+  在对外宣称 production-ready 前必须重新运行
+  `make acceptance-contract`、`make supply-chain-check`
+  和容器镜像/安全检查，并保留产物证据。
+
+不要把本地 fake GPU、Anvil、回归 fixture 或单机浏览器通过
+写成真实 GPU、多机生产部署或支付终局性。真实安全边界、
+认证拒绝、租约与 CAS 在开发期也必须保持 fail-closed。
