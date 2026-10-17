@@ -113,6 +113,7 @@ export function ManagementApp() {
   const [operationId, setOperationId] = useState('')
   const [activeReceipt, setActiveReceipt] = useState<Receipt | null>(null)
   const [activeEvidence, setActiveEvidence] = useState<EvidenceCheck | null>(null)
+  const [evidenceCheckedAt, setEvidenceCheckedAt] = useState<string | null>(null)
   const [verifiedSelection, setVerifiedSelection] = useState<VerifiedPoolSelection | null>(null)
   const [recentOps, setRecentOps] = useState<RecentOperation[]>([])
   const [feedback, setFeedback] = useState<Feedback>(null)
@@ -130,6 +131,7 @@ export function ManagementApp() {
     invalidateEvidence()
     setActiveReceipt(null)
     setActiveEvidence(null)
+    setEvidenceCheckedAt(null)
     setFeedback(null)
   }, [invalidateReceipt, invalidateEvidence])
 
@@ -300,6 +302,7 @@ export function ManagementApp() {
       )
       if (!stillCurrent()) return
       setActiveEvidence(check)
+      setEvidenceCheckedAt(new Date().toISOString())
       setFeedback({ kind: 'status', text: msg })
     } catch (e) {
       if (e instanceof StaleEvidenceReadError || !stillCurrent()) return
@@ -328,6 +331,7 @@ export function ManagementApp() {
         retire(verified, receipt.action === 'delete-request' ? 'DELETE' : 'PUT', operationId)
       }
       setActiveEvidence(check)
+      setEvidenceCheckedAt(new Date().toISOString())
       setFeedback({ kind: 'status', text: msg })
     } catch (e) {
       if (e instanceof StaleEvidenceReadError || !stillCurrent()) return
@@ -999,6 +1003,9 @@ export function ManagementApp() {
           {activeEvidence && (
             <div className="management-evidence mt-3 space-y-2">
               <p className="text-sm font-semibold text-[#47566b]">上次完整证据核对：</p>
+              <p className="text-xs text-[#66707a]" data-testid="evidence-check-time">
+                本页手动核对完成时间（浏览器时钟）：{evidenceCheckedAt ?? '未记录'}。这是只读查询结束时间，并非 Agent 心跳或实时 Job 状态。
+              </p>
               <div
                 role="note"
                 className="text-sm text-[#34486b] bg-[#edf2fc] rounded p-3"
@@ -1022,6 +1029,12 @@ export function ManagementApp() {
                     {activeEvidence.execution.label}（{activeEvidence.execution.code}）
                   </strong>
                   <p>{activeEvidence.execution.detail}</p>
+                  <p className="text-xs mt-1" data-testid="observation-provenance">
+                    Agent 最后上报时间：{activeEvidence.execution.observedAt ?? '未上报'}；
+                    {activeEvidence.execution.newerThanReceipt
+                      ? '观察对应较新 Generation，不能归因于当前操作回执。'
+                      : '本次只读查询读取历史观察，不能证明此刻仍在运行或已完成清理。'}
+                  </p>
                 </div>
               )}
             </div>
