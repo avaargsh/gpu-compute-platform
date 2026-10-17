@@ -41,6 +41,11 @@ export function rememberOperation(storage: Storage, scope: Scope, method: 'PUT' 
   const stored = storage.getItem(KEY)
   if (stored !== null) {
     const previous = recoverOperation(storage, now)
+    if (!previous) {
+      // An expired or malformed record may still identify a committed write.
+      // Never replace or erase its raw bytes without operator intervention.
+      throw new Error('存在已过期或损坏的操作记录；已阻止新写入。请先调查历史回执，并手动确认清除此记录。')
+    }
     if (previous) {
       if (previous.operationId === pointer.operationId &&
           previous.cluster === pointer.cluster &&
@@ -67,16 +72,12 @@ export function recoverOperation(storage: Storage, now = Date.now()): OperationP
   let raw: string | null
   try { raw = storage.getItem(KEY) } catch { return null }
   if (!raw) return null
-  if (raw.length > 1024) {
-    try { storage.removeItem(KEY) } catch { /* no storage access */ }
-    return null
-  }
+  // Never silently delete unknown bytes: they could be the only remaining
+  // evidence of a timed-out mutation whose HTTP ACK was lost.
+  if (raw.length > 1024) return null
   let parsed: OperationPointer
   try { parsed = JSON.parse(raw) as OperationPointer } catch { parsed = null as unknown as OperationPointer }
-  if (!valid(parsed, now)) {
-    try { storage.removeItem(KEY) } catch { /* no storage access */ }
-    return null
-  }
+  if (!valid(parsed, now)) return null
   // Copy only the allowlisted fields. Ignore any injected extra properties.
   return {
     operationId: parsed.operationId, cluster: parsed.cluster,
@@ -88,6 +89,19 @@ export function recoverOperation(storage: Storage, now = Date.now()): OperationP
 // Successful authorized receipt verification may retire only its own
 // tab-local pointer. A concurrent/newer write or different project must
 // never be erased by a late response from a previous request.
+
+// An invalid/expired record is not reusable, but its existence must remain
+// visible so the operator can explicitly investigate and discard it.
+export function hasUnresolvedRecoveryRecord(storage: Storage, now = Date.now()): boolean {
+  try {
+    const raw = storage.getItem(KEY)
+    return raw !== null && recoverOperation(storage, now) === null
+  } catch {
+    // Disabled storage cannot grant write authority.
+    return true
+  }
+}
+
 export function retireOperation(
   storage: Storage, scope: Scope, method: 'PUT' | 'DELETE', operationId: string,
   now = Date.now(),
