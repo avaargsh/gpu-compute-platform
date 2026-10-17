@@ -1,21 +1,11 @@
 name: Management Full Stack Real OIDC Acceptance
 
+# Heavy integration run on explicit request or v* release tags.
+# Management auth, CAS and security regressions still run in regular Go CI.
 on:
-  pull_request:
-    branches: [master]
-    paths:
-      - 'cmd/management-api/**'
-      - 'internal/platform/management/**'
-      - 'internal/store/postgres/schema.sql'
-      - 'frontend/src/management/**'
-      - 'frontend/playwright.management.fullstack.config.ts'
-      - 'frontend/tests/e2e/management.fullstack.e2e.spec.ts'
-      - 'frontend/vite.management.config.ts'
-      - 'frontend/management.html'
-      - 'scripts/e2e/management-fullstack-real-oidc-pg.sh'
-      - 'scripts/e2e/keycloak-management-browser-realm.json'
-      - '.github/workflows/management-fullstack-real-oidc.yml'
   workflow_dispatch:
+  push:
+    tags: ['v*']
 
 permissions:
   contents: read
