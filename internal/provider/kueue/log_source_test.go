@@ -28,9 +28,9 @@ func logSourceFixture() (baseprovider.WorkloadProjection, *batchv1.Job, *corev1.
 			UID: types.UID("job-uid-7"), ResourceVersion: "107",
 			Labels: map[string]string{"ai.compute/workload": "job-train-1"},
 			Annotations: map[string]string{
-				generationAnnotation: "7",
+				generationAnnotation:    "7",
 				logWorkloadIDAnnotation: "train-1",
-				logProjectIDAnnotation: "project-a",
+				logProjectIDAnnotation:  "project-a",
 			},
 		},
 		Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{
@@ -79,29 +79,60 @@ func TestInspectWorkloadLogSourceRejectsIdentityDrift(t *testing.T) {
 		name   string
 		change func(*baseprovider.WorkloadProjection, *batchv1.Job, *corev1.Pod)
 	}{
-		{"job-newer-generation", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) { j.Annotations[generationAnnotation] = "8" }},
-		{"job-no-generation", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) { delete(j.Annotations, generationAnnotation) }},
+		{"job-newer-generation", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) {
+			j.Annotations[generationAnnotation] = "8"
+		}},
+		{"job-no-generation", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) {
+			delete(j.Annotations, generationAnnotation)
+		}},
 		{"job-missing-uid", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) { j.UID = "" }},
 		{"job-missing-rv", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) { j.ResourceVersion = "" }},
-		{"job-wrong-label", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) { j.Labels["ai.compute/workload"] = "job-other" }},
-		{"job-missing-workload-id", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) { delete(j.Annotations, logWorkloadIDAnnotation) }},
-		{"job-colliding-workload-id", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) { j.Annotations[logWorkloadIDAnnotation] = "train_1" }},
-		{"job-cross-project", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) { j.Annotations[logProjectIDAnnotation] = "project-b" }},
-		{"job-deleting", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) { now := metav1.Now(); j.DeletionTimestamp = &now }},
-		{"job-no-container", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) { j.Spec.Template.Spec.Containers = nil }},
-		{"pod-old-job-uid", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) { p.OwnerReferences[0].UID = "old-job-uid" }},
-		{"pod-not-controller", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) { no := false; p.OwnerReferences[0].Controller = &no }},
-		{"pod-wrong-kind", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) { p.OwnerReferences[0].Kind = "ReplicaSet" }},
+		{"job-wrong-label", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) {
+			j.Labels["ai.compute/workload"] = "job-other"
+		}},
+		{"job-missing-workload-id", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) {
+			delete(j.Annotations, logWorkloadIDAnnotation)
+		}},
+		{"job-colliding-workload-id", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) {
+			j.Annotations[logWorkloadIDAnnotation] = "train_1"
+		}},
+		{"job-cross-project", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) {
+			j.Annotations[logProjectIDAnnotation] = "project-b"
+		}},
+		{"job-deleting", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) {
+			now := metav1.Now()
+			j.DeletionTimestamp = &now
+		}},
+		{"job-no-container", func(_ *baseprovider.WorkloadProjection, j *batchv1.Job, _ *corev1.Pod) {
+			j.Spec.Template.Spec.Containers = nil
+		}},
+		{"pod-old-job-uid", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) {
+			p.OwnerReferences[0].UID = "old-job-uid"
+		}},
+		{"pod-not-controller", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) {
+			no := false
+			p.OwnerReferences[0].Controller = &no
+		}},
+		{"pod-wrong-kind", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) {
+			p.OwnerReferences[0].Kind = "ReplicaSet"
+		}},
 		{"pod-no-owner", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) { p.OwnerReferences = nil }},
 		{"pod-missing-uid", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) { p.UID = "" }},
 		{"pod-missing-rv", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) { p.ResourceVersion = "" }},
-		{"pod-no-container", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) { p.Spec.Containers = []corev1.Container{{Name: "other"}} }},
-		{"pod-deleting", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) { now := metav1.Now(); p.DeletionTimestamp = &now }},
+		{"pod-no-container", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) {
+			p.Spec.Containers = []corev1.Container{{Name: "other"}}
+		}},
+		{"pod-deleting", func(_ *baseprovider.WorkloadProjection, _ *batchv1.Job, p *corev1.Pod) {
+			now := metav1.Now()
+			p.DeletionTimestamp = &now
+		}},
 		{"wrong-project-scope", func(s *baseprovider.WorkloadProjection, _ *batchv1.Job, _ *corev1.Pod) { s.ProjectID = "project-b" }},
 		{"wrong-namespace", func(s *baseprovider.WorkloadProjection, _ *batchv1.Job, _ *corev1.Pod) { s.Namespace = "ns-project-b" }},
 		{"invalid-generation", func(s *baseprovider.WorkloadProjection, _ *batchv1.Job, _ *corev1.Pod) { s.Generation = 0 }},
 		{"aliased-workload-id", func(s *baseprovider.WorkloadProjection, _ *batchv1.Job, _ *corev1.Pod) { s.WorkloadID = "train_1" }},
-		{"invalid-namespace", func(s *baseprovider.WorkloadProjection, _ *batchv1.Job, _ *corev1.Pod) { s.Namespace = "../ns-project-a" }},
+		{"invalid-namespace", func(s *baseprovider.WorkloadProjection, _ *batchv1.Job, _ *corev1.Pod) {
+			s.Namespace = "../ns-project-a"
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -167,12 +198,12 @@ func TestNewKueueJobsRetainExactProjectAndWorkloadIdentity(t *testing.T) {
 		in := baseprovider.WorkloadProjection{
 			WorkloadID: "train-1", ProjectID: "project-a", PoolID: "pool-1",
 			ClusterID: "cluster-a", Namespace: "ns-project-a", Generation: 7,
-			Image: "example/train:latest",
+			Image:       "example/train:latest",
 			Accelerator: domain.AcceleratorRequest{Class: "gpu", Quota: 1},
 			AcceleratorBinding: domain.AcceleratorBinding{
 				Class: "gpu", Flavor: "gpu-flavor", AllocationMode: allocation,
 				ResourceName: "nvidia.com/gpu",
-				DRA: &domain.DRAAllocation{DeviceClassName: "gpu.example"},
+				DRA:          &domain.DRAAllocation{DeviceClassName: "gpu.example"},
 			},
 		}
 		job, err := ProjectWorkload(in)
