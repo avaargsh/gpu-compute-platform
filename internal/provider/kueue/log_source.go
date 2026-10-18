@@ -12,6 +12,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
+const (
+	logWorkloadIDAnnotation = "ai.compute/workload-id"
+	logProjectIDAnnotation  = "ai.compute/project-id"
+)
+
 // WorkloadLogSource identifies one current Kubernetes Job/Pod pair. The
 // cluster/project scope MUST come from a separately authorized management
 // snapshot; this value is not an authorization grant or a log-read token.
@@ -64,7 +69,9 @@ func (c *KubeClient) InspectWorkloadLogSource(
 	}
 	if job.Name != jobName || job.Namespace != projection.Namespace ||
 		job.UID == "" || job.ResourceVersion == "" || job.DeletionTimestamp != nil ||
-		job.Labels["ai.compute/workload"] != jobName {
+		job.Labels["ai.compute/workload"] != jobName ||
+		job.Annotations[logWorkloadIDAnnotation] != string(projection.WorkloadID) ||
+		job.Annotations[logProjectIDAnnotation] != string(projection.ProjectID) {
 		return WorkloadLogSource{}, fmt.Errorf("workload Job identity is missing, stale or unowned")
 	}
 	if err := validateProviderGeneration("job", jobName, job.Annotations, projection.Generation); err != nil {
