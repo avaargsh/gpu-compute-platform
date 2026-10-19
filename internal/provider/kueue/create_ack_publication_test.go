@@ -21,9 +21,11 @@ type ackCaptureClient struct {
 func (c *ackCaptureClient) ApplyJobWithGuardedCreate(ctx context.Context, _ Job, before func(context.Context) error) (JobCreateResponse, error) {
 	c.captures++
 	if c.response.Disposition == JobCreateAcknowledged || c.response.Disposition == JobRaceAdoptedUnbound {
-		if err := before(ctx); err != nil { return JobCreateResponse{}, err }
+		if err := before(ctx); err != nil {
+			return JobCreateResponse{}, err
+		}
 	}
-	return c.response,c.err
+	return c.response, c.err
 }
 
 func createACKProjection() baseprovider.WorkloadProjection {

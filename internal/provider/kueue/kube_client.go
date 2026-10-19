@@ -127,7 +127,9 @@ func (c *KubeClient) ApplyJobWithCreateResponse(ctx context.Context, in Job) (Jo
 // Guarded CREATE prepares an immutable durable operation before touching
 // the external API. Missing, conflicted or ambiguous preparation stops CREATE.
 func (c *KubeClient) ApplyJobWithGuardedCreate(ctx context.Context, in Job, before func(context.Context) error) (JobCreateResponse, error) {
-	if before == nil { return JobCreateResponse{}, fmt.Errorf("durable pre-CREATE guard required") }
+	if before == nil {
+		return JobCreateResponse{}, fmt.Errorf("durable pre-CREATE guard required")
+	}
 	return c.applyJobWithResponse(ctx, in, before)
 }
 
@@ -156,7 +158,7 @@ func (c *KubeClient) applyJobWithResponse(ctx context.Context, in Job, before fu
 
 	if before != nil {
 		if err := before(ctx); err != nil {
-			return JobCreateResponse{}, fmt.Errorf("durable CREATE attempt denied: %w",err)
+			return JobCreateResponse{}, fmt.Errorf("durable CREATE attempt denied: %w", err)
 		}
 	}
 	created, err := jobs.Create(ctx, job, metav1.CreateOptions{})

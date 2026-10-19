@@ -243,7 +243,9 @@ func (a *AgentAPI) PrepareJobCreateAttempt(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var in verifiedops.JobCreateAttempt
-	if !decodeJSON(w, r, &in) { return }
+	if !decodeJSON(w, r, &in) {
+		return
+	}
 	if string(in.ClusterID) != cluster {
 		http.Error(w, "cluster agent scope mismatch", http.StatusForbidden)
 		return

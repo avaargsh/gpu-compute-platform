@@ -41,7 +41,7 @@ type WorkloadProjection struct {
 	OperationID string
 	// OnCreateACK is invoked only for a genuine Job CREATE return. This
 	// ephemeral callback is never serialized, replayed, or inferred from GET.
-	OnCreateACK        func(context.Context, JobCreateACK) error `json:"-"`
+	OnCreateACK func(context.Context, JobCreateACK) error `json:"-"`
 	// OnBeforeCreate is required for a claimed Management Operation, and
 	// runs only after a missing-object GET, immediately before CREATE.
 	OnBeforeCreate     func(context.Context, JobCreateIntent) error `json:"-"`
@@ -56,7 +56,7 @@ type WorkloadProjection struct {
 // CREATE response; it is a candidate identity, not signed execution proof.
 type JobCreateIntent struct {
 	Namespace string
-	Name string
+	Name      string
 }
 
 type JobCreateACK struct {

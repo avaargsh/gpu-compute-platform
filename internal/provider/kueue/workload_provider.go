@@ -36,7 +36,7 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("Kueue Job CREATE response capture unavailable")
 		}
 		result, err := capture.ApplyJobWithGuardedCreate(ctx, job, func(callCtx context.Context) error {
-			return projection.OnBeforeCreate(callCtx, baseprovider.JobCreateIntent{Namespace: job.Namespace,Name: job.Name})
+			return projection.OnBeforeCreate(callCtx, baseprovider.JobCreateIntent{Namespace: job.Namespace, Name: job.Name})
 		})
 		if err != nil {
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply Job with CREATE capture: %w", classifyProviderError(err))

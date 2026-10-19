@@ -13,13 +13,13 @@ import (
 func durableAttempt(b JobCreateUIDBinding) verifiedops.JobCreateAttempt {
 	return verifiedops.JobCreateAttempt{
 		OperationID: b.OperationID,
-		ClusterID: b.ClusterID,
-		ProjectID: b.ProjectID,
-		WorkloadID: b.WorkloadID,
-		Generation: b.Generation,
-		Namespace: b.Namespace,
-		JobName: b.JobName,
-		LeaseOwner: b.LeaseOwner,
+		ClusterID:   b.ClusterID,
+		ProjectID:   b.ProjectID,
+		WorkloadID:  b.WorkloadID,
+		Generation:  b.Generation,
+		Namespace:   b.Namespace,
+		JobName:     b.JobName,
+		LeaseOwner:  b.LeaseOwner,
 	}
 }
 
@@ -103,7 +103,7 @@ func TestCreateAttemptScopeValidationAndDeletingState(t *testing.T) {
 	store, binding := newCreateUIDFixture(t)
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name string
+		name   string
 		change func(*verifiedops.JobCreateAttempt)
 	}{
 		{"wrong-project", func(in *verifiedops.JobCreateAttempt) { in.ProjectID = "foreign" }},
@@ -120,10 +120,10 @@ func TestCreateAttemptScopeValidationAndDeletingState(t *testing.T) {
 			}
 		})
 	}
-	if err := store.MarkDesiredDeleting(ctx,binding.ClusterID,"Workload",binding.WorkloadID,time.Now().UTC()); err != nil {
+	if err := store.MarkDesiredDeleting(ctx, binding.ClusterID, "Workload", binding.WorkloadID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.PrepareJobCreateAttempt(ctx,durableAttempt(binding)); !errors.Is(err,ErrCreateUIDUnproven) {
-		t.Fatalf("deleting Desired allowed new CREATE intent: %v",err)
+	if err := store.PrepareJobCreateAttempt(ctx, durableAttempt(binding)); !errors.Is(err, ErrCreateUIDUnproven) {
+		t.Fatalf("deleting Desired allowed new CREATE intent: %v", err)
 	}
 }

@@ -123,12 +123,20 @@ func validCreateAttempt(in verifiedops.JobCreateAttempt) bool {
 // A second call always returns unresolved, even by the original lease owner:
 // repeating CREATE after an ambiguous ACK must not create new provenance.
 func (s *Store) PrepareJobCreateAttempt(ctx context.Context, in verifiedops.JobCreateAttempt) error {
-	if !validCreateAttempt(in) { return ErrCreateUIDUnproven }
-	if s == nil || s.db == nil { return fmt.Errorf("postgres database is required") }
+	if !validCreateAttempt(in) {
+		return ErrCreateUIDUnproven
+	}
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres database is required")
+	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer tx.Rollback()
-	if err := validateCreateAttemptTx(ctx, tx, in); err != nil { return err }
+	if err := validateCreateAttemptTx(ctx, tx, in); err != nil {
+		return err
+	}
 	var recorded string
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO provider_job_create_attempts
@@ -136,9 +144,13 @@ INSERT INTO provider_job_create_attempts
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 ON CONFLICT DO NOTHING RETURNING operation_id
 `, in.OperationID, in.ClusterID, in.ProjectID, in.WorkloadID, in.Generation,
-	in.Namespace, in.JobName, in.LeaseOwner).Scan(&recorded)
-	if errors.Is(err, sql.ErrNoRows) { return verifiedops.ErrCreateAttemptUnresolved }
-	if err != nil { return err }
+		in.Namespace, in.JobName, in.LeaseOwner).Scan(&recorded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return verifiedops.ErrCreateAttemptUnresolved
+	}
+	if err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -148,9 +160,13 @@ ON CONFLICT DO NOTHING RETURNING operation_id
 func (s *Store) GetJobCreateAttemptState(ctx context.Context,
 	operationID string, clusterID domain.ID, workloadID domain.ID, generation int64,
 ) (string, bool, error) {
-	if s == nil || s.db == nil { return "",false,fmt.Errorf("postgres database is required") }
+	if s == nil || s.db == nil {
+		return "", false, fmt.Errorf("postgres database is required")
+	}
 	if !bindingOperationID.MatchString(operationID) || clusterID == "" ||
-		workloadID == "" || generation < 1 { return "",false,ErrCreateUIDUnproven }
+		workloadID == "" || generation < 1 {
+		return "", false, ErrCreateUIDUnproven
+	}
 	var state string
 	err := s.db.QueryRowContext(ctx, `
 SELECT CASE WHEN b.operation_id IS NULL THEN 'UNKNOWN' ELSE 'ACK_BOUND' END
@@ -159,9 +175,11 @@ LEFT JOIN provider_job_create_uid_bindings b ON b.operation_id=a.operation_id
  AND b.cluster_id=a.cluster_id AND b.workload_id=a.workload_id
  AND b.generation=a.generation AND b.lease_owner=a.lease_owner
 WHERE a.operation_id=$1 AND a.cluster_id=$2 AND a.workload_id=$3 AND a.generation=$4
-`, operationID,clusterID,workloadID,generation).Scan(&state)
-	if errors.Is(err,sql.ErrNoRows) { return "",false,nil }
-	return state,err==nil,err
+`, operationID, clusterID, workloadID, generation).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return state, err == nil, err
 }
 
 func validJobBinding(in JobCreateUIDBinding) bool {
@@ -201,7 +219,9 @@ func (s *Store) RecordJobCreateUID(ctx context.Context, in JobCreateUIDBinding) 
 
 	if err := validateCreateAttemptTx(ctx, tx, JobCreateAttempt{OperationID: in.OperationID, ClusterID: in.ClusterID,
 		ProjectID: in.ProjectID, WorkloadID: in.WorkloadID, Generation: in.Generation,
-		Namespace: in.Namespace, JobName: in.JobName, LeaseOwner: in.LeaseOwner}); err != nil { return err }
+		Namespace: in.Namespace, JobName: in.JobName, LeaseOwner: in.LeaseOwner}); err != nil {
+		return err
+	}
 	// Never accept an ACK if no durable PREPARED intent existed beforehand.
 	// A GET, post-crash adoption, or unrelated lease cannot backfill one.
 	var preparedOwner, preparedNamespace, preparedName string
@@ -210,11 +230,15 @@ SELECT lease_owner,namespace,job_name FROM provider_job_create_attempts
 WHERE operation_id=$1 AND cluster_id=$2 AND project_id=$3
   AND workload_id=$4 AND generation=$5
 FOR UPDATE
-`, in.OperationID,in.ClusterID,in.ProjectID,in.WorkloadID,in.Generation).Scan(
-		&preparedOwner,&preparedNamespace,&preparedName)
-	if errors.Is(err,sql.ErrNoRows) { return ErrCreateUIDUnproven }
-	if err != nil { return err }
-	if preparedOwner!=in.LeaseOwner || preparedNamespace!=in.Namespace || preparedName!=in.JobName {
+`, in.OperationID, in.ClusterID, in.ProjectID, in.WorkloadID, in.Generation).Scan(
+		&preparedOwner, &preparedNamespace, &preparedName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCreateUIDUnproven
+	}
+	if err != nil {
+		return err
+	}
+	if preparedOwner != in.LeaseOwner || preparedNamespace != in.Namespace || preparedName != in.JobName {
 		return ErrCreateUIDUnproven
 	}
 	// First successful binding wins; neither a replacement UID nor another

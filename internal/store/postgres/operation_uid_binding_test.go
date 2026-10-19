@@ -87,11 +87,13 @@ func TestJobCreateUIDRequiresOriginalAuditAndLiveLease(t *testing.T) {
 		t.Fatalf("foreign Job name was accepted: %v", err)
 	}
 	if err := store.PrepareJobCreateAttempt(ctx, verifiedops.JobCreateAttempt{
-		OperationID: original.OperationID,ClusterID: original.ClusterID,
-		ProjectID: original.ProjectID,WorkloadID: original.WorkloadID,
-		Generation: original.Generation,Namespace: original.Namespace,
-		JobName: original.JobName,LeaseOwner: original.LeaseOwner,
-	});err!=nil{t.Fatal(err)}
+		OperationID: original.OperationID, ClusterID: original.ClusterID,
+		ProjectID: original.ProjectID, WorkloadID: original.WorkloadID,
+		Generation: original.Generation, Namespace: original.Namespace,
+		JobName: original.JobName, LeaseOwner: original.LeaseOwner,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.RecordJobCreateUID(ctx, original); err != nil {
 		t.Fatal(err)
 	}
