@@ -2,7 +2,6 @@ package kueue
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -119,7 +118,8 @@ func TestRealKindAPIServerJobCREATEOwnershipBoundaries(t *testing.T) {
 	if err:=core.BatchV1().Jobs(ns.Name).Delete(ctx,workload.Name,metav1.DeleteOptions{});err!=nil{t.Fatal(err)}
 	if err:=wait.PollUntilContextTimeout(ctx,250*time.Millisecond,20*time.Second,true,func(ctx context.Context)(bool,error){
 		_,err:=core.BatchV1().Jobs(ns.Name).Get(ctx,workload.Name,metav1.GetOptions{})
-		return apierrors.IsNotFound(err),func()error{if err!=nil&&!apierrors.IsNotFound(err){return err};return nil}()
+		if apierrors.IsNotFound(err) { return true,nil }
+		return false,err
 	});err!=nil{t.Fatal(err)}
 	replacement,err:=client.ApplyJobWithCreateResponse(ctx,workload)
 	if err!=nil||replacement.Disposition!=JobCreateAcknowledged||replacement.UID==oldUID{
