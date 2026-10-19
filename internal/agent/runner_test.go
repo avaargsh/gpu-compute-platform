@@ -128,9 +128,10 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 				},
 			},
 			{
-				Kind:       "Workload",
-				ID:         "train-1",
-				Generation: 4,
+				Kind:        "Workload",
+				ID:          "train-1",
+				Generation:  4,
+				OperationID: "0123456789abcdef0123456789abcdef",
 				Spec: map[string]any{
 					"projectID": "project-1",
 					"poolID":    "pool-1",
@@ -172,6 +173,9 @@ func TestRunnerPullsReconcilesAndReports(t *testing.T) {
 	}
 	if control.reported[0].LeaseOwner != "agent-test" {
 		t.Fatalf("explicit lease owner not propagated: %#v", control.reported)
+	}
+	if runtime.workload.OperationID != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("original operation ID was not projected to provider: %#v", runtime.workload)
 	}
 	if runtime.workload.AcceleratorBinding.ResourceName != "vendor.example/gpu" {
 		t.Fatalf("workload binding was not resolved: %#v", runtime.workload.AcceleratorBinding)

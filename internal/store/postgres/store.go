@@ -120,7 +120,18 @@ ORDER BY kind, resource_id
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	// Operation IDs come from immutable Management audit, not Desired JSON,
+	// Agent claims or Kubernetes labels. Legacy Desired remains unbound.
+	if err := s.attachOriginalOperationIDs(ctx, clusterID, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *Store) GetDesired(ctx context.Context, clusterID domain.ID, kind string, resourceID domain.ID) (agent.DesiredResource, bool, error) {
