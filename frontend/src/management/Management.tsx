@@ -34,6 +34,7 @@ import {
   type VerifiedPoolSelection,
 } from '@/management/workload-composer'
 import type { EvidenceCheck } from '@/management/evidence-check'
+import { classifyOperationVerdict } from '@/management/operation-verdict'
 import { receiptResourceScope } from '@/management/readback'
 
 const cardStyle: React.CSSProperties = {
@@ -117,6 +118,7 @@ export function ManagementApp() {
   const [verifiedSelection, setVerifiedSelection] = useState<VerifiedPoolSelection | null>(null)
   const [recentOps, setRecentOps] = useState<RecentOperation[]>([])
   const [feedback, setFeedback] = useState<Feedback>(null)
+  const operationVerdict = activeEvidence ? classifyOperationVerdict(activeEvidence) : null
 
   const scope: Scope = { cluster, project, kind, resource }
   // Updated on each render so a response for a superseded session/scope
@@ -1006,6 +1008,18 @@ export function ManagementApp() {
               <p className="text-xs text-[#66707a]" data-testid="evidence-check-time">
                 本页手动核对完成时间（浏览器时钟）：{evidenceCheckedAt ?? '未记录'}。这是只读查询结束时间，并非 Agent 心跳或实时 Job 状态。
               </p>
+              {operationVerdict && (
+                <div
+                  role="note"
+                  aria-label="Verified Operations verdict"
+                  data-testid="verified-operation-gate"
+                  className="text-sm text-[#754b22] bg-[#fff4e6] rounded p-3"
+                >
+                  <strong>Verified Operations：{operationVerdict.code}</strong>
+                  <p>{operationVerdict.detail}</p>
+                  <p className="text-xs mt-1">本判定仅由当前只读证据推导，未经密码学验证，不能授权执行或重试。</p>
+                </div>
+              )}
               <div
                 role="note"
                 className="text-sm text-[#34486b] bg-[#edf2fc] rounded p-3"
