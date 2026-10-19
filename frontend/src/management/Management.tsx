@@ -1010,7 +1010,7 @@ export function ManagementApp() {
               </p>
               {operationVerdict && (
                 <div
-                  role="note"
+                  role="group"
                   aria-label="Verified Operations verdict"
                   data-testid="verified-operation-gate"
                   className="text-sm text-[#754b22] bg-[#fff4e6] rounded p-3"
