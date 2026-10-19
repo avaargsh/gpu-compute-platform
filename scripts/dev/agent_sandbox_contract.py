@@ -126,13 +126,15 @@ def plan_transition(
         # Absence is meaningful only for an exact, verified lookup scope.
         # An unscoped provider 404 (or a contradictory physical reference)
         # must never authorize allocation or even assert a scoped NOOP.
-        if (observed.sandbox_ref is not None
-                or type(observed.generation) is not int
-                or not all((
-            observed.owner_scope, observed.workspace_id, observed.storage_ref,
-            observed.provider, observed.generation, observed.authority_digest,
-            observed.runtime_spec_digest,
-        ))):
+        if (
+            observed.sandbox_ref is not None
+            or type(observed.generation) is not int
+            or not all((
+                observed.owner_scope, observed.workspace_id, observed.storage_ref,
+                observed.provider, observed.generation, observed.authority_digest,
+                observed.runtime_spec_digest,
+            ))
+        ):
             return SandboxPlan(SandboxAction.OBSERVE_ONLY, "UNSCOPED_ABSENCE", False)
 
     if (
