@@ -1,0 +1,42 @@
+# Separate identity for the future Verified Operations read-only observer.
+# This installs NO workload, webhook, Service, issuer or signing key.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: verifiedops-observer
+  labels:
+    app.kubernetes.io/part-of: gpu-compute-platform
+    app.kubernetes.io/component: verifiedops-observer
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: verifiedops-observer
+  namespace: verifiedops-observer
+# An arbitrary Pod must not inherit this identity implicitly. A reviewed
+# Observer workload must opt in to a short-lived projected serviceAccountToken.
+automountServiceAccountToken: false
+---
+# The Observer calls Nodes().Get(pod.Spec.NodeName), not List/Watch.
+# It is intentionally NOT bound to the Agent or a Management ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: verifiedops-observer-node-get
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: verifiedops-observer-node-get
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: verifiedops-observer-node-get
+subjects:
+  - kind: ServiceAccount
+    name: verifiedops-observer
+    namespace: verifiedops-observer
