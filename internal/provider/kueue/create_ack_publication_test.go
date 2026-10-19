@@ -18,8 +18,13 @@ type ackCaptureClient struct {
 	captures int
 }
 
-func (c *ackCaptureClient) ApplyJobWithCreateResponse(_ context.Context, _ Job) (JobCreateResponse, error) {
+func (c *ackCaptureClient) ApplyJobWithGuardedCreate(ctx context.Context, _ Job, before func(context.Context) error) (JobCreateResponse, error) {
 	c.captures++
+	if c.response.Disposition == JobCreateAcknowledged || c.response.Disposition == JobRaceAdoptedUnbound {
+		if err := before(ctx); err != nil {
+			return JobCreateResponse{}, err
+		}
+	}
 	return c.response, c.err
 }
 
@@ -50,6 +55,7 @@ func TestKueueOnlyPublishesActualAPICreateACK(t *testing.T) {
 			}}
 			p := createACKProjection()
 			calls := 0
+			p.OnBeforeCreate = func(context.Context, baseprovider.JobCreateIntent) error { return nil }
 			p.OnCreateACK = func(_ context.Context, ack baseprovider.JobCreateACK) error {
 				calls++
 				if ack.UID != "returned-uid" || ack.ResourceVersion != "17" || ack.Name != "job-train-a" || ack.Namespace != "project-a" {
@@ -68,6 +74,7 @@ func TestKueueOnlyPublishesActualAPICreateACK(t *testing.T) {
 func TestKueuePublishFailureStopsObservationAndReportsRetryable(t *testing.T) {
 	c := &ackCaptureClient{fakeClient: &fakeClient{}, response: JobCreateResponse{Disposition: JobCreateAcknowledged, UID: "uid", ResourceVersion: "9"}}
 	p := createACKProjection()
+	p.OnBeforeCreate = func(context.Context, baseprovider.JobCreateIntent) error { return nil }
 	p.OnCreateACK = func(context.Context, baseprovider.JobCreateACK) error { return errors.New("disconnected") }
 	_, err := NewProvider(c).ReconcileWorkload(context.Background(), p)
 	if err == nil || !baseprovider.IsRetryable(err) {
@@ -81,6 +88,7 @@ func TestKueuePublishFailureStopsObservationAndReportsRetryable(t *testing.T) {
 }
 func TestKueueCannotCreateWithClaimedOperationOnLegacyAdapter(t *testing.T) {
 	p := createACKProjection()
+	p.OnBeforeCreate = func(context.Context, baseprovider.JobCreateIntent) error { return nil }
 	p.OnCreateACK = func(context.Context, baseprovider.JobCreateACK) error { return nil }
 	_, err := NewProvider(&fakeClient{}).ReconcileWorkload(context.Background(), p)
 	if err == nil || !strings.Contains(err.Error(), "capture unavailable") {
@@ -91,6 +99,7 @@ func TestKueueTimeoutCannotPublishACK(t *testing.T) {
 	c := &ackCaptureClient{fakeClient: &fakeClient{}, err: errors.New("lost ACK")}
 	p := createACKProjection()
 	calls := 0
+	p.OnBeforeCreate = func(context.Context, baseprovider.JobCreateIntent) error { return nil }
 	p.OnCreateACK = func(context.Context, baseprovider.JobCreateACK) error { calls++; return nil }
 	_, err := NewProvider(c).ReconcileWorkload(context.Background(), p)
 	if err == nil || calls != 0 {

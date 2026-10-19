@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 func TestCreateUIDCandidateClientPostsScopedJSON(t *testing.T) {
@@ -52,5 +53,24 @@ func TestCreateUIDCandidateClientRejectsRedirect(t *testing.T) {
 	c := New(origin.URL, origin.Client())
 	if err := c.PublishJobCreateUID(context.Background(), agent.JobCreateUIDCandidate{ClusterID: "cluster-a"}); err == nil || targetCalls != 0 {
 		t.Fatalf("client followed unsafe authenticated POST redirect: calls=%d", targetCalls)
+	}
+}
+
+func TestCreateAttemptClientUsesNonRedirectingAgentTransport(t *testing.T) {
+	count := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		if r.URL.Path != "/api/v1/agent/workload-create-attempt" {
+			t.Errorf("unexpected attempt route %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	c := New(server.URL, server.Client())
+	if err := c.PrepareJobCreateAttempt(context.Background(), verifiedops.JobCreateAttempt{
+		ClusterID: "cluster-a", OperationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ProjectID: "p", WorkloadID: "train", Generation: 1, Namespace: "research", JobName: "job-train", LeaseOwner: "agent-a",
+	}); err != nil || count != 1 {
+		t.Fatalf("failed attempt publication: %v count=%d", err, count)
 	}
 }

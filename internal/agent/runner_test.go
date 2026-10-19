@@ -8,6 +8,7 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/provider"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 type fakeControlPlane struct {
@@ -22,6 +23,8 @@ type fakeControlPlane struct {
 	finalizeErr            error
 	finalizeRequests       []FinalizeDesiredRequest
 	published              []JobCreateUIDCandidate
+	prepared               []verifiedops.JobCreateAttempt
+	prepareErr             error
 	publishErr             error
 	publishedBeforeRelease bool
 }

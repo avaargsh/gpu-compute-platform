@@ -10,6 +10,7 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/provider"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 type Runtime interface {
@@ -229,6 +230,16 @@ func (r *Runner) reconcile(ctx context.Context, item DesiredResource, bindings m
 			// The callback lives inside the leased reconciliation, not the
 			// eventual untrusted Kubernetes observation/report.
 			if publisher, ok := r.control.(CreateUIDPublisher); ok {
+				if preparer, available := r.control.(CreateAttemptPreparer); available {
+					projection.OnBeforeCreate = func(callCtx context.Context, intent provider.JobCreateIntent) error {
+						return preparer.PrepareJobCreateAttempt(callCtx, verifiedops.JobCreateAttempt{
+							OperationID: projection.OperationID, ClusterID: r.clusterID,
+							ProjectID: string(projection.ProjectID), WorkloadID: projection.WorkloadID,
+							Generation: projection.Generation, Namespace: intent.Namespace,
+							JobName: intent.Name, LeaseOwner: r.leaseOwner,
+						})
+					}
+				}
 				projection.OnCreateACK = func(callCtx context.Context, ack provider.JobCreateACK) error {
 					return publisher.PublishJobCreateUID(callCtx, JobCreateUIDCandidate{
 						ClusterID: r.clusterID, OperationID: projection.OperationID,

@@ -25,47 +25,14 @@ var bindingDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // Only a trusted Agent carrying a genuine Kubernetes CREATE response may
 // construct this value; same-generation GET/adoption is never enough.
 type JobCreateUIDBinding = verifiedops.JobCreateUIDBinding
+type JobCreateAttempt = verifiedops.JobCreateAttempt
 
-func validJobBinding(in JobCreateUIDBinding) bool {
-	return bindingOperationID.MatchString(in.OperationID) &&
-		in.ClusterID != "" && in.ProjectID != "" && in.WorkloadID != "" &&
-		in.Generation > 0 && strings.TrimSpace(in.LeaseOwner) != "" &&
-		strings.TrimSpace(in.JobUID) != "" && strings.TrimSpace(in.JobResourceVersion) != "" &&
-		len(validation.IsDNS1123Label(in.Namespace)) == 0 &&
-		len(validation.IsDNS1123Subdomain(in.JobName)) == 0 &&
-		in.JobName == "job-"+strings.NewReplacer("_", "-", ".", "-").Replace(strings.ToLower(string(in.WorkloadID)))
-}
-
-func equalJobBinding(a, b JobCreateUIDBinding) bool {
-	return a.OperationID == b.OperationID && a.ClusterID == b.ClusterID &&
-		a.ProjectID == b.ProjectID && a.WorkloadID == b.WorkloadID &&
-		a.Generation == b.Generation && a.Namespace == b.Namespace &&
-		a.JobName == b.JobName && a.JobUID == b.JobUID &&
-		a.JobResourceVersion == b.JobResourceVersion && a.LeaseOwner == b.LeaseOwner
-}
-
-// RecordJobCreateUID binds a candidate UID to an immutable Management CREATE
-// audit only while Desired, project/pool binding and Agent lease agree. It
-// cannot authenticate the Kubernetes response itself; that requires a trusted
-// Agent ingress and independent observer. No user-facing API invokes this.
-func (s *Store) RecordJobCreateUID(ctx context.Context, in JobCreateUIDBinding) error {
-	if !validJobBinding(in) {
-		return ErrCreateUIDUnproven
-	}
-	if s == nil || s.db == nil {
-		return fmt.Errorf("postgres database is required")
-	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
+func validateCreateAttemptTx(ctx context.Context, tx *sql.Tx, in verifiedops.JobCreateAttempt) error {
 	// Lock order must remain Desired -> Lease, as in Report/Finalize.
 	var generation int64
 	var desiredProject, pool string
 	var deleting sql.NullTime
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 SELECT generation, spec->>'projectID', spec->>'poolID', deletion_timestamp
 FROM desired_resources
 WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
@@ -140,6 +107,140 @@ SELECT provider FROM cluster_bindings WHERE pool_id=$1 AND cluster_id=$2
 		return ErrCreateUIDUnproven
 	}
 
+	return nil
+}
+
+func validCreateAttempt(in verifiedops.JobCreateAttempt) bool {
+	return bindingOperationID.MatchString(in.OperationID) &&
+		in.ClusterID != "" && in.ProjectID != "" && in.WorkloadID != "" &&
+		in.Generation > 0 && strings.TrimSpace(in.LeaseOwner) != "" &&
+		len(validation.IsDNS1123Label(in.Namespace)) == 0 &&
+		len(validation.IsDNS1123Subdomain(in.JobName)) == 0 &&
+		in.JobName == "job-"+strings.NewReplacer("_", "-", ".", "-").Replace(strings.ToLower(string(in.WorkloadID)))
+}
+
+// PrepareJobCreateAttempt is a one-shot lease-fenced operation admission.
+// A second call always returns unresolved, even by the original lease owner:
+// repeating CREATE after an ambiguous ACK must not create new provenance.
+func (s *Store) PrepareJobCreateAttempt(ctx context.Context, in verifiedops.JobCreateAttempt) error {
+	if !validCreateAttempt(in) {
+		return ErrCreateUIDUnproven
+	}
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres database is required")
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := validateCreateAttemptTx(ctx, tx, in); err != nil {
+		return err
+	}
+	var recorded string
+	err = tx.QueryRowContext(ctx, `
+INSERT INTO provider_job_create_attempts
+(operation_id,cluster_id,project_id,workload_id,generation,namespace,job_name,lease_owner)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+ON CONFLICT DO NOTHING RETURNING operation_id
+`, in.OperationID, in.ClusterID, in.ProjectID, in.WorkloadID, in.Generation,
+		in.Namespace, in.JobName, in.LeaseOwner).Scan(&recorded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return verifiedops.ErrCreateAttemptUnresolved
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// GetJobCreateAttemptState never infers UID ownership from Kubernetes GET.
+// PREPARED is returned as UNKNOWN until an actual CREATE ACK is durably
+// matched; a second Agent must not turn UNKNOWN into an ACK-bound claim.
+func (s *Store) GetJobCreateAttemptState(ctx context.Context,
+	operationID string, clusterID domain.ID, workloadID domain.ID, generation int64,
+) (string, bool, error) {
+	if s == nil || s.db == nil {
+		return "", false, fmt.Errorf("postgres database is required")
+	}
+	if !bindingOperationID.MatchString(operationID) || clusterID == "" ||
+		workloadID == "" || generation < 1 {
+		return "", false, ErrCreateUIDUnproven
+	}
+	var state string
+	err := s.db.QueryRowContext(ctx, `
+SELECT CASE WHEN b.operation_id IS NULL THEN 'UNKNOWN' ELSE 'ACK_BOUND' END
+FROM provider_job_create_attempts a
+LEFT JOIN provider_job_create_uid_bindings b ON b.operation_id=a.operation_id
+ AND b.cluster_id=a.cluster_id AND b.workload_id=a.workload_id
+ AND b.generation=a.generation AND b.lease_owner=a.lease_owner
+WHERE a.operation_id=$1 AND a.cluster_id=$2 AND a.workload_id=$3 AND a.generation=$4
+`, operationID, clusterID, workloadID, generation).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return state, err == nil, err
+}
+
+func validJobBinding(in JobCreateUIDBinding) bool {
+	return bindingOperationID.MatchString(in.OperationID) &&
+		in.ClusterID != "" && in.ProjectID != "" && in.WorkloadID != "" &&
+		in.Generation > 0 && strings.TrimSpace(in.LeaseOwner) != "" &&
+		strings.TrimSpace(in.JobUID) != "" && strings.TrimSpace(in.JobResourceVersion) != "" &&
+		len(validation.IsDNS1123Label(in.Namespace)) == 0 &&
+		len(validation.IsDNS1123Subdomain(in.JobName)) == 0 &&
+		in.JobName == "job-"+strings.NewReplacer("_", "-", ".", "-").Replace(strings.ToLower(string(in.WorkloadID)))
+}
+
+func equalJobBinding(a, b JobCreateUIDBinding) bool {
+	return a.OperationID == b.OperationID && a.ClusterID == b.ClusterID &&
+		a.ProjectID == b.ProjectID && a.WorkloadID == b.WorkloadID &&
+		a.Generation == b.Generation && a.Namespace == b.Namespace &&
+		a.JobName == b.JobName && a.JobUID == b.JobUID &&
+		a.JobResourceVersion == b.JobResourceVersion && a.LeaseOwner == b.LeaseOwner
+}
+
+// RecordJobCreateUID binds a candidate UID to an immutable Management CREATE
+// audit only while Desired, project/pool binding and Agent lease agree. It
+// cannot authenticate the Kubernetes response itself; that requires a trusted
+// Agent ingress and independent observer. No user-facing API invokes this.
+func (s *Store) RecordJobCreateUID(ctx context.Context, in JobCreateUIDBinding) error {
+	if !validJobBinding(in) {
+		return ErrCreateUIDUnproven
+	}
+	if s == nil || s.db == nil {
+		return fmt.Errorf("postgres database is required")
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := validateCreateAttemptTx(ctx, tx, JobCreateAttempt{OperationID: in.OperationID, ClusterID: in.ClusterID,
+		ProjectID: in.ProjectID, WorkloadID: in.WorkloadID, Generation: in.Generation,
+		Namespace: in.Namespace, JobName: in.JobName, LeaseOwner: in.LeaseOwner}); err != nil {
+		return err
+	}
+	// Never accept an ACK if no durable PREPARED intent existed beforehand.
+	// A GET, post-crash adoption, or unrelated lease cannot backfill one.
+	var preparedOwner, preparedNamespace, preparedName string
+	err = tx.QueryRowContext(ctx, `
+SELECT lease_owner,namespace,job_name FROM provider_job_create_attempts
+WHERE operation_id=$1 AND cluster_id=$2 AND project_id=$3
+  AND workload_id=$4 AND generation=$5
+FOR UPDATE
+`, in.OperationID, in.ClusterID, in.ProjectID, in.WorkloadID, in.Generation).Scan(
+		&preparedOwner, &preparedNamespace, &preparedName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrCreateUIDUnproven
+	}
+	if err != nil {
+		return err
+	}
+	if preparedOwner != in.LeaseOwner || preparedNamespace != in.Namespace || preparedName != in.JobName {
+		return ErrCreateUIDUnproven
+	}
 	// First successful binding wins; neither a replacement UID nor another
 	// operation for this same Workload generation may overwrite it.
 	_, err = tx.ExecContext(ctx, `

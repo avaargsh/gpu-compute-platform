@@ -233,3 +233,41 @@ func (a *AgentAPI) PublishJobCreateUID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// PrepareJobCreateAttempt requires the private scoped identity from mTLS.
+// It commits the one-shot attempt prior to the external Job CREATE.
+func (a *AgentAPI) PrepareJobCreateAttempt(w http.ResponseWriter, r *http.Request) {
+	cluster, authenticated := r.Context().Value(verifiedAgentScopeKey{}).(string)
+	if !authenticated || cluster == "" {
+		http.Error(w, "authenticated cluster agent required", http.StatusUnauthorized)
+		return
+	}
+	var in verifiedops.JobCreateAttempt
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if string(in.ClusterID) != cluster {
+		http.Error(w, "cluster agent scope mismatch", http.StatusForbidden)
+		return
+	}
+	persist, ok := a.store.(interface {
+		PrepareJobCreateAttempt(context.Context, verifiedops.JobCreateAttempt) error
+	})
+	if !ok {
+		http.Error(w, "durable CREATE attempt unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if err := persist.PrepareJobCreateAttempt(r.Context(), in); err != nil {
+		switch {
+		case errors.Is(err, verifiedops.ErrCreateUIDUnproven),
+			errors.Is(err, verifiedops.ErrCreateAttemptUnresolved),
+			errors.Is(err, agentstore.ErrLeaseLost):
+			http.Error(w, "CREATE attempt denied or unresolved", http.StatusConflict)
+		default:
+			http.Error(w, "durable CREATE attempt unavailable", http.StatusServiceUnavailable)
+		}
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusNoContent)
+}

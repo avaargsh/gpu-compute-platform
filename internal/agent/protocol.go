@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 type Registration struct {
@@ -84,6 +85,11 @@ type JobCreateUIDCandidate struct {
 
 // CreateUIDPublisher is separate from the legacy ControlPlane contract to
 // preserve existing stores and local callers without any proof capability.
+// CreateAttemptPreparer durably fences one external Job CREATE before sending it.
+type CreateAttemptPreparer interface {
+	PrepareJobCreateAttempt(context.Context, verifiedops.JobCreateAttempt) error
+}
+
 type CreateUIDPublisher interface {
 	PublishJobCreateUID(context.Context, JobCreateUIDCandidate) error
 }
