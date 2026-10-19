@@ -38,12 +38,24 @@ type WorkloadProjection struct {
 	Namespace  string
 	Generation int64
 	// OperationID is a non-authorizing original Management audit correlation.
-	OperationID        string
+	OperationID string
+	// OnCreateACK is invoked only for a genuine Job CREATE return. This
+	// ephemeral callback is never serialized, replayed, or inferred from GET.
+	OnCreateACK        func(context.Context, JobCreateACK) error `json:"-"`
 	Image              string
 	Command            []string
 	Accelerator        domain.AcceleratorRequest
 	AcceleratorBinding domain.AcceleratorBinding
 	Workspace          *domain.WorkspaceMount
+}
+
+// JobCreateACK records only the API-server-issued UID/RV from a successful
+// CREATE response; it is a candidate identity, not signed execution proof.
+type JobCreateACK struct {
+	Namespace       string
+	Name            string
+	UID             string
+	ResourceVersion string
 }
 
 type WorkloadObservation struct {

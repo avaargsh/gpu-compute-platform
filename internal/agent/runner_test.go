@@ -11,16 +11,19 @@ import (
 )
 
 type fakeControlPlane struct {
-	desired             []DesiredResource
-	reported            []Observation
-	leaseClaimed        bool
-	denyLease           bool
-	claimCalls          int
-	releaseCalls        int
-	reportBeforeRelease bool
-	reportErr           error
-	finalizeErr         error
-	finalizeRequests    []FinalizeDesiredRequest
+	desired                []DesiredResource
+	reported               []Observation
+	leaseClaimed           bool
+	denyLease              bool
+	claimCalls             int
+	releaseCalls           int
+	reportBeforeRelease    bool
+	reportErr              error
+	finalizeErr            error
+	finalizeRequests       []FinalizeDesiredRequest
+	published              []JobCreateUIDCandidate
+	publishErr             error
+	publishedBeforeRelease bool
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }

@@ -23,8 +23,33 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply resource claim: %w", classifyProviderError(err))
 		}
 	}
-	if err := p.client.ApplyJob(ctx, job); err != nil {
-		return baseprovider.WorkloadObservation{}, fmt.Errorf("apply job: %w", classifyProviderError(err))
+	if projection.OnCreateACK != nil && projection.OperationID != "" {
+		// A CREATE response may only come from the actual API-server write.
+		// Older test adapters and adoption-only clients cannot forge one.
+		capture, ok := p.client.(interface {
+			ApplyJobWithCreateResponse(context.Context, Job) (JobCreateResponse, error)
+		})
+		if !ok {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf("Kueue Job CREATE response capture unavailable")
+		}
+		result, err := capture.ApplyJobWithCreateResponse(ctx, job)
+		if err != nil {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply Job with CREATE capture: %w", classifyProviderError(err))
+		}
+		if result.Disposition == JobCreateAcknowledged {
+			// Publish synchronously before observing or reporting Ready. A
+			// failed publication must not masquerade as verified success.
+			if err := projection.OnCreateACK(ctx, baseprovider.JobCreateACK{
+				Namespace: job.Namespace, Name: job.Name,
+				UID: string(result.UID), ResourceVersion: result.ResourceVersion,
+			}); err != nil {
+				return baseprovider.WorkloadObservation{}, fmt.Errorf("publish Job CREATE candidate: %w", baseprovider.MarkRetryable(err))
+			}
+		}
+	} else {
+		if err := p.client.ApplyJob(ctx, job); err != nil {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply job: %w", classifyProviderError(err))
+		}
 	}
 
 	state, err := p.client.ObserveJob(ctx, job.Namespace, job.Name)
