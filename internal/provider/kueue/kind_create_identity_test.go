@@ -2,6 +2,7 @@ package kueue
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 	"testing"
@@ -106,6 +107,35 @@ func TestRealKindAPIServerJobCREATEOwnershipBoundaries(t *testing.T) {
 		}
 	}()
 	client := NewKubeClient(core, nil)
+	// The new one-shot guard runs only if a real GET returned 404; a
+	// rejected durable PREPARED must abort before reaching API-server CREATE.
+	preparedCalls := 0
+	guarded := kindJob(ns.Name, "job-guarded")
+	receipt, err := client.ApplyJobWithGuardedCreate(ctx, guarded, func(context.Context) error {
+		preparedCalls++
+		return nil
+	})
+	if err != nil || receipt.Disposition != JobCreateAcknowledged || receipt.UID == "" || preparedCalls != 1 {
+		t.Fatalf("real guarded CREATE failed: %#v %v prepared=%d", receipt, err, preparedCalls)
+	}
+	again, err := client.ApplyJobWithGuardedCreate(ctx, guarded, func(context.Context) error {
+		preparedCalls++
+		return nil
+	})
+	if err != nil || again.Disposition != JobExistingUnbound || again.UID != "" || preparedCalls != 1 {
+		t.Fatalf("existing Job re-prepared or minted a UID: %#v %v prepared=%d", again, err, preparedCalls)
+	}
+	deniedJob := kindJob(ns.Name, "job-guard-denied")
+	_, err = client.ApplyJobWithGuardedCreate(ctx, deniedJob, func(context.Context) error {
+		return verifiedops.ErrCreateAttemptUnresolved
+	})
+	if !errors.Is(err, verifiedops.ErrCreateAttemptUnresolved) {
+		t.Fatalf("unresolved PREPARED did not stop CREATE: %v", err)
+	}
+	if _, err := core.BatchV1().Jobs(ns.Name).Get(ctx, deniedJob.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("guard failure still wrote Job to real API server: %v", err)
+	}
+
 	// Exact CREATE ACK is the only UID/RV candidate allowed to enter a
 	// durable operation binding. Later GET is never an equivalent receipt.
 	workload := kindJob(ns.Name, "job-ack")

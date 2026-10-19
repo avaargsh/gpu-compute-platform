@@ -17,10 +17,17 @@ actual matching candidate record. No recovery step may turn UNKNOWN into
 ACK_BOUND via a GET. In particular, the operation status is not a signed proof
 and does not establish actual Job outcome or authorization.
 
-**Integration boundary:** this PR only introduces and tests the PostgreSQL
-journal and privilege-denial contract. It does not wire the Agent/Kueue
-pre-CREATE callback or publish endpoint. The existing write path is not yet
-compatible with requiring a prepared attempt: no rollout/merge until the
-Agent mTLS Prepare endpoint and pre-CREATE guard arrive in a stacked PR,
-pass full CI, and real kind race/restart tests are green. No backwards-compatible
-relaxation of the pre-create invariant is permissible.
+**Integrated path:** the Agent creates the attempt via the same mTLS-only
+cluster-scoped protocol. The Kueue adapter calls this endpoint after a Job
+GET returns NotFound, immediately before actual CREATE; only then can a
+returned UID/RV flow into existing candidate persistence. A durable PREPARED
+failure stops the API-server CREATE. Any non-Management Workload remains
+unbound; a claimed Management operation missing the pre-CREATE or ACK
+publisher fails closed, without falling back to legacy direct CREATE.
+
+The real kind acceptance now also exercises a guarded CREATE, an existing
+Job that must not prepare again, and a rejected PREPARED that must never
+write a Job to the API server. Crash-before/after-Kubernetes remains
+conservatively UNKNOWN after restart; that ambiguity is not magically
+resolved. Do not deploy before CI/DB grants and Agent mTLS validation pass.
+No backwards-compatible relaxation of the pre-CREATE invariant is allowed.
