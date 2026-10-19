@@ -25,13 +25,14 @@ var bindingDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // Only a trusted Agent carrying a genuine Kubernetes CREATE response may
 // construct this value; same-generation GET/adoption is never enough.
 type JobCreateUIDBinding = verifiedops.JobCreateUIDBinding
+type JobCreateAttempt = verifiedops.JobCreateAttempt
 
 func validateCreateAttemptTx(ctx context.Context, tx *sql.Tx, in verifiedops.JobCreateAttempt) error {
 	// Lock order must remain Desired -> Lease, as in Report/Finalize.
 	var generation int64
 	var desiredProject, pool string
 	var deleting sql.NullTime
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 SELECT generation, spec->>'projectID', spec->>'poolID', deletion_timestamp
 FROM desired_resources
 WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
