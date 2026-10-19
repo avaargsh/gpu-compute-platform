@@ -48,7 +48,7 @@ func TestUIDCandidateSinkRejectsPlainHTTPAndCrossClusterSpoofing(t *testing.T) {
 		{"other-cluster-cert", "spiffe://platform.example/cluster/cluster-b/agent", body, http.StatusForbidden},
 		{"duplicate-cluster-id", clusterAIdentity, strings.Replace(body, `"clusterId":"cluster-a"`, `"clusterId":"cluster-a","ClusterId":"cluster-b"`, 1), http.StatusBadRequest},
 		{"wrong-operation-scope", clusterAIdentity, strings.Replace(body, `"clusterId":"cluster-a"`, `"clusterId":"cluster-b"`, 1), http.StatusForbidden},
-	}{
+	} {
 		t.Run(test.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			protected.ServeHTTP(rec, agentRequest(t, http.MethodPost, path, test.payload, test.identity))

@@ -26,9 +26,9 @@ type Heartbeat struct {
 }
 
 type DesiredResource struct {
-	Kind              string         `json:"kind"`
-	ID                domain.ID      `json:"id"`
-	Generation        int64          `json:"generation"`
+	Kind       string    `json:"kind"`
+	ID         domain.ID `json:"id"`
+	Generation int64     `json:"generation"`
 	// OperationID is an optional server-derived Management CREATE audit correlation.
 	// It is never an authorization capability or proof of Kubernetes CREATE.
 	OperationID       string         `json:"operationId,omitempty"`

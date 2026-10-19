@@ -30,18 +30,18 @@ type PoolObservation struct {
 }
 
 type WorkloadProjection struct {
-	Provider           string
-	WorkloadID         domain.ID
-	ProjectID          domain.ID
-	PoolID             domain.ID
-	ClusterID          domain.ID
-	Namespace          string
-	Generation         int64
+	Provider   string
+	WorkloadID domain.ID
+	ProjectID  domain.ID
+	PoolID     domain.ID
+	ClusterID  domain.ID
+	Namespace  string
+	Generation int64
 	// OperationID is a non-authorizing original Management audit correlation.
-	OperationID        string
+	OperationID string
 	// OnCreateACK is invoked only for a genuine Job CREATE return. This
 	// ephemeral callback is never serialized, replayed, or inferred from GET.
-	OnCreateACK       func(context.Context, JobCreateACK) error `json:"-"`
+	OnCreateACK        func(context.Context, JobCreateACK) error `json:"-"`
 	Image              string
 	Command            []string
 	Accelerator        domain.AcceleratorRequest
