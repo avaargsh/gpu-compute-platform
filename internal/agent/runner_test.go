@@ -21,6 +21,9 @@ type fakeControlPlane struct {
 	reportErr           error
 	finalizeErr         error
 	finalizeRequests    []FinalizeDesiredRequest
+	published           []JobCreateUIDCandidate
+	publishErr          error
+	publishedBeforeRelease bool
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }
