@@ -25,6 +25,7 @@ REVOKE ALL PRIVILEGES ON TABLE
   public.deletion_tombstones,
   public.resource_observations,
   public.reconcile_leases,
+  public.provider_job_create_uid_bindings,
   public.placement_migrations,
   public.cluster_agents
 FROM gpu_management_runtime;
