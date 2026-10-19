@@ -57,16 +57,20 @@ func TestCreateUIDCandidateClientRejectsRedirect(t *testing.T) {
 }
 
 func TestCreateAttemptClientUsesNonRedirectingAgentTransport(t *testing.T) {
-	count:=0
-	server:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+	count := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		count++
-		if r.URL.Path!="/api/v1/agent/workload-create-attempt"{t.Errorf("unexpected attempt route %s",r.URL.Path)}
+		if r.URL.Path != "/api/v1/agent/workload-create-attempt" {
+			t.Errorf("unexpected attempt route %s", r.URL.Path)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	c:=New(server.URL,server.Client())
-	if err:=c.PrepareJobCreateAttempt(context.Background(),verifiedops.JobCreateAttempt{
-		ClusterID:"cluster-a",OperationID:"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		ProjectID:"p",WorkloadID:"train",Generation:1,Namespace:"research",JobName:"job-train",LeaseOwner:"agent-a",
-	});err!=nil||count!=1{t.Fatalf("failed attempt publication: %v count=%d",err,count)}
+	c := New(server.URL, server.Client())
+	if err := c.PrepareJobCreateAttempt(context.Background(), verifiedops.JobCreateAttempt{
+		ClusterID: "cluster-a", OperationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ProjectID: "p", WorkloadID: "train", Generation: 1, Namespace: "research", JobName: "job-train", LeaseOwner: "agent-a",
+	}); err != nil || count != 1 {
+		t.Fatalf("failed attempt publication: %v count=%d", err, count)
+	}
 }

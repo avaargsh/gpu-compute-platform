@@ -136,46 +136,54 @@ func TestJobCreateResponseFailClosedOnForbiddenAndGenerationDrift(t *testing.T) 
 func TestGuardedKubernetesCREATEPreparesOnlyWhenActuallyNeeded(t *testing.T) {
 	ctx := context.Background()
 	owned, err := jobObject(responseJob())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	owned.UID = types.UID("already-there")
 	owned.ResourceVersion = "22"
 	existing := kubefake.NewSimpleClientset(owned)
 	prepared := 0
-	got, err := NewKubeClient(existing,nil).ApplyJobWithGuardedCreate(ctx,responseJob(),
-		func(context.Context) error { prepared++;return nil })
+	got, err := NewKubeClient(existing, nil).ApplyJobWithGuardedCreate(ctx, responseJob(),
+		func(context.Context) error { prepared++; return nil })
 	if err != nil || got.Disposition != JobExistingUnbound || prepared != 0 {
-		t.Fatalf("same-name GET must not prepare a new CREATE: %#v %v prepared %d",got,err,prepared)
+		t.Fatalf("same-name GET must not prepare a new CREATE: %#v %v prepared %d", got, err, prepared)
 	}
 	absent := kubefake.NewSimpleClientset()
-	got,err = NewKubeClient(absent,nil).ApplyJobWithGuardedCreate(ctx,responseJob(),
-		func(context.Context) error { prepared++;return verifiedops.ErrCreateAttemptUnresolved })
-	if !errors.Is(err,verifiedops.ErrCreateAttemptUnresolved)||got.UID!=""||prepared!=1 {
-		t.Fatalf("unresolved durable attempt allowed CREATE: %#v err %v prepared %d",got,err,prepared)
+	got, err = NewKubeClient(absent, nil).ApplyJobWithGuardedCreate(ctx, responseJob(),
+		func(context.Context) error { prepared++; return verifiedops.ErrCreateAttemptUnresolved })
+	if !errors.Is(err, verifiedops.ErrCreateAttemptUnresolved) || got.UID != "" || prepared != 1 {
+		t.Fatalf("unresolved durable attempt allowed CREATE: %#v err %v prepared %d", got, err, prepared)
 	}
-	for _,action:=range absent.Actions(){
-		if action.GetVerb()=="create" { t.Fatalf("Kubernetes CREATE occurred despite failed prepare: %#v",absent.Actions()) }
+	for _, action := range absent.Actions() {
+		if action.GetVerb() == "create" {
+			t.Fatalf("Kubernetes CREATE occurred despite failed prepare: %#v", absent.Actions())
+		}
 	}
 	// The original method remains a separate unverified provider API.
-	if _,err:=NewKubeClient(absent,nil).ApplyJobWithGuardedCreate(ctx,responseJob(),nil);err==nil{
+	if _, err := NewKubeClient(absent, nil).ApplyJobWithGuardedCreate(ctx, responseJob(), nil); err == nil {
 		t.Fatal("nil pre-CREATE guard accepted")
 	}
 }
 
 func TestGuardedKubernetesCREATEMarksLostACKAsUnbound(t *testing.T) {
-	client:=kubefake.NewSimpleClientset()
-	prepared:=0
-	client.PrependReactor("create","jobs",func(action ktesting.Action)(bool,runtime.Object,error){
-		job:=action.(ktesting.CreateAction).GetObject().(*batchv1.Job).DeepCopy()
-		job.UID="ack-was-lost"
-		job.ResourceVersion="404"
-		if err:=client.Tracker().Create(batchv1.SchemeGroupVersion.WithResource("jobs"),job,action.GetNamespace());err!=nil{t.Fatal(err)}
-		return true,nil,apierrors.NewTimeoutError("ack lost after real API write",1)
+	client := kubefake.NewSimpleClientset()
+	prepared := 0
+	client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		job := action.(ktesting.CreateAction).GetObject().(*batchv1.Job).DeepCopy()
+		job.UID = "ack-was-lost"
+		job.ResourceVersion = "404"
+		if err := client.Tracker().Create(batchv1.SchemeGroupVersion.WithResource("jobs"), job, action.GetNamespace()); err != nil {
+			t.Fatal(err)
+		}
+		return true, nil, apierrors.NewTimeoutError("ack lost after real API write", 1)
 	})
-	kube:=NewKubeClient(client,nil)
-	first,err:=kube.ApplyJobWithGuardedCreate(context.Background(),responseJob(),func(context.Context)error{prepared++;return nil})
-	if !apierrors.IsTimeout(err)||first.UID!=""||prepared!=1{t.Fatalf("lost ACK: %#v %v prepared=%d",first,err,prepared)}
-	next,err:=kube.ApplyJobWithGuardedCreate(context.Background(),responseJob(),func(context.Context)error{prepared++;return nil})
-	if err!=nil||next.Disposition!=JobExistingUnbound||next.UID!=""||prepared!=1{
-		t.Fatalf("later GET invented CREATE or prepared again: %#v %v prepared=%d",next,err,prepared)
+	kube := NewKubeClient(client, nil)
+	first, err := kube.ApplyJobWithGuardedCreate(context.Background(), responseJob(), func(context.Context) error { prepared++; return nil })
+	if !apierrors.IsTimeout(err) || first.UID != "" || prepared != 1 {
+		t.Fatalf("lost ACK: %#v %v prepared=%d", first, err, prepared)
+	}
+	next, err := kube.ApplyJobWithGuardedCreate(context.Background(), responseJob(), func(context.Context) error { prepared++; return nil })
+	if err != nil || next.Disposition != JobExistingUnbound || next.UID != "" || prepared != 1 {
+		t.Fatalf("later GET invented CREATE or prepared again: %#v %v prepared=%d", next, err, prepared)
 	}
 }

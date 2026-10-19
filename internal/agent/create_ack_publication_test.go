@@ -109,10 +109,12 @@ func TestRunnerWithoutOriginalAuditCannotMintOperationID(t *testing.T) {
 func TestRunnerPreCREATEFailureNeverPublishesACK(t *testing.T) {
 	control, _, runner := createACKRunnerFixture()
 	control.prepareErr = verifiedops.ErrCreateAttemptUnresolved
-	if err := runner.Sync(context.Background()); err != nil { t.Fatal(err) }
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if len(control.prepared) != 1 || len(control.published) != 0 ||
 		len(control.reported) != 1 || control.releaseCalls != 2 {
 		t.Fatalf("ambiguous pre-CREATE incorrectly published/report success: prepared=%d published=%d report=%d release=%d",
-			len(control.prepared),len(control.published),len(control.reported),control.releaseCalls)
+			len(control.prepared), len(control.published), len(control.reported), control.releaseCalls)
 	}
 }
