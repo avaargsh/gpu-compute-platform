@@ -39,10 +39,10 @@ func TestUIDCandidateSinkRejectsPlainHTTPAndCrossClusterSpoofing(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, test := range []struct {
-		name string
+		name     string
 		identity string
-		payload string
-		want int
+		payload  string
+		want     int
 	}{
 		{"no-cert", "", body, http.StatusUnauthorized},
 		{"other-cluster-cert", "spiffe://platform.example/cluster/cluster-b/agent", body, http.StatusForbidden},
