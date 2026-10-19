@@ -40,15 +40,7 @@ jobs:
       - name: Test actual short-lived ServiceAccount bearer identity and Job observer
         env:
           VERIFIEDOPS_OBSERVER_TOKEN_E2E: "1"
-        run: go test ./internal/verifiedops -run '^TestRealKindObserverShortLivedSATokenAndBoundJob
-        if: failure()
-        run: |
-          kubectl get roles,rolebindings -n verifiedops-rbac-a -o wide || true
-          kubectl get clusterrolebinding verifiedops-observer-node-get || true
-      - name: Cleanup
-        if: always()
-        run: kind delete cluster --name verifiedops-rbac-ci || true
- -count=1 -timeout=180s -v
+        run: go test ./internal/verifiedops -run '^TestRealKindObserverShortLivedSATokenAndBoundJob$' -count=1 -timeout=180s -v
       - name: Failure diagnostics
         if: failure()
         run: |
