@@ -28,7 +28,7 @@ func TestDesiredProjectsOriginalManagementOperationWithoutSpecInjection(t *testi
 	originalID := fmt.Sprintf("%032x", uint64(id))
 	otherID := fmt.Sprintf("%032x", uint64(id+1))
 	store := New(db)
-	if err := store.UpsertDesired(ctx, cluster, agent.DesiredResource{
+	if err := store.UpsertDesired(ctx, domain.ID(cluster), agent.DesiredResource{
 		Kind: "Workload", ID: domain.ID(workload), Generation: 1,
 		Spec: map[string]any{
 			"projectID": project, "poolID": "pool-a", "operationId": "user-forged",
