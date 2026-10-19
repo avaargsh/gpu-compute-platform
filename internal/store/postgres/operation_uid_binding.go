@@ -41,7 +41,8 @@ func validJobBinding(in JobCreateUIDBinding) bool {
 		in.Generation > 0 && strings.TrimSpace(in.LeaseOwner) != "" &&
 		strings.TrimSpace(in.JobUID) != "" && strings.TrimSpace(in.JobResourceVersion) != "" &&
 		len(validation.IsDNS1123Label(in.Namespace)) == 0 &&
-		len(validation.IsDNS1123Subdomain(in.JobName)) == 0
+		len(validation.IsDNS1123Subdomain(in.JobName)) == 0 &&
+		in.JobName == "job-"+strings.NewReplacer("_", "-", ".", "-").Replace(strings.ToLower(string(in.WorkloadID)))
 }
 
 func equalJobBinding(a, b JobCreateUIDBinding) bool {
@@ -91,7 +92,7 @@ FOR SHARE
 	var owner string
 	var leaseValid bool
 	err = tx.QueryRowContext(ctx, `
-SELECT owner, lease_until > now()
+SELECT owner, lease_until > clock_timestamp()
 FROM reconcile_leases
 WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
 FOR UPDATE

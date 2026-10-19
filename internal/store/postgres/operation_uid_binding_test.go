@@ -33,7 +33,7 @@ func newCreateUIDFixture(t *testing.T) (*Store, JobCreateUIDBinding) {
 	binding := JobCreateUIDBinding{
 		OperationID: fmt.Sprintf("%032x", uint64(suffix)),
 		ClusterID: domain.ID(cluster), ProjectID: project, WorkloadID: domain.ID(workload),
-		Generation: 1, Namespace: "research", JobName: "job-train",
+		Generation: 1, Namespace: "research", JobName: "job-" + workload,
 		JobUID: "uid-from-apiserver", JobResourceVersion: "77",
 		LeaseOwner: "trusted-agent",
 	}
@@ -78,6 +78,13 @@ func newCreateUIDFixture(t *testing.T) (*Store, JobCreateUIDBinding) {
 func TestJobCreateUIDRequiresOriginalAuditAndLiveLease(t *testing.T) {
 	store, original := newCreateUIDFixture(t)
 	ctx := context.Background()
+	// Naming is the provider's deterministic Job projection, not an arbitrary
+	// same-namespace object chosen by a caller.
+	spoofed := original
+	spoofed.JobName = "job-foreign"
+	if err := store.RecordJobCreateUID(ctx, spoofed); !errors.Is(err, ErrCreateUIDUnproven) {
+		t.Fatalf("foreign Job name was accepted: %v", err)
+	}
 	if err := store.RecordJobCreateUID(ctx, original); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +102,7 @@ func TestJobCreateUIDRequiresOriginalAuditAndLiveLease(t *testing.T) {
 	}{
 		{"replaced-uid", func(x *JobCreateUIDBinding) { x.JobUID = "replacement-uid" }, ErrCreateUIDConflict},
 		{"changed-resource-version", func(x *JobCreateUIDBinding) { x.JobResourceVersion = "88" }, ErrCreateUIDConflict},
-		{"changed-job-name", func(x *JobCreateUIDBinding) { x.JobName = "foreign-job" }, ErrCreateUIDConflict},
+		{"changed-job-name", func(x *JobCreateUIDBinding) { x.JobName = "foreign-job" }, ErrCreateUIDUnproven},
 		{"different-project", func(x *JobCreateUIDBinding) { x.ProjectID = "foreign" }, ErrCreateUIDUnproven},
 		{"uncommitted-operation", func(x *JobCreateUIDBinding) { x.OperationID = strings.Repeat("f", 32) }, ErrCreateUIDUnproven},
 		{"new-generation", func(x *JobCreateUIDBinding) { x.Generation = 2 }, ErrCreateUIDUnproven},
