@@ -66,6 +66,28 @@ type Observation struct {
 	EvidenceRefs       []string           `json:"evidenceRefs,omitempty"`
 }
 
+// JobCreateUIDCandidate travels only from an authenticated Cluster Agent to
+// the server. The server must independently check immutable audit + lease.
+// A returned 204 records an unverified candidate, not ownership proof.
+type JobCreateUIDCandidate struct {
+	ClusterID          domain.ID `json:"clusterId"`
+	OperationID        string    `json:"operationId"`
+	ProjectID          string    `json:"projectId"`
+	WorkloadID         domain.ID `json:"workloadId"`
+	Generation         int64     `json:"generation"`
+	Namespace          string    `json:"namespace"`
+	JobName            string    `json:"jobName"`
+	JobUID             string    `json:"jobUid"`
+	JobResourceVersion string    `json:"jobResourceVersion"`
+	LeaseOwner         string    `json:"leaseOwner"`
+}
+
+// CreateUIDPublisher is separate from the legacy ControlPlane contract to
+// preserve existing stores and local callers without any proof capability.
+type CreateUIDPublisher interface {
+	PublishJobCreateUID(context.Context, JobCreateUIDCandidate) error
+}
+
 type ControlPlane interface {
 	Register(context.Context, Registration) error
 	Heartbeat(context.Context, Heartbeat) error

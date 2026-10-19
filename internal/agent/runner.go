@@ -225,6 +225,21 @@ func (r *Runner) reconcile(ctx context.Context, item DesiredResource, bindings m
 			return Observation{}, fmt.Errorf("accelerator binding not found: %s", projection.Accelerator.Class)
 		}
 		projection.AcceleratorBinding = binding
+		if projection.OperationID != "" {
+			// The callback lives inside the leased reconciliation, not the
+			// eventual untrusted Kubernetes observation/report.
+			if publisher, ok := r.control.(CreateUIDPublisher); ok {
+				projection.OnCreateACK = func(callCtx context.Context, ack provider.JobCreateACK) error {
+					return publisher.PublishJobCreateUID(callCtx, JobCreateUIDCandidate{
+						ClusterID: r.clusterID, OperationID: projection.OperationID,
+						ProjectID: string(projection.ProjectID), WorkloadID: projection.WorkloadID,
+						Generation: projection.Generation, Namespace: ack.Namespace,
+						JobName: ack.Name, JobUID: ack.UID,
+						JobResourceVersion: ack.ResourceVersion, LeaseOwner: r.leaseOwner,
+					})
+				}
+			}
+		}
 		got, err := r.runtime.ReconcileWorkload(ctx, projection)
 		if err != nil {
 			return Observation{}, err

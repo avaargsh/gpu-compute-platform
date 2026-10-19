@@ -70,6 +70,12 @@ func (c *Client) FinalizeDesired(ctx context.Context, in agent.FinalizeDesiredRe
 	return c.post(ctx, "/api/v1/agent/finalize-desired", in)
 }
 
+// PublishJobCreateUID sends a candidate CREATE ACK via the same no-redirect
+// authenticated Agent transport. Never call it for GET/adopted resources.
+func (c *Client) PublishJobCreateUID(ctx context.Context, in agent.JobCreateUIDCandidate) error {
+	return c.post(ctx, "/api/v1/agent/workload-create-uid", in)
+}
+
 func (c *Client) Report(ctx context.Context, clusterID domain.ID, observations []agent.Observation) error {
 	payload := struct {
 		ClusterID    domain.ID           `json:"clusterId"`
