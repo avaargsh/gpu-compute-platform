@@ -78,7 +78,9 @@ func TestRealKindAPIServerJobCREATEOwnershipBoundaries(t *testing.T) {
 	if os.Getenv("VERIFIEDOPS_KIND_E2E") != "1" {
 		t.Skip("requires real kind/Kueue cluster and VERIFIEDOPS_KIND_E2E=1")
 	}
-	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
+	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(), &clientcmd.ConfigOverrides{},
+	).ClientConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
