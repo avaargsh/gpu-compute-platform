@@ -27,7 +27,7 @@ concurrency:
 jobs:
   chromium-postgres:
     name: Real Chromium / Management API / PostgreSQL
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 18
     services:
       postgres:
@@ -63,6 +63,9 @@ jobs:
       - name: Install pinned Portal dependencies
         working-directory: frontend
         run: npm ci
+      - name: Verify Management read-only contracts
+        working-directory: frontend
+        run: npm run management:test
       - name: Install ephemeral Playwright runner without lockfile mutations
         working-directory: frontend
         run: npm install --no-save --package-lock=false @playwright/test@1.56.1
