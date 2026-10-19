@@ -41,8 +41,13 @@ creation, no PVC mutation, and no claim of successful execution.
 1. `WorkspaceBinding` persists across runs: owner scope, workspace ID,
    storage reference, provider, generation, authority digest and runtime spec
    digest are bound together. The VM itself is ephemeral.
-2. Verified `ABSENT + RUNNING` -> `CREATE` (requires *fresh external approval*);
-   `ABSENT + PAUSED` -> `NOOP`. A sleeping user need not reserve compute.
+2. Only **verified and fully scoped** `ABSENT + RUNNING` -> `CREATE`
+   (requires *fresh external approval*); `ABSENT + PAUSED` -> `NOOP`.
+   The absence lookup must explicitly bind owner, workspace, storage, provider,
+   generation, authority digest and runtime spec digest, without a physical
+   sandbox reference. An unscoped 404, incomplete scope or contradictory
+   sandbox reference -> `OBSERVE_ONLY`; scoped identity mismatch ->
+   `CONFLICT`. A sleeping user need not reserve compute.
 3. Matching `RUNNING + PAUSED` -> `PAUSE`; matching `PAUSED + RUNNING` ->
    `RESUME`. A pause never implicitly deletes persistent storage.
 4. `UNKNOWN` or unverified observation -> `OBSERVE_ONLY`: do not create,
@@ -64,8 +69,9 @@ python3 -m unittest discover -s scripts/dev \
     -p 'test_agent_sandbox_contract.py' -v
 ```
 
-Includes on-demand allocation, pause/resume, UNKNOWN and unverified observation
-fail-closed, immutable identity drift, bad input shape and repeated planning.
+Includes scoped on-demand allocation, pause/resume, UNKNOWN, missing/foreign
+ABSENT identity and unverified observation fail-closed, immutable identity drift,
+bad input shape and repeated planning.
 
 ## Important gaps before a real provider
 
@@ -73,8 +79,10 @@ fail-closed, immutable identity drift, bad input shape and repeated planning.
   capability grants and independent operation proof.
 - Durable task-to-sandbox execution lease with fencing and CAS; authority
   cannot be inferred from a `requires_authorization` flag.
-- Provider lookup by deterministic physical ID, create-or-adopt and lost ACK
-  reconciliation; the reference intentionally never performs CREATE itself.
+- Provider lookup by deterministic scoped key or physical ID, independent
+  attestation of absence (the `verified` Boolean alone is not proof),
+  create-or-adopt and lost ACK reconciliation; the reference intentionally
+  never performs CREATE itself.
 - Browser Profile isolation, screenshot/live-control authorization, connection
   disruption handling after snapshot/restore.
 - Workspace volume/PVC access checks, secret isolation, encryption, backup,

@@ -58,7 +58,7 @@ class WorkspaceBinding:
                 self.authority_digest,
                 self.runtime_spec_digest,
             )
-        ) or self.generation < 1:
+        ) or type(self.generation) is not int or self.generation < 1:
             raise SandboxContractError("incomplete persistent workspace binding")
 
 
@@ -79,9 +79,13 @@ class SandboxObservation:
     def __post_init__(self) -> None:
         if not isinstance(self.state, SandboxState):
             raise SandboxContractError("invalid provider state")
+        if type(self.verified) is not bool:
+            raise SandboxContractError("observation verification must be boolean")
         if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
             raise SandboxContractError("observation requires timezone-aware time")
         if self.state in (SandboxState.RUNNING, SandboxState.PAUSED):
+            if type(self.generation) is not int or self.generation < 1:
+                raise SandboxContractError("active sandbox has invalid generation")
             if not all(
                 (
                     self.owner_scope,
@@ -119,9 +123,19 @@ def plan_transition(
     if observed.state is SandboxState.UNKNOWN:
         return SandboxPlan(SandboxAction.OBSERVE_ONLY, "UNKNOWN_PROVIDER_OUTCOME", False)
     if observed.state is SandboxState.ABSENT:
-        if desired is DesiredRuntime.PAUSED:
-            return SandboxPlan(SandboxAction.NOOP, "NO_SANDBOX_ALLOCATED", False)
-        return SandboxPlan(SandboxAction.CREATE, "ALLOCATE_ON_DEMAND", True)
+        # Absence is meaningful only for an exact, verified lookup scope.
+        # An unscoped provider 404 (or a contradictory physical reference)
+        # must never authorize allocation or even assert a scoped NOOP.
+        if (
+            observed.sandbox_ref is not None
+            or type(observed.generation) is not int
+            or not all((
+                observed.owner_scope, observed.workspace_id, observed.storage_ref,
+                observed.provider, observed.generation, observed.authority_digest,
+                observed.runtime_spec_digest,
+            ))
+        ):
+            return SandboxPlan(SandboxAction.OBSERVE_ONLY, "UNSCOPED_ABSENCE", False)
 
     if (
         observed.owner_scope != binding.owner_scope
@@ -133,6 +147,11 @@ def plan_transition(
         or observed.runtime_spec_digest != binding.runtime_spec_digest
     ):
         return SandboxPlan(SandboxAction.CONFLICT, "IMMUTABLE_BINDING_DRIFT", False)
+
+    if observed.state is SandboxState.ABSENT:
+        if desired is DesiredRuntime.PAUSED:
+            return SandboxPlan(SandboxAction.NOOP, "NO_SANDBOX_ALLOCATED", False)
+        return SandboxPlan(SandboxAction.CREATE, "ALLOCATE_ON_DEMAND", True)
 
     if observed.state is SandboxState.RUNNING:
         if desired is DesiredRuntime.PAUSED:
