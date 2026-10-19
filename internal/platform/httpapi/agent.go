@@ -9,7 +9,7 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
-	postgresstore "github.com/avaargsh/gpu-compute-platform/internal/store/postgres"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 type AgentAPI struct {
@@ -206,13 +206,13 @@ func (a *AgentAPI) PublishJobCreateUID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	persist, ok := a.store.(interface {
-		RecordJobCreateUID(context.Context, postgresstore.JobCreateUIDBinding) error
+		RecordJobCreateUID(context.Context, verifiedops.JobCreateUIDBinding) error
 	})
 	if !ok {
 		http.Error(w, "UID persistence unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	err := persist.RecordJobCreateUID(r.Context(), postgresstore.JobCreateUIDBinding{
+	err := persist.RecordJobCreateUID(r.Context(), verifiedops.JobCreateUIDBinding{
 		OperationID: in.OperationID, ClusterID: domain.ID(in.ClusterID),
 		ProjectID: in.ProjectID, WorkloadID: domain.ID(in.WorkloadID),
 		Generation: in.Generation, Namespace: in.Namespace, JobName: in.JobName,
@@ -221,8 +221,8 @@ func (a *AgentAPI) PublishJobCreateUID(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		switch {
-		case errors.Is(err, postgresstore.ErrCreateUIDUnproven),
-			errors.Is(err, postgresstore.ErrCreateUIDConflict),
+		case errors.Is(err, verifiedops.ErrCreateUIDUnproven),
+			errors.Is(err, verifiedops.ErrCreateUIDConflict),
 			errors.Is(err, agentstore.ErrLeaseLost):
 			http.Error(w, "UID binding rejected", http.StatusConflict)
 		default:

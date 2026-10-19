@@ -8,17 +8,17 @@ import (
 	"testing"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
-	postgresstore "github.com/avaargsh/gpu-compute-platform/internal/store/postgres"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 type recordingCreateUIDStore struct {
 	agentstore.Store
 	calls int
-	last  postgresstore.JobCreateUIDBinding
+	last  verifiedops.JobCreateUIDBinding
 	err   error
 }
 
-func (s *recordingCreateUIDStore) RecordJobCreateUID(_ context.Context, in postgresstore.JobCreateUIDBinding) error {
+func (s *recordingCreateUIDStore) RecordJobCreateUID(_ context.Context, in verifiedops.JobCreateUIDBinding) error {
 	s.calls++
 	s.last = in
 	return s.err
@@ -67,7 +67,7 @@ func TestUIDCandidateSinkRejectsPlainHTTPAndCrossClusterSpoofing(t *testing.T) {
 }
 
 func TestUIDCandidateSinkMapsStoreRejectionWithoutExposingIdentity(t *testing.T) {
-	store := &recordingCreateUIDStore{Store: agentstore.NewMemory(), err: postgresstore.ErrCreateUIDConflict}
+	store := &recordingCreateUIDStore{Store: agentstore.NewMemory(), err: verifiedops.ErrCreateUIDConflict}
 	handler, err := AgentMTLSRouter(NewRouterWithAgentStore(store), "platform.example")
 	if err != nil {
 		t.Fatal(err)
