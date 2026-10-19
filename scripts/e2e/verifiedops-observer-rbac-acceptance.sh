@@ -17,7 +17,7 @@ bash "$source_root/scripts/e2e/verifiedops-observer-project-rbac.sh" "$project_a
 
 expect_allowed() {
   local actual
-  actual="$(kubectl auth can-i --as="$identity" "$@" 2>&1)" || {
+  actual="$(kubectl auth can-i --as="$identity" "$@" 2>/dev/null)" || {
     echo "expected allowed: $*; got $actual" >&2
     return 1
   }
@@ -25,7 +25,7 @@ expect_allowed() {
 }
 expect_denied() {
   local actual
-  actual="$(kubectl auth can-i --as="$identity" "$@" 2>&1)" || {
+  actual="$(kubectl auth can-i --as="$identity" "$@" 2>/dev/null)" || {
     [[ "$actual" == "no" ]] && return 0
     echo "RBAC check failed (not a denial): $* => $actual" >&2
     return 1
