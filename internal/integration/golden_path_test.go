@@ -132,8 +132,8 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 	controller := true
 	_, err = coreClient.CoreV1().Pods("project-1").Create(ctx, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "job-train-1-pod",
-			Labels: map[string]string{"ai.compute/workload": "job-train-1"},
+			Name:            "job-train-1-pod",
+			Labels:          map[string]string{"ai.compute/workload": "job-train-1"},
 			OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &controller}},
 		},
 		Spec: corev1.PodSpec{NodeName: "node-a"},
