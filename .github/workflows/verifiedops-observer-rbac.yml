@@ -1,0 +1,41 @@
+name: Verified Operations / real Observer RBAC boundaries
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "deploy/kubernetes/verifiedops-observer/**"
+      - "scripts/e2e/verifiedops-observer-*.sh"
+      - ".github/workflows/verifiedops-observer-rbac.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observer-rbac:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax and minimal RBAC checks
+        run: |
+          bash -n scripts/e2e/verifiedops-observer-project-rbac.sh
+          bash -n scripts/e2e/verifiedops-observer-rbac-acceptance.sh
+      - name: Install pinned kind
+        run: |
+          curl --fail --location --retry 3 --output /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+      - name: Provision real API server
+        run: kind create cluster --name verifiedops-rbac-ci --image kindest/node:v1.34.0 --wait 120s
+      - name: Validate Observer namespace, limited grants and cross-project denials
+        run: bash scripts/e2e/verifiedops-observer-rbac-acceptance.sh
+      - name: Failure diagnostics
+        if: failure()
+        run: |
+          kubectl get roles,rolebindings -n verifiedops-rbac-a -o wide || true
+          kubectl get clusterrolebinding verifiedops-observer-node-get || true
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name verifiedops-rbac-ci || true
