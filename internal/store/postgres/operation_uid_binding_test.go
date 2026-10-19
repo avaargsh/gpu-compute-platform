@@ -32,7 +32,7 @@ func newCreateUIDFixture(t *testing.T) (*Store, JobCreateUIDBinding) {
 	workload := fmt.Sprintf("uidworkload-%d", suffix)
 	binding := JobCreateUIDBinding{
 		OperationID: fmt.Sprintf("%032x", uint64(suffix)),
-		ClusterID: domain.ID(cluster), ProjectID: project, WorkloadID: domain.ID(workload),
+		ClusterID:   domain.ID(cluster), ProjectID: project, WorkloadID: domain.ID(workload),
 		Generation: 1, Namespace: "research", JobName: "job-" + workload,
 		JobUID: "uid-from-apiserver", JobResourceVersion: "77",
 		LeaseOwner: "trusted-agent",
