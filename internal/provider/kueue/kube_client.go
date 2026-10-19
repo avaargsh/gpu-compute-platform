@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -236,7 +237,7 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 		return JobObservation{}, err
 	}
 	for _, pod := range pods.Items {
-		if podReady(pod.Status.Conditions) {
+		if readyPodOwnedByJob(pod, job) {
 			out.PodsReady = true
 			if !out.Failed && !out.Succeeded {
 				out.Phase = "Running"
@@ -245,6 +246,25 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 		}
 	}
 	return out, nil
+}
+
+// Ordinary status is not proof of execution ownership, but even a Ready
+// signal must be attributable to the exact API-server Job UID. Labels alone
+// can be forged by another Pod or left behind after name reuse.
+func readyPodOwnedByJob(pod corev1.Pod, job *batchv1.Job) bool {
+	if job == nil || job.UID == "" || pod.DeletionTimestamp != nil ||
+		pod.Status.Phase != corev1.PodRunning || pod.Spec.NodeName == "" ||
+		!podReady(pod.Status.Conditions) {
+		return false
+	}
+	for _, owner := range pod.OwnerReferences {
+		if owner.APIVersion == "batch/v1" && owner.Kind == "Job" &&
+			owner.Name == job.Name && owner.UID == job.UID &&
+			owner.Controller != nil && *owner.Controller {
+			return true
+		}
+	}
+	return false
 }
 
 // Guarded workload deletion verifies generation/ownership before applying

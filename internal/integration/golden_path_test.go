@@ -101,6 +101,14 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("job was not projected: %v", err)
 	}
+	// The fake API server does not assign a Job UID automatically. Give the
+	// simulated Job its API-server identity before creating controller-owned
+	// Pods; a label-only Ready Pod must not satisfy ordinary observations.
+	job.UID = "job-train-1-uid"
+	job, err = coreClient.BatchV1().Jobs("project-1").Update(ctx, job, metav1.UpdateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	workloadObject := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "kueue.x-k8s.io/v1beta1",
 		"kind":       "Workload",
@@ -121,12 +129,16 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	controller := true
 	_, err = coreClient.CoreV1().Pods("project-1").Create(ctx, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   "job-train-1-pod",
-			Labels: map[string]string{"ai.compute/workload": "job-train-1"},
+			Name:            "job-train-1-pod",
+			Labels:          map[string]string{"ai.compute/workload": "job-train-1"},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &controller}},
 		},
+		Spec: corev1.PodSpec{NodeName: "node-a"},
 		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
 			Conditions: []corev1.PodCondition{
 				{Type: corev1.PodReady, Status: corev1.ConditionTrue},
 			},

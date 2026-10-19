@@ -66,6 +66,7 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	job.UID = "job-train-1-uid"
 	job.Status.Active = 1
 	updatedJob, err := coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{})
 	if err != nil {
@@ -91,12 +92,16 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	controller := true
 	_, err = coreClient.CoreV1().Pods("project-1").Create(ctx, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   "job-train-1-pod",
-			Labels: map[string]string{"ai.compute/workload": "job-train-1"},
+			Name:            "job-train-1-pod",
+			Labels:          map[string]string{"ai.compute/workload": "job-train-1"},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &controller}},
 		},
+		Spec: corev1.PodSpec{NodeName: "node-a"},
 		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
 			Conditions: []corev1.PodCondition{
 				{Type: corev1.PodReady, Status: corev1.ConditionTrue},
 			},
@@ -150,13 +155,20 @@ func TestObserveJobDoesNotInferAdmissionFromRunningReadyPod(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	job.UID = "job-no-admission-uid"
 	job.Status.Active = 1
 	if _, err := coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
+	controller := true
 	if _, err := coreClient.CoreV1().Pods("project-1").Create(ctx, &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "ready-pod", Labels: map[string]string{"ai.compute/workload": "job-no-admission"}},
-		Status:     corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "ready-pod", Labels: map[string]string{"ai.compute/workload": "job-no-admission"},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &controller}},
+		},
+		Spec: corev1.PodSpec{NodeName: "node-a"},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning,
+			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
 	}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -169,6 +181,47 @@ func TestObserveJobDoesNotInferAdmissionFromRunningReadyPod(t *testing.T) {
 	}
 	if !observed.PodsReady || observed.Phase != "Running" {
 		t.Fatalf("expected running ready workload: %#v", observed)
+	}
+}
+
+func TestObserveJobRejectsLabelSpoofedAndRecreatedPod(t *testing.T) {
+	controller := true
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		change func(*corev1.Pod)
+		want   bool
+	}{
+		{"exact-controller", func(_ *corev1.Pod) {}, true},
+		{"label-only", func(p *corev1.Pod) { p.OwnerReferences = nil }, false},
+		{"replaced-job-uid", func(p *corev1.Pod) { p.OwnerReferences[0].UID = "old-uid" }, false},
+		{"not-controller", func(p *corev1.Pod) { no := false; p.OwnerReferences[0].Controller = &no }, false},
+		{"wrong-kind", func(p *corev1.Pod) { p.OwnerReferences[0].Kind = "ReplicaSet" }, false},
+		{"wrong-owner-name", func(p *corev1.Pod) { p.OwnerReferences[0].Name = "another" }, false},
+		{"pending", func(p *corev1.Pod) { p.Status.Phase = corev1.PodPending }, false},
+		{"not-scheduled", func(p *corev1.Pod) { p.Spec.NodeName = "" }, false},
+		{"deleting", func(p *corev1.Pod) { now := metav1.Now(); p.DeletionTimestamp = &now }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "job-t", Namespace: "ns-a", UID: "real-uid", ResourceVersion: "71"}}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-t", Namespace: "ns-a",
+					Labels: map[string]string{"ai.compute/workload": "job-t"},
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: "batch/v1", Kind: "Job", Name: "job-t", UID: job.UID, Controller: &controller,
+					}},
+				},
+				Spec: corev1.PodSpec{NodeName: "node-a"},
+				Status: corev1.PodStatus{Phase: corev1.PodRunning,
+					Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+			}
+			tc.change(pod)
+			client := NewKubeClient(kubefake.NewSimpleClientset(job, pod), nil)
+			observed, err := client.ObserveJob(ctx, "ns-a", "job-t")
+			if err != nil || observed.PodsReady != tc.want {
+				t.Fatalf("Ready attribution wrong for %s: observed=%#v err=%v", tc.name, observed, err)
+			}
+		})
 	}
 }
 
