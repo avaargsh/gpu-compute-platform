@@ -110,6 +110,22 @@ CREATE INDEX IF NOT EXISTS reconcile_leases_expiry_idx
 
 -- Candidate Job CREATE identity. A row is NOT signed execution evidence.
 -- Management's login may not read or mutate this Agent-owned candidate table.
+-- Persist BEFORE sending Job CREATE. A PREPARED row may already have
+-- performed the external API call even if no acknowledgement survived.
+-- Recover its outcome as UNKNOWN; never assign the UID using a GET.
+CREATE TABLE IF NOT EXISTS provider_job_create_attempts (
+    operation_id TEXT PRIMARY KEY CHECK (operation_id ~ '^[0-9a-f]{32}$'),
+    cluster_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    workload_id TEXT NOT NULL,
+    generation BIGINT NOT NULL CHECK (generation > 0),
+    namespace TEXT NOT NULL,
+    job_name TEXT NOT NULL,
+    lease_owner TEXT NOT NULL,
+    prepared_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    UNIQUE (cluster_id, workload_id, generation)
+);
+
 CREATE TABLE IF NOT EXISTS provider_job_create_uid_bindings (
     operation_id TEXT PRIMARY KEY CHECK (operation_id ~ '^[0-9a-f]{32}$'),
     cluster_id TEXT NOT NULL,

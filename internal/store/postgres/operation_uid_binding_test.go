@@ -12,6 +12,7 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 func newCreateUIDFixture(t *testing.T) (*Store, JobCreateUIDBinding) {
@@ -85,6 +86,12 @@ func TestJobCreateUIDRequiresOriginalAuditAndLiveLease(t *testing.T) {
 	if err := store.RecordJobCreateUID(ctx, spoofed); !errors.Is(err, ErrCreateUIDUnproven) {
 		t.Fatalf("foreign Job name was accepted: %v", err)
 	}
+	if err := store.PrepareJobCreateAttempt(ctx, verifiedops.JobCreateAttempt{
+		OperationID: original.OperationID,ClusterID: original.ClusterID,
+		ProjectID: original.ProjectID,WorkloadID: original.WorkloadID,
+		Generation: original.Generation,Namespace: original.Namespace,
+		JobName: original.JobName,LeaseOwner: original.LeaseOwner,
+	});err!=nil{t.Fatal(err)}
 	if err := store.RecordJobCreateUID(ctx, original); err != nil {
 		t.Fatal(err)
 	}
