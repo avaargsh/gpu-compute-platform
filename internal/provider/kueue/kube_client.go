@@ -90,13 +90,13 @@ type JobApplyDisposition string
 
 const (
 	JobCreateAcknowledged JobApplyDisposition = "CREATE_ACKNOWLEDGED"
-	JobExistingUnbound JobApplyDisposition = "EXISTING_UNBOUND"
+	JobExistingUnbound    JobApplyDisposition = "EXISTING_UNBOUND"
 	JobRaceAdoptedUnbound JobApplyDisposition = "RACE_ADOPTED_UNBOUND"
 )
 
 type JobCreateResponse struct {
-	Disposition JobApplyDisposition
-	UID types.UID
+	Disposition     JobApplyDisposition
+	UID             types.UID
 	ResourceVersion string
 }
 

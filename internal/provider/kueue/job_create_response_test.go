@@ -17,7 +17,7 @@ import (
 func responseJob() Job {
 	return Job{
 		Generation: 7, Name: "job-train", Namespace: "research",
-		Image: "example/train@sha256:" + strings.Repeat("a", 64),
+		Image:     "example/train@sha256:" + strings.Repeat("a", 64),
 		Resources: map[string]int64{"vendor.example/gpu": 1},
 	}
 }
@@ -130,4 +130,3 @@ func TestJobCreateResponseFailClosedOnForbiddenAndGenerationDrift(t *testing.T) 
 		t.Fatalf("generation drift must fail closed: %#v err=%v", r, err)
 	}
 }
-
