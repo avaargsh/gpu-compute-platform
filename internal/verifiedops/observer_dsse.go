@@ -3,9 +3,9 @@ package verifiedops
 import (
 	"bytes"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"errors"
 	"fmt"
 	"strings"
@@ -68,7 +68,7 @@ func VerifyObserverEnvelope(raw []byte, trust ObserverTrust, want ObserverSubjec
 		return out, ErrObserverUntrusted
 	}
 	var env SignedObserverEnvelope
-	if err := json.Unmarshal(raw, &env); err != nil {
+	if err := strictObserverJSON(raw, &env); err != nil {
 		return out, ErrObserverUntrusted
 	}
 	if env.PayloadType != ObserverPayloadType || len(env.Signatures) != 1 || env.Signatures[0].KeyID != trust.KeyID {
@@ -82,9 +82,7 @@ func VerifyObserverEnvelope(raw []byte, trust ObserverTrust, want ObserverSubjec
 	if err != nil || !ed25519.Verify(trust.PublicKey, dssePAE(env.PayloadType, payload), signature) {
 		return out, ErrObserverUntrusted
 	}
-	decoder := json.NewDecoder(bytes.NewReader(payload))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&out); err != nil {
+	if err := strictObserverJSON(payload, &out); err != nil {
 		return ObserverStatement{}, ErrObserverUntrusted
 	}
 	if out.Type != ObserverStatementType || out.PredicateType != ObserverPredicateType || len(out.Subject) != 1 ||
@@ -103,12 +101,22 @@ func VerifyObserverEnvelope(raw []byte, trust ObserverTrust, want ObserverSubjec
 	if len(digest) != 64 || strings.Trim(digest, "0123456789abcdef") != "" {
 		return ObserverStatement{}, ErrObserverUntrusted
 	}
-	// Reject a second JSON document appended after a signed statement.
-	var extra any
-	if decoder.Decode(&extra) == nil {
-		return ObserverStatement{}, ErrObserverUntrusted
-	}
 	return out, nil
 }
 
-var _ = sha256.Size
+
+// strictObserverJSON rejects trailing documents and unknown struct fields.
+// Duplicate-key detection remains a separate fail-closed admission requirement;
+// this offline primitive must not be used as a final authorization verdict.
+func strictObserverJSON(raw []byte, target any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return ErrObserverUntrusted
+	}
+	return nil
+}
