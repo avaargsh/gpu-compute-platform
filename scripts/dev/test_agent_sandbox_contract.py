@@ -104,6 +104,7 @@ class SandboxPlannerTests(unittest.TestCase):
             observation(SandboxState.ABSENT, sandbox_ref=None, owner_scope=None),
             observation(SandboxState.ABSENT, sandbox_ref=None, storage_ref=None),
             observation(SandboxState.ABSENT, sandbox_ref=None, generation=None),
+            observation(SandboxState.ABSENT, sandbox_ref=None, generation=True),
             observation(SandboxState.ABSENT, sandbox_ref=None, authority_digest=""),
         )
         for desired in (DesiredRuntime.RUNNING, DesiredRuntime.PAUSED):
@@ -154,6 +155,12 @@ class SandboxPlannerTests(unittest.TestCase):
             replace(binding(), owner_scope="")
         with self.assertRaises(SandboxContractError):
             replace(binding(), generation=0)
+        with self.assertRaises(SandboxContractError):
+            replace(binding(), generation=True)
+        with self.assertRaises(SandboxContractError):
+            observation(generation=True)
+        with self.assertRaises(SandboxContractError):
+            observation(verified="yes")
         with self.assertRaises(SandboxContractError):
             observation(sandbox_ref="")
         with self.assertRaises(SandboxContractError):
