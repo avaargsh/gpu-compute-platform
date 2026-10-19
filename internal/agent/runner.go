@@ -215,6 +215,7 @@ func (r *Runner) reconcile(ctx context.Context, item DesiredResource, bindings m
 		projection.WorkloadID = item.ID
 		projection.ClusterID = r.clusterID
 		projection.Generation = item.Generation
+		projection.OperationID = item.OperationID
 		poolBindings, ok := bindings[projection.PoolID]
 		if !ok {
 			return Observation{}, fmt.Errorf("accelerator bindings not found for pool %s", projection.PoolID)
@@ -260,6 +261,7 @@ func (r *Runner) delete(ctx context.Context, item DesiredResource, bindings map[
 		projection.WorkloadID = item.ID
 		projection.ClusterID = r.clusterID
 		projection.Generation = item.Generation
+		projection.OperationID = item.OperationID
 		if poolBindings, ok := bindings[projection.PoolID]; ok {
 			projection.AcceleratorBinding = poolBindings[projection.Accelerator.Class]
 		}

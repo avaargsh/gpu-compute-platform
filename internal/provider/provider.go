@@ -30,13 +30,15 @@ type PoolObservation struct {
 }
 
 type WorkloadProjection struct {
-	Provider           string
-	WorkloadID         domain.ID
-	ProjectID          domain.ID
-	PoolID             domain.ID
-	ClusterID          domain.ID
-	Namespace          string
-	Generation         int64
+	Provider   string
+	WorkloadID domain.ID
+	ProjectID  domain.ID
+	PoolID     domain.ID
+	ClusterID  domain.ID
+	Namespace  string
+	Generation int64
+	// OperationID is a non-authorizing original Management audit correlation.
+	OperationID        string
 	Image              string
 	Command            []string
 	Accelerator        domain.AcceleratorRequest
