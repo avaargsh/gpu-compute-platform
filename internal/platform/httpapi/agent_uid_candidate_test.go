@@ -79,3 +79,51 @@ func TestUIDCandidateSinkMapsStoreRejectionWithoutExposingIdentity(t *testing.T)
 		t.Fatalf("candidate conflict leaked provider evidence: status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
+
+type recordingCreateAttemptStore struct {
+	*recordingCreateUIDStore
+	attemptCalls int
+	lastAttempt verifiedops.JobCreateAttempt
+	attemptErr error
+}
+func (s *recordingCreateAttemptStore) PrepareJobCreateAttempt(_ context.Context, in verifiedops.JobCreateAttempt) error {
+	s.attemptCalls++
+	s.lastAttempt = in
+	return s.attemptErr
+}
+func TestPreparedJobCreateRequiresVerifiedClusterCertificate(t *testing.T) {
+	store:=&recordingCreateAttemptStore{recordingCreateUIDStore:&recordingCreateUIDStore{Store:agentstore.NewMemory()}}
+	routes:=NewRouterWithAgentStore(store)
+	body:=`{"clusterId":"cluster-a","operationId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","projectId":"p","workloadId":"train","generation":1,"namespace":"research","jobName":"job-train","leaseOwner":"agent-a"}`
+	path:="/api/v1/agent/workload-create-attempt"
+	plain:=httptest.NewRecorder()
+	routes.ServeHTTP(plain,agentRequest(t,http.MethodPost,path,body,clusterAIdentity))
+	if plain.Code!=http.StatusUnauthorized||store.attemptCalls!=0{t.Fatalf("unwrapped attempt sink: %d",plain.Code)}
+	protected,err:=AgentMTLSRouter(routes,"platform.example")
+	if err!=nil{t.Fatal(err)}
+	for _,tc:=range []struct{
+		name string
+		identity string
+		content string
+		want int
+	}{
+		{"missing-cert","",body,http.StatusUnauthorized},
+		{"other-cluster", "spiffe://platform.example/cluster/cluster-b/agent",body,http.StatusForbidden},
+		{"body-spoof",clusterAIdentity,strings.Replace(body,`"clusterId":"cluster-a"`,`"clusterId":"cluster-b"`,1),http.StatusForbidden},
+	}{
+		t.Run(tc.name,func(t *testing.T){
+			rec:=httptest.NewRecorder()
+			protected.ServeHTTP(rec,agentRequest(t,http.MethodPost,path,tc.content,tc.identity))
+			if rec.Code!=tc.want||store.attemptCalls!=0{t.Fatalf("scope escaped: %d calls=%d",rec.Code,store.attemptCalls)}
+		})
+	}
+	rec:=httptest.NewRecorder()
+	protected.ServeHTTP(rec,agentRequest(t,http.MethodPost,path,body,clusterAIdentity))
+	if rec.Code!=http.StatusNoContent||store.attemptCalls!=1||store.lastAttempt.OperationID!="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"{
+		t.Fatalf("verified Agent prepare failed: %d %#v",rec.Code,store.lastAttempt)
+	}
+	store.attemptErr=verifiedops.ErrCreateAttemptUnresolved
+	again:=httptest.NewRecorder()
+	protected.ServeHTTP(again,agentRequest(t,http.MethodPost,path,body,clusterAIdentity))
+	if again.Code!=http.StatusConflict{t.Fatalf("ambiguous retry allowed: %d",again.Code)}
+}

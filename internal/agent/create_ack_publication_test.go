@@ -65,6 +65,10 @@ func TestRunnerPublishesServerDerivedCreateBeforeReportAndRelease(t *testing.T) 
 	if err := runner.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	if len(control.prepared) != 1 || control.prepared[0].OperationID != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ||
+		control.prepared[0].JobName != "job-train-a" || control.prepared[0].LeaseOwner != "agent-lease-1" {
+		t.Fatalf("durable pre-CREATE missing or forged: %#v", control.prepared)
+	}
 	if len(control.published) != 1 {
 		t.Fatalf("expected one candidate publication: %#v", control.published)
 	}
@@ -99,5 +103,16 @@ func TestRunnerWithoutOriginalAuditCannotMintOperationID(t *testing.T) {
 	}
 	if len(control.published) != 0 || rt.workload.OnCreateACK != nil {
 		t.Fatalf("legacy Desired unexpectedly generated CREATE proof: %#v", control.published)
+	}
+}
+
+func TestRunnerPreCREATEFailureNeverPublishesACK(t *testing.T) {
+	control, _, runner := createACKRunnerFixture()
+	control.prepareErr = verifiedops.ErrCreateAttemptUnresolved
+	if err := runner.Sync(context.Background()); err != nil { t.Fatal(err) }
+	if len(control.prepared) != 1 || len(control.published) != 0 ||
+		len(control.reported) != 1 || control.releaseCalls != 2 {
+		t.Fatalf("ambiguous pre-CREATE incorrectly published/report success: prepared=%d published=%d report=%d release=%d",
+			len(control.prepared),len(control.published),len(control.reported),control.releaseCalls)
 	}
 }

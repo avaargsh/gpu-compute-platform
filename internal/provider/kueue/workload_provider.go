@@ -23,6 +23,11 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply resource claim: %w", classifyProviderError(err))
 		}
 	}
+	// A claimed Management operation must never bypass durable PREPARED.
+	// If the Agent transport lacks either endpoint, fail before CREATE.
+	if projection.OperationID != "" && (projection.OnBeforeCreate == nil || projection.OnCreateACK == nil) {
+		return baseprovider.WorkloadObservation{}, fmt.Errorf("claimed CREATE requires authenticated durable attempt and ACK publisher")
+	}
 	if projection.OnCreateACK != nil && projection.OperationID != "" {
 		if projection.OnBeforeCreate == nil {
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("durable pre-CREATE guard missing")
