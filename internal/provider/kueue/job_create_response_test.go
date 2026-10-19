@@ -8,7 +8,6 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	kubefake "k8s.io/client-go/kubernetes/fake"
@@ -132,6 +131,3 @@ func TestJobCreateResponseFailClosedOnForbiddenAndGenerationDrift(t *testing.T) 
 	}
 }
 
-// A test must not infer a Kubernetes CREATE acknowledgement from a synthetic
-// Desired commit, a Pod Ready condition or a GET-only read.
-var _ = metav1.GetOptions{}
