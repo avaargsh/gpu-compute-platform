@@ -302,6 +302,16 @@ func TestManagementActualLoginAuthorityAdmission(t *testing.T) {
 		"column-scoped RBAC mutation",
 	)
 	revoke(
+		"GRANT SELECT ON public.provider_job_create_uid_bindings TO "+login,
+		"REVOKE SELECT ON public.provider_job_create_uid_bindings FROM "+login,
+		"candidate provider UID table visible to Management",
+	)
+	revoke(
+		"GRANT INSERT ON public.provider_job_create_uid_bindings TO "+login,
+		"REVOKE INSERT ON public.provider_job_create_uid_bindings FROM "+login,
+		"candidate provider UID table writable by Management",
+	)
+	revoke(
 		"GRANT SELECT ON public.cluster_agents TO "+login,
 		"REVOKE SELECT ON public.cluster_agents FROM "+login,
 		"cross-plane Agent metadata access",

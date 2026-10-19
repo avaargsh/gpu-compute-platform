@@ -74,16 +74,17 @@ SELECT pg_catalog.has_table_privilege(current_user, $1::regclass, $2)
 	// No column-specific grant may silently bypass a forbidden table-wide
 	// grant check. has_any_column_privilege detects either form.
 	forbidden := map[string]string{
-		"management_project_grants":  "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
-		"project_bindings":           "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
-		"cluster_bindings":           "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
-		"deletion_tombstones":        "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
-		"desired_resources":          "DELETE,TRUNCATE,REFERENCES,TRIGGER",
-		"management_operation_audit": "UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
-		"resource_observations":      "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
-		"reconcile_leases":           "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
-		"placement_migrations":       "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
-		"cluster_agents":             "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"management_project_grants":        "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"project_bindings":                 "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"cluster_bindings":                 "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"deletion_tombstones":              "INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"desired_resources":                "DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"management_operation_audit":       "UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"resource_observations":            "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"reconcile_leases":                 "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"provider_job_create_uid_bindings": "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"placement_migrations":             "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"cluster_agents":                   "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
 	}
 	for table, privileges := range forbidden {
 		var tableGrant bool
