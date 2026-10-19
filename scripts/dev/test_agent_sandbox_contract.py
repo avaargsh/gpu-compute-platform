@@ -49,13 +49,13 @@ def observation(state=SandboxState.RUNNING, **changes):
 
 class SandboxPlannerTests(unittest.TestCase):
     def test_absent_workspace_allocates_on_demand(self):
-        absent = SandboxObservation(SandboxState.ABSENT, NOW, True)
+        absent = observation(SandboxState.ABSENT, sandbox_ref=None)
         result = plan_transition(binding(), DesiredRuntime.RUNNING, absent)
         self.assertEqual(result.action, SandboxAction.CREATE)
         self.assertTrue(result.requires_authorization)
 
     def test_absent_paused_user_keeps_workspace_without_vm(self):
-        absent = SandboxObservation(SandboxState.ABSENT, NOW, True)
+        absent = observation(SandboxState.ABSENT, sandbox_ref=None)
         result = plan_transition(binding(), DesiredRuntime.PAUSED, absent)
         self.assertEqual(result.action, SandboxAction.NOOP)
         self.assertFalse(result.requires_authorization)
@@ -96,6 +96,40 @@ class SandboxPlannerTests(unittest.TestCase):
                     plan_transition(binding(), DesiredRuntime.RUNNING, observed).action,
                     SandboxAction.OBSERVE_ONLY,
                 )
+
+    def test_unscoped_absence_cannot_create_or_claim_noop(self):
+        cases = (
+            SandboxObservation(SandboxState.ABSENT, NOW, True),
+            observation(SandboxState.ABSENT, sandbox_ref="sandbox://stale"),
+            observation(SandboxState.ABSENT, sandbox_ref=None, owner_scope=None),
+            observation(SandboxState.ABSENT, sandbox_ref=None, storage_ref=None),
+            observation(SandboxState.ABSENT, sandbox_ref=None, generation=None),
+            observation(SandboxState.ABSENT, sandbox_ref=None, authority_digest=""),
+        )
+        for desired in (DesiredRuntime.RUNNING, DesiredRuntime.PAUSED):
+            for absent in cases:
+                with self.subTest(desired=desired, absent=absent):
+                    result = plan_transition(binding(), desired, absent)
+                    self.assertEqual(result.action, SandboxAction.OBSERVE_ONLY)
+                    self.assertEqual(result.reason, "UNSCOPED_ABSENCE")
+                    self.assertFalse(result.requires_authorization)
+
+    def test_verified_absence_with_foreign_identity_is_conflict(self):
+        changes = (
+            {"owner_scope": "project-b/user-1"},
+            {"workspace_id": "ws-other"},
+            {"storage_ref": "pvc://project-b/shared"},
+            {"provider": "other-provider"},
+            {"generation": 8},
+            {"authority_digest": "sha256:other-policy"},
+            {"runtime_spec_digest": "sha256:other-image"},
+        )
+        for change in changes:
+            with self.subTest(change=change):
+                absent = observation(SandboxState.ABSENT, sandbox_ref=None, **change)
+                result = plan_transition(binding(), DesiredRuntime.RUNNING, absent)
+                self.assertEqual(result.action, SandboxAction.CONFLICT)
+                self.assertFalse(result.requires_authorization)
 
     def test_provider_and_workspace_identity_drift_is_conflict(self):
         changes = (
