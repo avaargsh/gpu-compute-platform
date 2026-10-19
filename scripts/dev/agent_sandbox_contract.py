@@ -119,9 +119,15 @@ def plan_transition(
     if observed.state is SandboxState.UNKNOWN:
         return SandboxPlan(SandboxAction.OBSERVE_ONLY, "UNKNOWN_PROVIDER_OUTCOME", False)
     if observed.state is SandboxState.ABSENT:
-        if desired is DesiredRuntime.PAUSED:
-            return SandboxPlan(SandboxAction.NOOP, "NO_SANDBOX_ALLOCATED", False)
-        return SandboxPlan(SandboxAction.CREATE, "ALLOCATE_ON_DEMAND", True)
+        # Absence is meaningful only for an exact, verified lookup scope.
+        # An unscoped provider 404 (or a contradictory physical reference)
+        # must never authorize allocation or even assert a scoped NOOP.
+        if observed.sandbox_ref is not None or not all((
+            observed.owner_scope, observed.workspace_id, observed.storage_ref,
+            observed.provider, observed.generation, observed.authority_digest,
+            observed.runtime_spec_digest,
+        )):
+            return SandboxPlan(SandboxAction.OBSERVE_ONLY, "UNSCOPED_ABSENCE", False)
 
     if (
         observed.owner_scope != binding.owner_scope
@@ -133,6 +139,11 @@ def plan_transition(
         or observed.runtime_spec_digest != binding.runtime_spec_digest
     ):
         return SandboxPlan(SandboxAction.CONFLICT, "IMMUTABLE_BINDING_DRIFT", False)
+
+    if observed.state is SandboxState.ABSENT:
+        if desired is DesiredRuntime.PAUSED:
+            return SandboxPlan(SandboxAction.NOOP, "NO_SANDBOX_ALLOCATED", False)
+        return SandboxPlan(SandboxAction.CREATE, "ALLOCATE_ON_DEMAND", True)
 
     if observed.state is SandboxState.RUNNING:
         if desired is DesiredRuntime.PAUSED:
