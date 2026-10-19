@@ -56,7 +56,7 @@ func openContractDB(t *testing.T) *sql.DB {
 	if _, err := db.ExecContext(ctx, string(schema)); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"reconcile_leases", "resource_observations", "deletion_tombstones", "desired_resources"} {
+	for _, table := range []string{"provider_job_create_uid_bindings", "reconcile_leases", "resource_observations", "deletion_tombstones", "desired_resources"} {
 		if _, err := db.ExecContext(ctx, "TRUNCATE TABLE "+table); err != nil {
 			t.Fatal(err)
 		}

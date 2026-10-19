@@ -108,6 +108,36 @@ CREATE TABLE IF NOT EXISTS reconcile_leases (
 CREATE INDEX IF NOT EXISTS reconcile_leases_expiry_idx
     ON reconcile_leases (lease_until);
 
+-- A candidate Kubernetes CREATE-response UID, not a signed outcome proof.
+-- Management's runtime DB principal must have no INSERT/UPDATE/DELETE here.
+CREATE TABLE IF NOT EXISTS provider_job_create_uid_bindings (
+    operation_id TEXT PRIMARY KEY CHECK (operation_id ~ '^[0-9a-f]{32}
+
+CREATE TABLE IF NOT EXISTS deletion_tombstones (
+    cluster_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    generation BIGINT NOT NULL,
+    finalized_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (cluster_id, kind, resource_id)
+);
+
+CREATE INDEX IF NOT EXISTS deletion_tombstones_finalized_idx
+    ON deletion_tombstones (finalized_at);
+),
+    cluster_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    workload_id TEXT NOT NULL,
+    generation BIGINT NOT NULL CHECK (generation > 0),
+    namespace TEXT NOT NULL,
+    job_name TEXT NOT NULL,
+    job_uid TEXT NOT NULL,
+    job_resource_version TEXT NOT NULL,
+    lease_owner TEXT NOT NULL,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (cluster_id, workload_id, generation)
+);
+
 
 CREATE TABLE IF NOT EXISTS deletion_tombstones (
     cluster_id TEXT NOT NULL,
