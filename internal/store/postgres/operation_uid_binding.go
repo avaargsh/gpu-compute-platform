@@ -10,30 +10,21 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-// A candidate API-server CREATE response is not signed execution evidence.
-var ErrCreateUIDUnproven = errors.New("provider CREATE UID ownership unproven")
-var ErrCreateUIDConflict = errors.New("conflicting provider CREATE UID binding")
+// Re-export neutral contract symbols so existing Store callers and tests
+// retain their source API without importing the HTTP layer.
+var ErrCreateUIDUnproven = verifiedops.ErrCreateUIDUnproven
+var ErrCreateUIDConflict = verifiedops.ErrCreateUIDConflict
 
 var bindingOperationID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 var bindingDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // Only a trusted Agent carrying a genuine Kubernetes CREATE response may
 // construct this value; same-generation GET/adoption is never enough.
-type JobCreateUIDBinding struct {
-	OperationID        string
-	ClusterID          domain.ID
-	ProjectID          string
-	WorkloadID         domain.ID
-	Generation         int64
-	Namespace          string
-	JobName            string
-	JobUID             string
-	JobResourceVersion string
-	LeaseOwner         string
-}
+type JobCreateUIDBinding = verifiedops.JobCreateUIDBinding
 
 func validJobBinding(in JobCreateUIDBinding) bool {
 	return bindingOperationID.MatchString(in.OperationID) &&

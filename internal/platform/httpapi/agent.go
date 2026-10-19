@@ -1,12 +1,15 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 type AgentAPI struct {
@@ -169,5 +172,64 @@ func (a *AgentAPI) FinalizeDesired(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// PublishJobCreateUID is a candidate-only provider identity sink. It can be
+// reached ONLY after AgentMTLSRouter verifies SPIFFE cluster certificate and
+// stamps an unforgeable, handler-private scope marker. A bearer, browser,
+// localhost bypass or synthetic TLS header cannot publish candidate UIDs.
+// The store rechecks original Management audit and live lease in PostgreSQL.
+func (a *AgentAPI) PublishJobCreateUID(w http.ResponseWriter, r *http.Request) {
+	cluster, authenticated := r.Context().Value(verifiedAgentScopeKey{}).(string)
+	if !authenticated || cluster == "" {
+		http.Error(w, "authenticated cluster agent required", http.StatusUnauthorized)
+		return
+	}
+	var in struct {
+		ClusterID          string `json:"clusterId"`
+		OperationID        string `json:"operationId"`
+		ProjectID          string `json:"projectId"`
+		WorkloadID         string `json:"workloadId"`
+		Generation         int64  `json:"generation"`
+		Namespace          string `json:"namespace"`
+		JobName            string `json:"jobName"`
+		JobUID             string `json:"jobUid"`
+		JobResourceVersion string `json:"jobResourceVersion"`
+		LeaseOwner         string `json:"leaseOwner"`
+	}
+	if !decodeJSON(w, r, &in) {
+		return
+	}
+	if in.ClusterID != cluster {
+		http.Error(w, "cluster agent scope mismatch", http.StatusForbidden)
+		return
+	}
+	persist, ok := a.store.(interface {
+		RecordJobCreateUID(context.Context, verifiedops.JobCreateUIDBinding) error
+	})
+	if !ok {
+		http.Error(w, "UID persistence unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	err := persist.RecordJobCreateUID(r.Context(), verifiedops.JobCreateUIDBinding{
+		OperationID: in.OperationID, ClusterID: domain.ID(in.ClusterID),
+		ProjectID: in.ProjectID, WorkloadID: domain.ID(in.WorkloadID),
+		Generation: in.Generation, Namespace: in.Namespace, JobName: in.JobName,
+		JobUID: in.JobUID, JobResourceVersion: in.JobResourceVersion,
+		LeaseOwner: in.LeaseOwner,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, verifiedops.ErrCreateUIDUnproven),
+			errors.Is(err, verifiedops.ErrCreateUIDConflict),
+			errors.Is(err, agentstore.ErrLeaseLost):
+			http.Error(w, "UID binding rejected", http.StatusConflict)
+		default:
+			http.Error(w, "UID persistence unavailable", http.StatusServiceUnavailable)
+		}
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusNoContent)
 }
