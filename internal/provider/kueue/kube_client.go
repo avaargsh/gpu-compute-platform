@@ -82,43 +82,93 @@ func (c *KubeClient) ApplyResourceClaim(ctx context.Context, in Job) error {
 	return validateProviderGeneration("resource claim", claim.Name, current.Annotations, in.Generation)
 }
 
+// JobApplyDisposition distinguishes a response to our actual API-server
+// CREATE from deterministic same-generation convergence after GET/AlreadyExists.
+// Only CreateAcknowledged may carry the CREATE response UID/RV. Neither status
+// independently establishes original Management operation ownership.
+type JobApplyDisposition string
+
+const (
+	JobCreateAcknowledged JobApplyDisposition = "CREATE_ACKNOWLEDGED"
+	JobExistingUnbound JobApplyDisposition = "EXISTING_UNBOUND"
+	JobRaceAdoptedUnbound JobApplyDisposition = "RACE_ADOPTED_UNBOUND"
+)
+
+type JobCreateResponse struct {
+	Disposition JobApplyDisposition
+	UID types.UID
+	ResourceVersion string
+}
+
+// ApplyJob preserves the existing provider's at-least-once reconciliation
+// semantics. It never publishes a CREATE response or invents operation proof.
 func (c *KubeClient) ApplyJob(ctx context.Context, in Job) error {
+	_, err := c.applyJobWithResponse(ctx, in)
+	return err
+}
+
+// ApplyJobWithCreateResponse is the bounded API-server CREATE response
+// capture seam for a future authenticated Agent / durable Operation binding.
+// An existing or raced object returns NO UID/RV even when its GET has them.
+// A successful CREATE without API-server-issued UID/RV fails closed here,
+// while legacy ApplyJob still performs ordinary provider convergence.
+func (c *KubeClient) ApplyJobWithCreateResponse(ctx context.Context, in Job) (JobCreateResponse, error) {
+	result, err := c.applyJobWithResponse(ctx, in)
+	if err != nil {
+		return JobCreateResponse{}, err
+	}
+	if result.Disposition == JobCreateAcknowledged && (result.UID == "" || result.ResourceVersion == "") {
+		return JobCreateResponse{}, fmt.Errorf("job CREATE response missing API-server UID or resourceVersion")
+	}
+	return result, nil
+}
+
+func (c *KubeClient) applyJobWithResponse(ctx context.Context, in Job) (JobCreateResponse, error) {
 	if c.core == nil {
-		return fmt.Errorf("kubernetes client is required")
+		return JobCreateResponse{}, fmt.Errorf("kubernetes client is required")
 	}
 	job, err := jobObject(in)
 	if err != nil {
-		return err
+		return JobCreateResponse{}, err
 	}
 
 	jobs := c.core.BatchV1().Jobs(in.Namespace)
 	current, err := jobs.Get(ctx, in.Name, metav1.GetOptions{})
 	if err == nil {
-		// Jobs are immutable execution objects. A different desired generation
-		// must never be accepted as converged by the old provider object.
-		return validateProviderGeneration("job", in.Name, current.Annotations, in.Generation)
+		// Existing objects may be adopted for convergence, but their UID
+		// was not returned by our CREATE and must never be claimed as such.
+		if err := validateProviderGeneration("job", in.Name, current.Annotations, in.Generation); err != nil {
+			return JobCreateResponse{}, err
+		}
+		return JobCreateResponse{Disposition: JobExistingUnbound}, nil
 	}
 	if !apierrors.IsNotFound(err) {
-		return err
+		return JobCreateResponse{}, err
 	}
 
-	_, err = jobs.Create(ctx, job, metav1.CreateOptions{})
+	created, err := jobs.Create(ctx, job, metav1.CreateOptions{})
 	if err == nil {
-		return nil
+		if created == nil {
+			return JobCreateResponse{Disposition: JobCreateAcknowledged}, nil
+		}
+		return JobCreateResponse{Disposition: JobCreateAcknowledged, UID: created.UID, ResourceVersion: created.ResourceVersion}, nil
 	}
 	if !apierrors.IsAlreadyExists(err) {
-		return err
+		// A lost acknowledgement or timeout is UNKNOWN, never a CREATE
+		// response suitable for binding. Preserve the error for recovery.
+		return JobCreateResponse{}, err
 	}
 
-	// GET -> CREATE is intentionally not treated as an atomic section. A
-	// takeover owner may race with an older in-flight side effect. Deterministic
-	// identity plus generation validation lets the new owner adopt the same
-	// logical Job instead of failing or creating a duplicate.
+	// A race winner may have performed the same deterministic side effect.
+	// Generation-safe adoption remains legal but never yields a CREATE UID.
 	current, err = jobs.Get(ctx, in.Name, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("adopt job %s after create race: %w", in.Name, err)
+		return JobCreateResponse{}, fmt.Errorf("adopt job %s after create race: %w", in.Name, err)
 	}
-	return validateProviderGeneration("job", in.Name, current.Annotations, in.Generation)
+	if err := validateProviderGeneration("job", in.Name, current.Annotations, in.Generation); err != nil {
+		return JobCreateResponse{}, err
+	}
+	return JobCreateResponse{Disposition: JobRaceAdoptedUnbound}, nil
 }
 
 func validateProviderGeneration(kind, name string, annotations map[string]string, generation int64) error {
