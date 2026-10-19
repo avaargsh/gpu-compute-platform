@@ -37,6 +37,8 @@ type WorkloadProjection struct {
 	ClusterID          domain.ID
 	Namespace          string
 	Generation         int64
+	// OperationID is a non-authorizing original Management audit correlation.
+	OperationID        string
 	Image              string
 	Command            []string
 	Accelerator        domain.AcceleratorRequest
