@@ -87,8 +87,8 @@ func TestRealKindObserverShortLivedSATokenAndBoundJob(t *testing.T) {
 	const digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	job, err := admin.BatchV1().Jobs(observerProjectA).Create(ctx, &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "job-token-observer",
-			Labels: map[string]string{"ai.compute/workload": "job-token-observer"},
+			Name:        "job-token-observer",
+			Labels:      map[string]string{"ai.compute/workload": "job-token-observer"},
 			Annotations: map[string]string{"ai.compute/generation": "1"},
 		},
 		Spec: batchv1.JobSpec{
