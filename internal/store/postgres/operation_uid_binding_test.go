@@ -46,7 +46,7 @@ func newCreateUIDFixture(t *testing.T) (*Store, JobCreateUIDBinding) {
 	}
 	for _, stmt := range []struct {
 		query string
-		args []any
+		args  []any
 	}{
 		{`INSERT INTO project_bindings (project_id,cluster_id,namespace) VALUES ($1,$2,$3)`,
 			[]any{project, cluster, binding.Namespace}},
@@ -96,9 +96,9 @@ func TestJobCreateUIDRequiresOriginalAuditAndLiveLease(t *testing.T) {
 		t.Fatalf("stored UID read: %#v found=%t err=%v", got, found, err)
 	}
 	for _, testcase := range []struct {
-		name string
+		name   string
 		change func(*JobCreateUIDBinding)
-		want error
+		want   error
 	}{
 		{"replaced-uid", func(x *JobCreateUIDBinding) { x.JobUID = "replacement-uid" }, ErrCreateUIDConflict},
 		{"changed-resource-version", func(x *JobCreateUIDBinding) { x.JobResourceVersion = "88" }, ErrCreateUIDConflict},
