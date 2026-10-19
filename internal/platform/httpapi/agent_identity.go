@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"encoding/json"
 	"errors"
@@ -42,9 +43,14 @@ func AgentMTLSRouter(next http.Handler, trustDomain string) (http.Handler, error
 			http.Error(w, "cluster agent scope mismatch", http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r)
+		// Only this mTLS identity gate may stamp authenticated Agent scope.
+		// Body fields, forwarded headers and caller-supplied context cannot.
+		ctx := context.WithValue(r.Context(), verifiedAgentScopeKey{}, clusterID)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	}), nil
 }
+
+type verifiedAgentScopeKey struct{}
 
 var agentIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 var trustDomainPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.-]{0,251}[a-zA-Z0-9]$`)
@@ -62,7 +68,8 @@ func agentProtocolRoute(r *http.Request) bool {
 		"POST /api/v1/agent/report",
 		"POST /api/v1/agent/reconcile-lease/claim",
 		"POST /api/v1/agent/reconcile-lease/release",
-		"POST /api/v1/agent/finalize-desired":
+		"POST /api/v1/agent/finalize-desired",
+		"POST /api/v1/agent/workload-create-uid":
 		return true
 	default:
 		return false
