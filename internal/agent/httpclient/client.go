@@ -11,6 +11,7 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 type Client struct {
@@ -68,6 +69,11 @@ func (c *Client) ReleaseReconcileLease(ctx context.Context, in agent.ReconcileLe
 
 func (c *Client) FinalizeDesired(ctx context.Context, in agent.FinalizeDesiredRequest) error {
 	return c.post(ctx, "/api/v1/agent/finalize-desired", in)
+}
+
+// PrepareJobCreateAttempt is mandatory before any API-server Job CREATE.
+func (c *Client) PrepareJobCreateAttempt(ctx context.Context, in verifiedops.JobCreateAttempt) error {
+	return c.post(ctx, "/api/v1/agent/workload-create-attempt", in)
 }
 
 // PublishJobCreateUID sends a candidate CREATE ACK via the same no-redirect

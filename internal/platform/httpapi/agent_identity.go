@@ -69,7 +69,8 @@ func agentProtocolRoute(r *http.Request) bool {
 		"POST /api/v1/agent/reconcile-lease/claim",
 		"POST /api/v1/agent/reconcile-lease/release",
 		"POST /api/v1/agent/finalize-desired",
-		"POST /api/v1/agent/workload-create-uid":
+		"POST /api/v1/agent/workload-create-uid",
+		"POST /api/v1/agent/workload-create-attempt":
 		return true
 	default:
 		return false

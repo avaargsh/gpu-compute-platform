@@ -7,6 +7,7 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/provider"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 type scriptedACKRuntime struct {
@@ -17,12 +18,22 @@ type scriptedACKRuntime struct {
 func (r *scriptedACKRuntime) ReconcileWorkload(ctx context.Context, p provider.WorkloadProjection) (provider.WorkloadObservation, error) {
 	r.workloadCalls++
 	r.workload = p
+	if p.OnBeforeCreate != nil {
+		if err := p.OnBeforeCreate(ctx, provider.JobCreateIntent{Namespace: r.ack.Namespace, Name: r.ack.Name}); err != nil {
+			return provider.WorkloadObservation{}, provider.MarkRetryable(err)
+		}
+	}
 	if p.OnCreateACK != nil {
 		if err := p.OnCreateACK(ctx, r.ack); err != nil {
 			return provider.WorkloadObservation{}, provider.MarkRetryable(err)
 		}
 	}
 	return provider.WorkloadObservation{ObservedGeneration: p.Generation}, nil
+}
+
+func (f *fakeControlPlane) PrepareJobCreateAttempt(_ context.Context, in verifiedops.JobCreateAttempt) error {
+	f.prepared = append(f.prepared, in)
+	return f.prepareErr
 }
 
 func (f *fakeControlPlane) PublishJobCreateUID(_ context.Context, in JobCreateUIDCandidate) error {

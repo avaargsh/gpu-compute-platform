@@ -104,7 +104,7 @@ type JobCreateResponse struct {
 // ApplyJob preserves the existing provider's at-least-once reconciliation
 // semantics. It never publishes a CREATE response or invents operation proof.
 func (c *KubeClient) ApplyJob(ctx context.Context, in Job) error {
-	_, err := c.applyJobWithResponse(ctx, in)
+	_, err := c.applyJobWithResponse(ctx, in, nil)
 	return err
 }
 
@@ -114,7 +114,7 @@ func (c *KubeClient) ApplyJob(ctx context.Context, in Job) error {
 // A successful CREATE without API-server-issued UID/RV fails closed here,
 // while legacy ApplyJob still performs ordinary provider convergence.
 func (c *KubeClient) ApplyJobWithCreateResponse(ctx context.Context, in Job) (JobCreateResponse, error) {
-	result, err := c.applyJobWithResponse(ctx, in)
+	result, err := c.applyJobWithResponse(ctx, in, nil)
 	if err != nil {
 		return JobCreateResponse{}, err
 	}
@@ -124,7 +124,14 @@ func (c *KubeClient) ApplyJobWithCreateResponse(ctx context.Context, in Job) (Jo
 	return result, nil
 }
 
-func (c *KubeClient) applyJobWithResponse(ctx context.Context, in Job) (JobCreateResponse, error) {
+// Guarded CREATE prepares an immutable durable operation before touching
+// the external API. Missing, conflicted or ambiguous preparation stops CREATE.
+func (c *KubeClient) ApplyJobWithGuardedCreate(ctx context.Context, in Job, before func(context.Context) error) (JobCreateResponse, error) {
+	if before == nil { return JobCreateResponse{}, fmt.Errorf("durable pre-CREATE guard required") }
+	return c.applyJobWithResponse(ctx, in, before)
+}
+
+func (c *KubeClient) applyJobWithResponse(ctx context.Context, in Job, before func(context.Context) error) (JobCreateResponse, error) {
 	if c.core == nil {
 		return JobCreateResponse{}, fmt.Errorf("kubernetes client is required")
 	}
@@ -147,6 +154,11 @@ func (c *KubeClient) applyJobWithResponse(ctx context.Context, in Job) (JobCreat
 		return JobCreateResponse{}, err
 	}
 
+	if before != nil {
+		if err := before(ctx); err != nil {
+			return JobCreateResponse{}, fmt.Errorf("durable CREATE attempt denied: %w",err)
+		}
+	}
 	created, err := jobs.Create(ctx, job, metav1.CreateOptions{})
 	if err == nil {
 		if created == nil {

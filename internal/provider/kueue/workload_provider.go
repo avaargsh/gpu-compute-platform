@@ -24,15 +24,20 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 		}
 	}
 	if projection.OnCreateACK != nil && projection.OperationID != "" {
+		if projection.OnBeforeCreate == nil {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf("durable pre-CREATE guard missing")
+		}
 		// A CREATE response may only come from the actual API-server write.
 		// Older test adapters and adoption-only clients cannot forge one.
 		capture, ok := p.client.(interface {
-			ApplyJobWithCreateResponse(context.Context, Job) (JobCreateResponse, error)
+			ApplyJobWithGuardedCreate(context.Context, Job, func(context.Context) error) (JobCreateResponse, error)
 		})
 		if !ok {
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("Kueue Job CREATE response capture unavailable")
 		}
-		result, err := capture.ApplyJobWithCreateResponse(ctx, job)
+		result, err := capture.ApplyJobWithGuardedCreate(ctx, job, func(callCtx context.Context) error {
+			return projection.OnBeforeCreate(callCtx, baseprovider.JobCreateIntent{Namespace: job.Namespace,Name: job.Name})
+		})
 		if err != nil {
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply Job with CREATE capture: %w", classifyProviderError(err))
 		}
