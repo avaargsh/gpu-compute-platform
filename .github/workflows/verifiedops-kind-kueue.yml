@@ -1,0 +1,49 @@
+name: Verified Operations / real kind + Kueue UID races
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "internal/provider/kueue/**"
+      - "internal/verifiedops/**"
+      - "internal/agent/**"
+      - ".github/workflows/verifiedops-kind-kueue.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kind-create-uid:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - name: Install pinned kind
+        run: |
+          curl --fail --location --retry 3 --output /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+      - name: Provision real API server and Kueue webhooks
+        run: |
+          kind create cluster --name verifiedops-ci --image kindest/node:v1.34.0 --wait 120s
+          kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.19.6/manifests.yaml
+          kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout=180s
+      - name: Test real CREATE ACK, race, UID replacement and lost ACK
+        env:
+          VERIFIEDOPS_KIND_E2E: "1"
+        run: go test ./internal/provider/kueue -run '^TestRealKindAPIServerJobCREATEOwnershipBoundaries$' -count=1 -timeout=180s -v
+      - name: Failure diagnostics
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl get jobs -A -o wide || true
+          kubectl get validatingwebhookconfigurations || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -n 80 || true
+      - name: Clean ephemeral kind
+        if: always()
+        run: kind delete cluster --name verifiedops-ci || true
