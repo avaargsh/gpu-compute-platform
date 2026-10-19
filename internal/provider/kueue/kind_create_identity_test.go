@@ -183,8 +183,8 @@ func TestRealKindAPIServerJobCREATEOwnershipBoundaries(t *testing.T) {
 	acknowledged, adopted := 0, 0
 	var winningUID types.UID
 	for i := 0; i < 2; i++ {
-		result, err := <-results
-		if err != nil {
+		result := <-results
+		if err := <-errorsSeen; err != nil {
 			t.Fatalf("real concurrent CREATE: %v", err)
 		}
 		if result.Disposition == JobCreateAcknowledged && result.UID != "" && result.ResourceVersion != "" {
@@ -194,11 +194,6 @@ func TestRealKindAPIServerJobCREATEOwnershipBoundaries(t *testing.T) {
 			adopted++
 		} else {
 			t.Fatalf("race result gave false CREATE proof: %#v", result)
-		}
-	}
-	for i := 0; i < 2; i++ {
-		if err := <-errorsSeen; err != nil {
-			t.Fatal(err)
 		}
 	}
 	if acknowledged != 1 || adopted != 1 {
