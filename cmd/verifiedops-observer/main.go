@@ -89,6 +89,25 @@ func readFileNoSymlink(path string, limit int64, secret bool) ([]byte, error) {
 	return content, nil
 }
 
+// Refuse hard-link aliases as well as symlinks. A key that shares an inode
+// with the ticket or pinned public root must not be loaded as a signer.
+func rejectSignerInputAlias(cfg observerConfig) error {
+	key, err := os.Stat(cfg.observerPrivateKeyFile)
+	if err != nil {
+		return err
+	}
+	for _, path := range []string{cfg.ticketFile, cfg.dispatcherPublicKeyFile} {
+		input, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		if os.SameFile(key, input) {
+			return errors.New("Observer signing key aliases a work input")
+		}
+	}
+	return nil
+}
+
 func loadObserverPrivateKey(path string) (ed25519.PrivateKey, error) {
 	raw, err := readFileNoSymlink(path, maxPrivateKeyBytes, true)
 	if err != nil {
@@ -134,6 +153,9 @@ func runOnce(ctx context.Context, cfg observerConfig, client kubernetes.Interfac
 	}
 	approved, err := verifiedops.ApproveObserverWorkTicket(raw, root)
 	if err != nil {
+		return err
+	}
+	if err := rejectSignerInputAlias(cfg); err != nil {
 		return err
 	}
 	signer, err := loadObserverPrivateKey(cfg.observerPrivateKeyFile)
