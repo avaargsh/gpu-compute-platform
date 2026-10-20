@@ -18,6 +18,10 @@ fi
 # example digest and key IDs with reviewed values before installing.
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-policy.example.yaml >/dev/null
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-job-policy.yaml >/dev/null
+# Surface the complete admission matching chain before any negative test.
+kubectl get namespace verifiedops-observer --show-labels
+kubectl get validatingadmissionpolicybinding verifiedops-observer-job-envelope -o yaml
+kubectl get configmap verifiedops-observer-policy -n verifiedops-observer -o yaml
 # ValidatingAdmissionPolicy in Kubernetes 1.30-1.34 does not expose an
 # Accepted condition for kubectl wait. Its status reports observedGeneration
 # and typeChecking warnings; actual CEL evaluation is exercised by server-side
