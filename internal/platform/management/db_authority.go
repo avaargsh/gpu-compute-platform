@@ -84,6 +84,7 @@ SELECT pg_catalog.has_table_privilege(current_user, $1::regclass, $2)
 		"reconcile_leases":                 "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
 		"provider_job_create_uid_bindings": "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
 		"provider_job_create_attempts":     "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
+		"verified_observer_nonce_receipts": "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
 		"placement_migrations":             "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
 		"cluster_agents":                   "SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER",
 	}

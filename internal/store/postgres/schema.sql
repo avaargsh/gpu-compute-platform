@@ -142,6 +142,27 @@ CREATE TABLE IF NOT EXISTS provider_job_create_uid_bindings (
 );
 
 
+-- Independent signed Observer evidence nonce ledger. Not an operation
+-- verdict, nor a substitute for a server-issued challenge protocol.
+-- UNIQUE (cluster, nonce) fences cross-operation and altered-proof replay.
+CREATE TABLE IF NOT EXISTS verified_observer_nonce_receipts (
+    cluster_id TEXT NOT NULL,
+    nonce TEXT NOT NULL CHECK (nonce ~ '^[0-9a-f]{64}$'),
+    operation_id TEXT NOT NULL CHECK (operation_id ~ '^[0-9a-f]{32}$'),
+    project_id TEXT NOT NULL,
+    workload_id TEXT NOT NULL,
+    generation BIGINT NOT NULL CHECK (generation > 0),
+    job_uid TEXT NOT NULL,
+    signer_key_id TEXT NOT NULL,
+    envelope_sha256 TEXT NOT NULL CHECK (envelope_sha256 ~ '^[0-9a-f]{64}$'),
+    observed_at TIMESTAMPTZ NOT NULL,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (cluster_id, nonce)
+);
+
+CREATE INDEX IF NOT EXISTS verified_observer_nonce_operation_idx
+    ON verified_observer_nonce_receipts (operation_id, cluster_id, workload_id, generation);
+
 CREATE TABLE IF NOT EXISTS deletion_tombstones (
     cluster_id TEXT NOT NULL,
     kind TEXT NOT NULL,
