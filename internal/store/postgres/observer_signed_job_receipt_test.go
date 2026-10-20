@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 	batchv1 "k8s.io/api/batch/v1"
@@ -110,4 +111,62 @@ func TestSignedObservedJobV2RejectsForgedScopeAndUnissuedChallenge(t *testing.T)
 	if _,err:=store.RecordSignedObservedJobProof(ctx,raw,trust,scope,challenge.Nonce);err!=nil{
 		t.Fatalf("rejected attempts poisoned legitimate challenge: %v",err)
 	}
+}
+
+func TestSignedObservedJobV2ExpiredDeletedAndChangedDesired(t *testing.T){
+	for _,mode:=range []string{"expired","deleted","changed-image"}{
+		t.Run(mode,func(t *testing.T){
+			store,binding,challenge,raw,trust:=pendingV2Proof(t)
+			ctx:=context.Background()
+			switch mode{
+			case "expired":
+				_,err:=store.db.ExecContext(ctx,`
+UPDATE verified_observer_challenges
+SET issued_at=clock_timestamp()-interval '3 minutes',
+    expires_at=clock_timestamp()-interval '1 second'
+WHERE cluster_id=$1 AND nonce=$2
+`,binding.ClusterID,challenge.Nonce)
+				if err!=nil{t.Fatal(err)}
+			case "deleted":
+				if err:=store.MarkDesiredDeleting(ctx,binding.ClusterID,"Workload",binding.WorkloadID,time.Now().UTC());err!=nil{t.Fatal(err)}
+			case "changed-image":
+				_,err:=store.db.ExecContext(ctx,`
+UPDATE desired_resources SET spec=jsonb_set(spec,'{image}',to_jsonb($3::text),true)
+WHERE cluster_id=$1 AND resource_id=$2
+`,binding.ClusterID,binding.WorkloadID,"registry.invalid/other@sha256:"+strings.Repeat("b",64))
+				if err!=nil{t.Fatal(err)}
+			}
+			_,err:=store.RecordSignedObservedJobProof(ctx,raw,trust,makeObserverScope(binding),challenge.Nonce)
+			var expected error=ErrObserverNonceUnproven
+			if mode=="expired"{expected=ErrObserverChallengeExpired}
+			if mode=="changed-image"{expected=verifiedops.ErrObserverUntrusted}
+			if !errors.Is(err,expected){t.Fatalf("invalid %s proof accepted: %v expected %v",mode,err,expected)}
+			var count int
+			if err:=store.db.QueryRowContext(ctx,"SELECT count(*) FROM verified_observer_nonce_receipts").Scan(&count);
+				err!=nil||count!=0{t.Fatalf("failure wrote receipt: %d %v",count,err)}
+		})
+	}
+}
+
+func TestSignedObservedJobV2FirstSeenV1CannotConsumeAgain(t *testing.T){
+	store,binding,challenge,raw,trust:=pendingV2Proof(t)
+	ctx:=context.Background()
+	legacySubject:=subjectForChallenge(challenge)
+	legacyRaw,legacyTrust:=signedNonceFixture(t,legacySubject)
+	if err:=store.RecordSignedObserverNonce(ctx,legacyRaw,legacyTrust,legacySubject);err!=nil{t.Fatal(err)}
+	if _,err:=store.RecordSignedObservedJobProof(ctx,raw,trust,makeObserverScope(binding),challenge.Nonce);
+		!errors.Is(err,ErrObserverEvidenceReplayed){t.Fatalf("v2 bypassed v1 receipt: %v",err)}
+}
+
+func TestSignedObservedJobV2WrongRootAndAlteredEnvelope(t *testing.T){
+	store,binding,challenge,raw,trust:=pendingV2Proof(t)
+	ctx:=context.Background()
+	invalidTrust:=trust
+	invalidTrust.KeyID="another-observer-key"
+	if _,err:=store.RecordSignedObservedJobProof(ctx,raw,invalidTrust,makeObserverScope(binding),challenge.Nonce);
+		!errors.Is(err,verifiedops.ErrObserverUntrusted){t.Fatalf("foreign signer accepted: %v",err)}
+	altered:=append([]byte(nil),raw...)
+	altered[len(altered)-8]^=1
+	if _,err:=store.RecordSignedObservedJobProof(ctx,altered,trust,makeObserverScope(binding),challenge.Nonce);
+		!errors.Is(err,verifiedops.ErrObserverUntrusted){t.Fatalf("altered envelope accepted: %v",err)}
 }
