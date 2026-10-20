@@ -37,6 +37,55 @@ if [[ -z "$policy_generation" || "$observed_generation" != "$policy_generation" 
 fi
 kubectl apply --dry-run=server -f "$manifest" >/dev/null
 
+# Verify the API server actually evaluates VAP bindings in this cluster.
+# This deliberately-denying canary is ephemeral and is removed before testing
+# the production policy; if it does not deny, diagnose the admission substrate
+# rather than misattributing a pass/failure to the complex policy.
+kubectl apply -f - >/dev/null <<'VAP_CANARY'
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: verifiedops-observer-vap-canary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        app.kubernetes.io/component: verifiedops-observer
+    resourceRules:
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["jobs"]
+  validations:
+    - expression: "false"
+      message: "temporary VAP engine canary must deny"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: verifiedops-observer-vap-canary
+spec:
+  policyName: verifiedops-observer-vap-canary
+  validationActions: ["Deny"]
+VAP_CANARY
+if kubectl create --dry-run=server -f "$manifest" >/dev/null 2>"$unsafe.canary.err"; then
+  echo "VAP canary failed: API server admitted a Job despite a matching deny-all policy" >&2
+  kubectl get validatingadmissionpolicy verifiedops-observer-vap-canary -o yaml >&2 || true
+  kubectl get validatingadmissionpolicybinding verifiedops-observer-vap-canary -o yaml >&2 || true
+  rm -f "$unsafe.canary.err"
+  exit 1
+fi
+if ! grep -Eiq 'denied|forbidden|validation|temporary VAP engine canary' "$unsafe.canary.err"; then
+  echo "VAP canary request failed for a reason other than admission denial" >&2
+  cat "$unsafe.canary.err" >&2
+  rm -f "$unsafe.canary.err"
+  exit 1
+fi
+rm -f "$unsafe.canary.err"
+kubectl delete validatingadmissionpolicybinding verifiedops-observer-vap-canary --wait=true
+kubectl delete validatingadmissionpolicy verifiedops-observer-vap-canary --wait=true
+
 # Prove the policy rejects a mutable process and an image that differs from
 # the operator-pinned digest. Neither negative fixture is persisted.
 unsafe="$(mktemp)"
