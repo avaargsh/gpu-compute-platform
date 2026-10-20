@@ -10,7 +10,7 @@ Connect the existing internal primitives into one fail-closed workflow:
 2. PostgreSQL issues a short-lived Challenge and IssueSignedObserverWork produces a signed, domain-separated ticket;
 3. a reviewed isolated execution adapter delivers only that ticket and the pinned trust/configuration references to the independent Observer;
 4. the Observer emits one bounded DSSE observation envelope;
-5. a trusted receipt adapter resolves the original Challenge scope and passes only the Observer key ID to RecordSignedObservedJobProof; PostgreSQL resolves the Ed25519 key from the DBA-controlled cluster-scoped trust registry in the same READ COMMITTED transaction; the server-issued Challenge row is locked FOR UPDATE as the v1/v2 nonce serialization point;
+5. a trusted receipt adapter resolves the original Challenge scope and passes only the Observer key ID to RecordSignedObservedJobProof; PostgreSQL resolves the Ed25519 key from the DBA-controlled cluster-scoped trust registry in the same SERIALIZABLE transaction, with bounded full-transaction retries for SQLSTATE 40001/40P01; the server-issued Challenge row is locked FOR UPDATE as the v1/v2 nonce serialization point;
 6. the caller receives a receipt identity and evidence-only observation state.
 
 This is a control-plane integration contract, not a new public API or a new execution engine.
