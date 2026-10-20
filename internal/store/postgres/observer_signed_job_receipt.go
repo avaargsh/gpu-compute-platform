@@ -86,7 +86,7 @@ func isRetryableObserverTransactionError(err error) bool {
 // records observed outcomes, including PENDING, but never issues a final
 // AUTHORIZED_AND_VERIFIED verdict.
 func (s *Store) recordSignedObservedJobProofOnce(
-	ctx context.Context, envelope []byte, trust verifiedops.ObserverTrust,
+	ctx context.Context, envelope []byte, observerKeyID string,
 	scope ObserverChallengeScope, nonce string,
 ) (ObservedJobReceipt, error) {
 	var empty ObservedJobReceipt
