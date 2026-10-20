@@ -1,10 +1,11 @@
 # Cluster-scoped Observer trust roots
 
 The v2 PostgreSQL receipt path no longer accepts a caller-supplied public key.
-It takes only a key ID and resolves that ID inside the same SERIALIZABLE
-transaction against `verified_observer_signing_keys`, scoped to the target
-cluster. The selected row is locked `FOR SHARE` through commit, so a concurrent
-revocation/validity update cannot race a receipt admission.
+It takes only a key ID and resolves that ID inside the same PostgreSQL transaction against `verified_observer_signing_keys`,
+scoped to the target cluster. The selected row is locked `FOR SHARE` through
+commit, so a concurrent revocation/validity update cannot race a receipt
+admission. Receipt transactions use READ COMMITTED and lock the server-issued
+Challenge row `FOR UPDATE` as the serialization point for v1/v2 nonce consumption.
 
 Each row contains a 32-byte Ed25519 public key, a unique per-cluster key ID,
 `valid_from`, optional `valid_until`, and optional `revoked_at`. Unknown,
