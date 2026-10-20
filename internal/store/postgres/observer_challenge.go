@@ -71,14 +71,14 @@ SELECT generation,spec->>'projectID',deletion_timestamp
 FROM desired_resources
 WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
 FOR SHARE
-`, scope.ClusterID,scope.WorkloadID).Scan(&generation,&desiredProject,&deleting)
-	if errors.Is(err,sql.ErrNoRows) {
+`, scope.ClusterID, scope.WorkloadID).Scan(&generation, &desiredProject, &deleting)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ObserverChallenge{}, ErrObserverNonceUnproven
 	}
 	if err != nil {
-		return ObserverChallenge{},err
+		return ObserverChallenge{}, err
 	}
-	if generation!=scope.Generation || desiredProject!=scope.ProjectID || deleting.Valid {
+	if generation != scope.Generation || desiredProject != scope.ProjectID || deleting.Valid {
 		return ObserverChallenge{}, ErrObserverNonceUnproven
 	}
 

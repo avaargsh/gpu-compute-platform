@@ -71,14 +71,14 @@ SELECT generation,spec->>'projectID',deletion_timestamp
 FROM desired_resources
 WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
 FOR SHARE
-`, want.ClusterID,want.WorkloadID).Scan(&desiredGeneration,&desiredProject,&deleting)
+`, want.ClusterID, want.WorkloadID).Scan(&desiredGeneration, &desiredProject, &deleting)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrObserverNonceUnproven
 	}
 	if err != nil {
 		return err
 	}
-	if desiredGeneration!=want.Generation || desiredProject!=want.ProjectID || deleting.Valid {
+	if desiredGeneration != want.Generation || desiredProject != want.ProjectID || deleting.Valid {
 		return ErrObserverNonceUnproven
 	}
 
