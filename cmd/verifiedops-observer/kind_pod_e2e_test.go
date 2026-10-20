@@ -55,15 +55,15 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 	const jobName = "verifiedops-observer-pod-e2e-target"
 	job, err := admin.BatchV1().Jobs(project).Create(ctx, &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: jobName,
-			Labels: map[string]string{"ai.compute/workload": jobName},
+			Name:        jobName,
+			Labels:      map[string]string{"ai.compute/workload": jobName},
 			Annotations: map[string]string{"ai.compute/generation": "1"},
 		},
 		Spec: batchv1.JobSpec{
 			Suspend: &suspended,
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
-				RestartPolicy: corev1.RestartPolicyNever,
-				Containers: []corev1.Container{{Name: "workload", Image: "example.invalid/test@" + digest}},
+				RestartPolicy:                corev1.RestartPolicyNever,
+				Containers:    []corev1.Container{{Name: "workload", Image: "example.invalid/test@" + digest}},
 			}},
 		},
 	}, metav1.CreateOptions{})
@@ -103,19 +103,19 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 	now := time.Now().UTC()
 	rawTicket, err := verifiedops.AuthorObserverWorkTicket(verifiedops.ObserverWorkTicket{
 		Challenge: challenge, Expected: expected,
-		IssuedAt: now.Add(-time.Second).Format(time.RFC3339Nano),
-		ExpiresAt: now.Add(2*time.Minute-time.Second).Format(time.RFC3339Nano),
+		IssuedAt:  now.Add(-time.Second).Format(time.RFC3339Nano),
+		ExpiresAt: now.Add(2*time.Minute - time.Second).Format(time.RFC3339Nano),
 	}, verifiedops.ObserverSigner{KeyID: "kind-dispatcher-test-only", Signer: dispatchKey})
 	if err != nil {
 		t.Fatal(err)
 	}
 	secret, err := admin.CoreV1().Secrets(identityNamespace).Create(ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: "observer-pod-e2e-only-"},
-		Type: corev1.SecretTypeOpaque,
+		Type:       corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
-			"ticket.dsse.json": rawTicket,
+			"ticket.dsse.json":   rawTicket,
 			"dispatcher.pub.b64": []byte(base64.StdEncoding.EncodeToString(dispatchPub)),
-			"observer.pk8.pem": pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER}),
+			"observer.pk8.pem":   pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER}),
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
@@ -134,13 +134,13 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 	dropAll := []corev1.Capability{"ALL"}
 	security := &corev1.SecurityContext{
 		AllowPrivilegeEscalation: &denyEsc,
-		ReadOnlyRootFilesystem: &readOnly,
-		Capabilities: &corev1.Capabilities{Drop: dropAll},
+		ReadOnlyRootFilesystem:   &readOnly,
+		Capabilities:             &corev1.Capabilities{Drop: dropAll},
 	}
 	pod, err := admin.CoreV1().Pods(identityNamespace).Create(ctx, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{GenerateName: "verifiedops-observer-signed-e2e-"},
 		Spec: corev1.PodSpec{
-			ServiceAccountName: "verifiedops-observer",
+			ServiceAccountName:           "verifiedops-observer",
 			AutomountServiceAccountToken: &automount,
 			RestartPolicy: corev1.RestartPolicyNever,
 			SecurityContext: &corev1.PodSecurityContext{
@@ -149,7 +149,7 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 			},
 			InitContainers: []corev1.Container{{
 				Name: "stage-test-only-files", Image: image, ImagePullPolicy: corev1.PullNever,
-				Command: []string{"sh", "-ec", "cp /run/e2e-secret/ticket.dsse.json /run/verifiedops/ticket.dsse.json; cp /run/e2e-secret/dispatcher.pub.b64 /run/verifiedops/dispatcher.pub.b64; cp /run/e2e-secret/observer.pk8.pem /run/verifiedops/observer.pk8.pem; chmod 0400 /run/verifiedops/*"},
+				Command:         []string{"sh", "-ec", "cp /run/e2e-secret/ticket.dsse.json /run/verifiedops/ticket.dsse.json; cp /run/e2e-secret/dispatcher.pub.b64 /run/verifiedops/dispatcher.pub.b64; cp /run/e2e-secret/observer.pk8.pem /run/verifiedops/observer.pk8.pem; chmod 0400 /run/verifiedops/*"},
 				SecurityContext: security,
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "test-fixture-secret", MountPath: "/run/e2e-secret", ReadOnly: true},
@@ -182,7 +182,7 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 						{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Path: "token", ExpirationSeconds: &tokenTTL}},
 						{ConfigMap: &corev1.ConfigMapProjection{
 							LocalObjectReference: corev1.LocalObjectReference{Name: "kube-root-ca.crt"},
-							Items: []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}},
+							Items:                []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}},
 						}},
 						{DownwardAPI: &corev1.DownwardAPIProjection{
 							Items: []corev1.DownwardAPIVolumeFile{{
