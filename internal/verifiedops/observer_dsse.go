@@ -1,0 +1,184 @@
+package verifiedops
+
+import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+)
+
+// SignedObserverEnvelope is a deliberately narrow, offline-verifiable
+// DSSE v1 envelope. Signature validity authenticates a signer, NOT the
+// Kubernetes observation or authorization.
+type SignedObserverEnvelope struct {
+	PayloadType string              `json:"payloadType"`
+	Payload     string              `json:"payload"`
+	Signatures  []ObserverSignature `json:"signatures"`
+}
+type ObserverSignature struct {
+	KeyID string `json:"keyid"`
+	Sig   string `json:"sig"`
+}
+type ObserverSubject struct {
+	OperationID string `json:"operationId"`
+	ClusterID   string `json:"clusterId"`
+	ProjectID   string `json:"projectId"`
+	WorkloadID  string `json:"workloadId"`
+	Generation  int64  `json:"generation"`
+	JobUID      string `json:"jobUid"`
+	Nonce       string `json:"nonce"`
+	ObservedAt  string `json:"observedAt"`
+}
+type ObserverStatement struct {
+	Type          string `json:"_type"`
+	PredicateType string `json:"predicateType"`
+	Subject       []struct {
+		Name   string            `json:"name"`
+		Digest map[string]string `json:"digest"`
+	} `json:"subject"`
+	Predicate ObserverSubject `json:"predicate"`
+}
+type ObserverTrust struct {
+	KeyID     string
+	PublicKey ed25519.PublicKey
+}
+
+var ErrObserverUntrusted = errors.New("observer signature or context untrusted")
+
+const ObserverPayloadType = "application/vnd.in-toto+json"
+const ObserverStatementType = "https://in-toto.io/Statement/v1"
+const ObserverPredicateType = "https://gpupanel.dev/attestation/observer/v1"
+
+func dssePAE(kind string, payload []byte) []byte {
+	return []byte(fmt.Sprintf("DSSEv1 %d %s %d %s", len(kind), kind, len(payload), payload))
+}
+
+// VerifyObserverEnvelope validates a pinned Ed25519 trust root, DSSE
+// pre-authentication encoding, exact operation context and the Statement
+// shape. It is intentionally not an authorization or outcome verdict.
+// Callers must separately validate freshness, nonce uniqueness, original
+// CREATE ACK ownership and independent Kubernetes reads.
+func VerifyObserverEnvelope(raw []byte, trust ObserverTrust, want ObserverSubject) (ObserverStatement, error) {
+	var out ObserverStatement
+	if len(raw) == 0 || len(raw) > 1<<20 || trust.KeyID == "" || len(trust.PublicKey) != ed25519.PublicKeySize {
+		return out, ErrObserverUntrusted
+	}
+	var env SignedObserverEnvelope
+	if err := strictObserverJSON(raw, &env); err != nil {
+		return out, ErrObserverUntrusted
+	}
+	if env.PayloadType != ObserverPayloadType || len(env.Signatures) != 1 || env.Signatures[0].KeyID != trust.KeyID {
+		return out, ErrObserverUntrusted
+	}
+	payload, err := base64.StdEncoding.Strict().DecodeString(env.Payload)
+	if err != nil || len(payload) == 0 || len(payload) > 1<<19 {
+		return out, ErrObserverUntrusted
+	}
+	signature, err := base64.StdEncoding.Strict().DecodeString(env.Signatures[0].Sig)
+	if err != nil || !ed25519.Verify(trust.PublicKey, dssePAE(env.PayloadType, payload), signature) {
+		return out, ErrObserverUntrusted
+	}
+	if err := strictObserverJSON(payload, &out); err != nil {
+		return ObserverStatement{}, ErrObserverUntrusted
+	}
+	if out.Type != ObserverStatementType || out.PredicateType != ObserverPredicateType || len(out.Subject) != 1 ||
+		len(out.Subject[0].Digest) != 1 || !strings.HasPrefix(out.Subject[0].Name, "k8s-job:") {
+		return ObserverStatement{}, ErrObserverUntrusted
+	}
+	p := out.Predicate
+	if p != want || p.OperationID == "" || p.ClusterID == "" || p.ProjectID == "" || p.WorkloadID == "" ||
+		p.Generation < 1 || p.JobUID == "" || p.Nonce == "" || p.ObservedAt == "" {
+		return ObserverStatement{}, ErrObserverUntrusted
+	}
+	if out.Subject[0].Name != "k8s-job:"+p.JobUID {
+		return ObserverStatement{}, ErrObserverUntrusted
+	}
+	digest := out.Subject[0].Digest["sha256"]
+	if len(digest) != 64 || strings.Trim(digest, "0123456789abcdef") != "" {
+		return ObserverStatement{}, ErrObserverUntrusted
+	}
+	return out, nil
+}
+
+// strictObserverJSON rejects trailing documents and unknown struct fields.
+// Duplicate-key detection remains a separate fail-closed admission requirement;
+// this offline primitive must not be used as a final authorization verdict.
+func strictObserverJSON(raw []byte, target any) error {
+	if err := rejectDuplicateJSONKeys(raw); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return ErrObserverUntrusted
+	}
+	return nil
+}
+
+// rejectDuplicateJSONKeys validates JSON token structure and rejects duplicate
+// keys at every nested object level before typed decoding. Decoder alone
+// otherwise silently accepts last-key-wins aliases in signed evidence.
+func rejectDuplicateJSONKeys(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var visit func() error
+	visit = func() error {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		delim, ok := tok.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delim {
+		case '{':
+			seen := make(map[string]struct{})
+			for dec.More() {
+				key, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				name, ok := key.(string)
+				if !ok {
+					return ErrObserverUntrusted
+				}
+				if _, exists := seen[name]; exists {
+					return ErrObserverUntrusted
+				}
+				seen[name] = struct{}{}
+				if err := visit(); err != nil {
+					return err
+				}
+			}
+		case '[':
+			for dec.More() {
+				if err := visit(); err != nil {
+					return err
+				}
+			}
+		default:
+			return ErrObserverUntrusted
+		}
+		end, err := dec.Token()
+		if err != nil || end != json.Delim(map[json.Delim]rune{'{': '}', '[': ']'}[delim]) {
+			return ErrObserverUntrusted
+		}
+		return nil
+	}
+	if err := visit(); err != nil {
+		return err
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		return ErrObserverUntrusted
+	}
+	return nil
+}
