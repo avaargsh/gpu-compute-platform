@@ -34,6 +34,8 @@ func TestDispatchAndRecordSignedObservedJobEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	registerObserverTrustForTest(t, store, input.ClusterID,
+		verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPub})
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -78,7 +80,7 @@ func TestDispatchAndRecordSignedObservedJobEndToEnd(t *testing.T) {
 	receipt, err := store.DispatchAndRecordSignedObservedJob(
 		context.Background(), makeObserverScope(input),
 		verifiedops.ObserverSigner{KeyID: "dispatcher", Signer: dispatchPriv},
-		verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPub}, runner)
+		"observer", runner)
 	if err != nil {
 		t.Fatalf("dispatch -> signed observation -> durable receipt: %v", err)
 	}
@@ -100,15 +102,10 @@ func TestDispatchAndRecordRejectsMissingRunnerBeforeIssuingChallenge(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, observerPriv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
 	_, err = store.DispatchAndRecordSignedObservedJob(context.Background(),
 		makeObserverScope(input),
 		verifiedops.ObserverSigner{KeyID: "dispatcher", Signer: dispatcherPriv},
-		verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPriv.Public().(ed25519.PublicKey)},
-		nil)
+		"observer", nil)
 	if !errors.Is(err, verifiedops.ErrObserverUntrusted) {
 		t.Fatalf("missing runner should fail closed, got %v", err)
 	}
@@ -132,13 +129,15 @@ func TestDispatchAndRecordRejectsMalformedEvidenceWithoutReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	registerObserverTrustForTest(t, store, input.ClusterID,
+		verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPub})
 	runner := observerEvidenceRunnerFunc(func(context.Context, []byte) ([]byte, error) {
 		return []byte(`{"payload":"not-a-valid-dsse-envelope"}`), nil
 	})
 	_, err = store.DispatchAndRecordSignedObservedJob(context.Background(),
 		makeObserverScope(input),
 		verifiedops.ObserverSigner{KeyID: "dispatcher", Signer: dispatcherPriv},
-		verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPub}, runner)
+		"observer", runner)
 	if err == nil {
 		t.Fatal("malformed evidence was accepted")
 	}
