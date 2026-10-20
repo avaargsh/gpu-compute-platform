@@ -13,13 +13,13 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 	authenticationv1 "k8s.io/api/authentication/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	ktesting "k8s.io/client-go/testing"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	fake "k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 const trustedTicketImage = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -234,6 +234,7 @@ func TestIssuedSignedTicketCanReachPendingV2ReceiptWithoutAuthorityVerdict(t *te
 		t.Fatal("no final authorization verdict is permitted")
 	}
 }
+
 // This crosses the durable CREATE+ACK / signed dispatcher / dedicated Observer
 // identity / signed Kubernetes evidence / PostgreSQL receipt boundary. A Job
 // that begins deletion at the final GET must remain non-positive even when a
