@@ -1,0 +1,11 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: verifiedops-observer-job-envelope
+spec:
+  policyName: verifiedops-observer-job-envelope
+  paramRef:
+    name: verifiedops-observer-policy
+    namespace: verifiedops-observer
+    parameterNotFoundAction: Deny
+  validationActions: ["Deny"]
