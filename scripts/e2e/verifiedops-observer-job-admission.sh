@@ -69,6 +69,10 @@ metadata:
   name: verifiedops-observer-vap-canary
 spec:
   policyName: verifiedops-observer-vap-canary
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        app.kubernetes.io/component: verifiedops-observer
   validationActions: ["Deny"]
 VAP_CANARY
 if kubectl create --dry-run=server -f "$manifest" >/dev/null 2>"$canary_err"; then
