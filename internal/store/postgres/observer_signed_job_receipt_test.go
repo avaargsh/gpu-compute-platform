@@ -14,8 +14,8 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	fake "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -39,16 +39,22 @@ WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
 `, binding.ClusterID, binding.WorkloadID, "registry.invalid/train@"+v2Digest); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.PrepareJobCreateAttempt(ctx, durableAttempt(binding)); err != nil { t.Fatal(err) }
-	if err := store.RecordJobCreateUID(ctx, binding); err != nil { t.Fatal(err) }
+	if err := store.PrepareJobCreateAttempt(ctx, durableAttempt(binding)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordJobCreateUID(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
 	challenge, err := store.IssueObserverChallenge(ctx, makeObserverScope(binding))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: binding.JobName, Namespace: binding.Namespace, UID: types.UID(binding.JobUID),
 			ResourceVersion: "180",
-			Annotations: map[string]string{"ai.compute/generation": "1"},
-			Labels: map[string]string{"ai.compute/workload": binding.JobName},
+			Annotations:     map[string]string{"ai.compute/generation": "1"},
+			Labels:          map[string]string{"ai.compute/workload": binding.JobName},
 		},
 		Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{Name: "workload", Image: "registry.invalid/train@" + v2Digest}},
@@ -69,11 +75,11 @@ WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
 				}},
 			},
 			Spec: corev1.PodSpec{
-				NodeName: "gpu-node-01",
+				NodeName:   "gpu-node-01",
 				Containers: []corev1.Container{{Name: "workload", Image: "registry.invalid/train@" + v2Digest}},
 			},
 			Status: corev1.PodStatus{
-				Phase: corev1.PodRunning,
+				Phase:      corev1.PodRunning,
 				Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 				ContainerStatuses: []corev1.ContainerStatus{{
 					Name: "workload", Ready: true,
@@ -83,7 +89,7 @@ WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
 		}
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{Name: "gpu-node-01", UID: types.UID("node-stable-uid"), ResourceVersion: "333"},
-			Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}},
+			Status:     corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}},
 		}
 		objects = append(objects, pod, node)
 		expectedCode = verifiedops.PODReadyObserved
@@ -98,7 +104,9 @@ WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
 		Generation: binding.Generation, ContainerName: "workload", ImageDigest: v2Digest,
 	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	raw, observed, err := verifiedops.NewJobObserver(fake.NewSimpleClientset(objects...)).ObserveAndSign(
 		ctx, subject, expected, verifiedops.ObserverSigner{KeyID: "pinned-test-only", Signer: priv})
 	if err != nil || observed.Code != expectedCode {
