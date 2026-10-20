@@ -66,7 +66,7 @@ func (s *Store) IssueObserverChallenge(ctx context.Context, scope ObserverChalle
 	var generation int64
 	var desiredProject string
 	var deleting sql.NullTime
-	err := tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 SELECT generation,spec->>'projectID',deletion_timestamp
 FROM desired_resources
 WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
