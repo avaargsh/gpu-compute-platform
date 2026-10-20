@@ -94,6 +94,11 @@ func readyPod(p *corev1.Pod) bool {
 }
 
 func readyNode(n *corev1.Node) bool {
+	// A Node being removed or cordoned is not an acceptable positive
+	// readiness attestation, even if its last NodeReady condition is True.
+	if n == nil || n.DeletionTimestamp != nil || n.Spec.Unschedulable {
+		return false
+	}
 	for _, c := range n.Status.Conditions {
 		if c.Type == corev1.NodeReady && c.Status == corev1.ConditionTrue {
 			return true

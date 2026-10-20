@@ -66,6 +66,13 @@ func TestBoundUIDGenerationAndOwnerFailures(t *testing.T) {
 		{"node-not-ready", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
 			n.Status.Conditions[0].Status = corev1.ConditionFalse
 		}, OutcomePending},
+		{"node-cordoned", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
+			n.Spec.Unschedulable = true
+		}, OutcomePending},
+		{"node-deleting", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
+			now := metav1.Now()
+			n.DeletionTimestamp = &now
+		}, OutcomePending},
 		{"wrong-image-digest", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
 			p.Status.ContainerStatuses[0].ImageID = "docker-pullable://repo/train@sha256:" + strings.Repeat("b", 64)
 		}, OutcomeMismatch},
