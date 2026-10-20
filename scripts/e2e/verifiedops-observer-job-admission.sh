@@ -14,6 +14,10 @@ kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-policy.example.
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-job-policy.yaml >/dev/null
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-job-policy-binding.yaml >/dev/null
 kubectl get validatingadmissionpolicybinding verifiedops-observer-job-envelope -o yaml
+kubectl get namespace verifiedops-observer --show-labels
+kubectl -n verifiedops-observer get configmap verifiedops-observer-policy -o yaml
+kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o jsonpath='{.status}'; printf '\\n'
+kubectl get validatingadmissionpolicybinding verifiedops-observer-job-envelope -o jsonpath='{.status}'; printf '\\n'
 kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o yaml
 # Prove the policy is active through API-server enforcement below rather than relying
 # on the optional Accepted status condition, which may remain unset on kind's
