@@ -14,6 +14,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	fake "k8s.io/client-go/kubernetes/fake"
 )
@@ -295,5 +296,127 @@ WHERE cluster_id=$1 AND key_id=$2
 				t.Fatalf("untrusted root consumed receipt: count=%d err=%v", count, err)
 			}
 		})
+	}
+}
+
+func readyV2Proof(t *testing.T) (*Store, JobCreateUIDBinding, ObserverChallenge, []byte, verifiedops.ObserverTrust) {
+	return signedV2Proof(t, true)
+}
+
+func signedV2Proof(t *testing.T, ready bool) (*Store, JobCreateUIDBinding, ObserverChallenge, []byte, verifiedops.ObserverTrust) {
+	t.Helper()
+	store, binding := newCreateUIDFixture(t)
+	ctx := context.Background()
+	if _, err := store.db.ExecContext(ctx, `
+UPDATE desired_resources SET spec=jsonb_set(spec,'{image}',to_jsonb($3::text),true)
+WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
+`, binding.ClusterID, binding.WorkloadID, "registry.invalid/train@"+v2Digest); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PrepareJobCreateAttempt(ctx, durableAttempt(binding)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordJobCreateUID(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := store.IssueObserverChallenge(ctx, makeObserverScope(binding))
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: binding.JobName, Namespace: binding.Namespace, UID: types.UID(binding.JobUID),
+			ResourceVersion: "180",
+			Annotations:     map[string]string{"ai.compute/generation": "1"},
+			Labels:          map[string]string{"ai.compute/workload": binding.JobName},
+		},
+		Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "workload", Image: "registry.invalid/train@" + v2Digest}},
+		}}},
+	}
+	objects := []runtime.Object{job}
+	expectedCode := verifiedops.OutcomePending
+	if ready {
+		controller := true
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: binding.JobName + "-pod", Namespace: binding.Namespace,
+				UID: types.UID("pod-stable-uid"), ResourceVersion: "200",
+				Labels: map[string]string{"batch.kubernetes.io/controller-uid": binding.JobUID},
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: "batch/v1", Kind: "Job", Name: binding.JobName,
+					UID: types.UID(binding.JobUID), Controller: &controller,
+				}},
+			},
+			Spec: corev1.PodSpec{
+				NodeName:   "gpu-node-01",
+				Containers: []corev1.Container{{Name: "workload", Image: "registry.invalid/train@" + v2Digest}},
+			},
+			Status: corev1.PodStatus{
+				Phase:      corev1.PodRunning,
+				Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name: "workload", Ready: true,
+					ImageID: "docker-pullable://registry.invalid/train@" + v2Digest,
+				}},
+			},
+		}
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "gpu-node-01", UID: types.UID("node-stable-uid"), ResourceVersion: "333"},
+			Status:     corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}},
+		}
+		objects = append(objects, pod, node)
+		expectedCode = verifiedops.PODReadyObserved
+	}
+	subject := verifiedops.ObserverSubject{
+		OperationID: challenge.OperationID, ClusterID: string(challenge.ClusterID),
+		ProjectID: challenge.ProjectID, WorkloadID: string(challenge.WorkloadID),
+		Generation: challenge.Generation, JobUID: challenge.JobUID, Nonce: challenge.Nonce,
+	}
+	expected := verifiedops.ExpectedJob{
+		Namespace: binding.Namespace, Name: binding.JobName, JobUID: types.UID(binding.JobUID),
+		Generation: binding.Generation, ContainerName: "workload", ImageDigest: v2Digest,
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerObserverTrustForTest(t, store, binding.ClusterID, verifiedops.ObserverTrust{KeyID: "pinned-test-only", PublicKey: pub})
+	raw, observed, err := verifiedops.NewJobObserver(fake.NewSimpleClientset(objects...)).ObserveAndSign(
+		ctx, subject, expected, verifiedops.ObserverSigner{KeyID: "pinned-test-only", Signer: priv})
+	if err != nil || observed.Code != expectedCode {
+		t.Fatalf("signed observation: want %s got %#v err=%v", expectedCode, observed, err)
+	}
+	return store, binding, challenge, raw, verifiedops.ObserverTrust{KeyID: "pinned-test-only", PublicKey: pub}
+}
+
+func TestSignedObservedJobV2ReadyObservationRemainsNonAuthorizing(t *testing.T) {
+	store, binding, challenge, raw, trust := readyV2Proof(t)
+	receipt, err := store.RecordSignedObservedJobProof(context.Background(), raw, trust.KeyID,
+		makeObserverScope(binding), challenge.Nonce)
+	if err != nil {
+		t.Fatalf("valid signed READY observation rejected: %v", err)
+	}
+	if receipt.Observation.Code != verifiedops.PODReadyObserved {
+		t.Fatalf("receipt lost signed observation state: %#v", receipt.Observation)
+	}
+	if receipt.PredicateType != verifiedops.ObservedJobPredicateType {
+		t.Fatalf("wrong predicate type: %s", receipt.PredicateType)
+	}
+	var code, nodeUID, imageID string
+	if err := store.db.QueryRowContext(context.Background(), `
+SELECT observation_json->>'Code',
+       observation_json->>'NodeUID',
+       observation_json->>'ImageID'
+FROM verified_observer_nonce_receipts WHERE cluster_id=$1 AND nonce=$2
+`, binding.ClusterID, challenge.Nonce).Scan(&code, &nodeUID, &imageID); err != nil {
+		t.Fatal(err)
+	}
+	if code != verifiedops.PODReadyObserved || nodeUID != "node-stable-uid" ||
+		!strings.HasSuffix(imageID, "@"+v2Digest) {
+		t.Fatalf("durable READY receipt does not preserve actual observed fields: code=%s node=%s image=%s", code, nodeUID, imageID)
+	}
+	if strings.Contains(strings.ToUpper(code), "AUTHORIZED_AND_VERIFIED") {
+		t.Fatal("signed READY observation was promoted to authorization")
 	}
 }
