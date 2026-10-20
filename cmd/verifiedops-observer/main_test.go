@@ -189,16 +189,29 @@ func TestDisabledExampleObserverJobHasProjectedTokenAndNoPrivilegedHostPath(t *t
 		t.Fatal("must have one isolated Observer container")
 	}
 	c := pod.Containers[0]
-	if c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation ||
-		c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem ||
-		c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged ||
-		c.SecurityContext.RunAsNonRoot == nil || !*c.SecurityContext.RunAsNonRoot ||
-		c.SecurityContext.RunAsUser == nil || *c.SecurityContext.RunAsUser != 65532 ||
-		c.SecurityContext.RunAsGroup == nil || *c.SecurityContext.RunAsGroup != 65532 ||
-		c.SecurityContext.Capabilities == nil || len(c.SecurityContext.Capabilities.Drop) != 1 ||
-		c.SecurityContext.Capabilities.Drop[0] != "ALL" ||
-		len(c.Ports) != 0 || len(c.EnvFrom) != 0 || len(c.Command) != 0 || len(c.Args) != 0 ||
-		!strings.Contains(c.Image, "@sha256:") {
+	checks := []struct {
+		name string
+		bad  bool
+	}{
+		{"allowPrivilegeEscalation", c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation},
+		{"readOnlyRootFilesystem", c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem},
+		{"privileged", c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged},
+		{"runAsNonRoot", c.SecurityContext.RunAsNonRoot == nil || !*c.SecurityContext.RunAsNonRoot},
+		{"runAsUser", c.SecurityContext.RunAsUser == nil || *c.SecurityContext.RunAsUser != 65532},
+		{"runAsGroup", c.SecurityContext.RunAsGroup == nil || *c.SecurityContext.RunAsGroup != 65532},
+		{"dropAllCapabilities", c.SecurityContext.Capabilities == nil || len(c.SecurityContext.Capabilities.Drop) != 1 || c.SecurityContext.Capabilities.Drop[0] != "ALL"},
+		{"ports", len(c.Ports) != 0},
+		{"envFrom", len(c.EnvFrom) != 0},
+		{"command", len(c.Command) != 0},
+		{"args", len(c.Args) != 0},
+		{"imageDigest", !strings.Contains(c.Image, "@sha256:")},
+	}
+	for _, check := range checks {
+		if check.bad {
+			t.Errorf("sample workload violates %s: container=%#v", check.name, c)
+		}
+	}
+	if t.Failed() {
 		t.Fatal("sample workload has unsafe container security settings or overridable process")
 	}
 	// The Observer must receive only the ticket, pinned dispatcher public root,
