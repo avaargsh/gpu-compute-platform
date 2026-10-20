@@ -55,7 +55,11 @@ func (s *Store) RecordSignedObserverNonce(ctx context.Context, envelope []byte,
 	sum := sha256.Sum256(envelope)
 	digest := hex.EncodeToString(sum[:])
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	// Match v2 receipt admission: READ COMMITTED plus the challenge row's
+	// FOR UPDATE lock serializes same-nonce v1/v2 submissions. This avoids
+	// spurious SSI 40001 failures for exact retries while the shared
+	// (cluster_id, nonce) primary key remains the cross-version replay fence.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
 	}
