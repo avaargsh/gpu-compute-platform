@@ -29,6 +29,7 @@ REVOKE ALL PRIVILEGES ON TABLE
   public.provider_job_create_attempts,
   public.verified_observer_nonce_receipts,
   public.verified_observer_challenges,
+  public.verified_observer_signing_keys,
   public.placement_migrations,
   public.cluster_agents
 FROM gpu_management_runtime;
