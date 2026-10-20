@@ -264,19 +264,25 @@ func TestSignedObservedJobV2RequiresActiveClusterScopedTrustRoot(t *testing.T) {
 UPDATE verified_observer_signing_keys SET revoked_at=clock_timestamp()
 WHERE cluster_id=$1 AND key_id=$2
 `, binding.ClusterID, keyID)
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 			case "expired":
 				_, err := store.db.ExecContext(ctx, `
 UPDATE verified_observer_signing_keys SET valid_until=clock_timestamp()-interval '1 second'
 WHERE cluster_id=$1 AND key_id=$2
 `, binding.ClusterID, keyID)
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 			case "not-yet-valid":
 				_, err := store.db.ExecContext(ctx, `
 UPDATE verified_observer_signing_keys SET valid_from=clock_timestamp()+interval '1 minute'
 WHERE cluster_id=$1 AND key_id=$2
 `, binding.ClusterID, keyID)
-				if err != nil { t.Fatal(err) }
+				if err != nil {
+					t.Fatal(err)
+				}
 			case "foreign-cluster":
 				scope.ClusterID = "foreign-cluster"
 			}
