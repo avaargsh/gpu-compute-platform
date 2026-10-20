@@ -10,7 +10,7 @@ spec:
   matchConstraints:
     namespaceSelector:
       matchLabels:
-        kubernetes.io/metadata.name: verifiedops-observer
+        app.kubernetes.io/component: verifiedops-observer
     resourceRules:
       - apiGroups: ["batch"]
         apiVersions: ["v1"]
@@ -52,6 +52,10 @@ metadata:
   name: verifiedops-observer-job-envelope
 spec:
   policyName: verifiedops-observer-job-envelope
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        app.kubernetes.io/component: verifiedops-observer
   paramRef:
     name: verifiedops-observer-policy
     namespace: verifiedops-observer
