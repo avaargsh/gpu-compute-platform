@@ -2,11 +2,13 @@ package postgres
 
 import (
 	"context"
+	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -361,5 +363,57 @@ FROM verified_observer_nonce_receipts WHERE cluster_id=$1 AND nonce=$2
 `, input.ClusterID, issued.Challenge.Nonce).Scan(&count, &storedCode); err != nil ||
 		count != 1 || storedCode != verifiedops.OwnershipUnproven {
 		t.Fatalf("incorrect durable negative receipt: count=%d code=%s err=%v", count, storedCode, err)
+	}
+}
+
+var errObserverDispatcherSignerUnavailable = errors.New("test dispatcher signer unavailable")
+
+type unavailableObserverDispatcherSigner struct {
+	public ed25519.PublicKey
+}
+
+func (s unavailableObserverDispatcherSigner) Public() crypto.PublicKey { return s.public }
+
+func (unavailableObserverDispatcherSigner) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
+	return nil, errObserverDispatcherSignerUnavailable
+}
+
+func TestDispatcherSignerFailureLeavesOnlyUnusableShortLivedChallenge(t *testing.T) {
+	store, input := prepareTrustedObserverIssue(t)
+	public, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	issued, err := store.IssueSignedObserverWork(context.Background(), makeObserverScope(input),
+		verifiedops.ObserverSigner{
+			KeyID: "trusted-dispatcher", Signer: unavailableObserverDispatcherSigner{public: public},
+		})
+	if !errors.Is(err, errObserverDispatcherSignerUnavailable) {
+		t.Fatalf("signer failure was not surfaced: issued=%#v err=%v", issued, err)
+	}
+	if len(issued.Ticket) != 0 || issued.Challenge.Nonce != "" {
+		t.Fatalf("signer failure returned usable work: %#v", issued)
+	}
+
+	var challenges, receipts int
+	if err := store.db.QueryRowContext(context.Background(),
+		"SELECT count(*) FROM verified_observer_challenges").Scan(&challenges); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRowContext(context.Background(),
+		"SELECT count(*) FROM verified_observer_nonce_receipts").Scan(&receipts); err != nil {
+		t.Fatal(err)
+	}
+	if challenges != 1 || receipts != 0 {
+		t.Fatalf("signer failure must leave only the documented short-lived challenge: challenges=%d receipts=%d", challenges, receipts)
+	}
+	var expiresAt time.Time
+	if err := store.db.QueryRowContext(context.Background(),
+		"SELECT expires_at FROM verified_observer_challenges").Scan(&expiresAt); err != nil {
+		t.Fatal(err)
+	}
+	if !expiresAt.After(time.Now().UTC()) || expiresAt.After(time.Now().UTC().Add(2*time.Minute+time.Second)) {
+		t.Fatalf("orphan challenge was not bounded by the short TTL: expires_at=%s", expiresAt.UTC().Format(time.RFC3339Nano))
 	}
 }
