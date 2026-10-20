@@ -151,3 +151,43 @@ func TestDispatchAndRecordRejectsMalformedEvidenceWithoutReceipt(t *testing.T) {
 		t.Fatalf("malformed evidence created %d receipts", count)
 	}
 }
+
+func TestDispatchAndRecordDeliveryFailureLeavesNoReceipt(t *testing.T) {
+	store, input := prepareTrustedObserverIssue(t)
+	_, dispatcherPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observerPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveryErr := errors.New("observer delivery timed out")
+	runner := observerEvidenceRunnerFunc(func(context.Context, []byte) ([]byte, error) {
+		return nil, deliveryErr
+	})
+
+	_, err = store.DispatchAndRecordSignedObservedJob(context.Background(),
+		makeObserverScope(input),
+		verifiedops.ObserverSigner{KeyID: "dispatcher", Signer: dispatcherPriv},
+		verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPub}, runner)
+	if !errors.Is(err, deliveryErr) {
+		t.Fatalf("delivery failure should propagate, got %v", err)
+	}
+
+	var challenges, receipts int
+	if err := store.db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM verified_observer_challenges`).Scan(&challenges); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM verified_observer_nonce_receipts`).Scan(&receipts); err != nil {
+		t.Fatal(err)
+	}
+	if challenges != 1 {
+		t.Fatalf("expected one short-lived challenge for failed delivery, got %d", challenges)
+	}
+	if receipts != 0 {
+		t.Fatalf("failed delivery must not persist an observation receipt, got %d", receipts)
+	}
+}
