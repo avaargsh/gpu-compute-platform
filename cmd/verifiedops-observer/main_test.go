@@ -194,6 +194,7 @@ func TestDisabledExampleObserverJobHasProjectedTokenAndNoPrivilegedHostPath(t *t
 		c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged ||
 		c.SecurityContext.RunAsNonRoot == nil || !*c.SecurityContext.RunAsNonRoot ||
 		c.SecurityContext.RunAsUser == nil || *c.SecurityContext.RunAsUser != 65532 ||
+		c.SecurityContext.RunAsGroup == nil || *c.SecurityContext.RunAsGroup != 65532 ||
 		c.SecurityContext.Capabilities == nil || len(c.SecurityContext.Capabilities.Drop) != 1 ||
 		c.SecurityContext.Capabilities.Drop[0] != "ALL" ||
 		len(c.Ports) != 0 || len(c.EnvFrom) != 0 || len(c.Command) != 0 || len(c.Args) != 0 ||
