@@ -124,3 +124,23 @@ func TestObserverReadErrorDoesNotBecomeSuccess(t *testing.T) {
 		t.Fatalf("reader error accepted: %#v %v", got, err)
 	}
 }
+
+func TestJobDeletionBetweenObserverReadsIsNotReady(t *testing.T) {
+	w, j, p, n := fixture()
+	c := fake.NewSimpleClientset(j, p, n)
+	calls := 0
+	c.PrependReactor("get", "jobs", func(a ktesting.Action) (bool, runtime.Object, error) {
+		calls++
+		if calls == 2 {
+			deleting := j.DeepCopy()
+			now := metav1.Now()
+			deleting.DeletionTimestamp = &now
+			return true, deleting, nil
+		}
+		return false, nil, nil
+	})
+	got, err := NewJobObserver(c).Observe(context.Background(), w)
+	if err != nil || got.Code != OwnershipUnproven || calls != 2 {
+		t.Fatalf("deleting Job incorrectly attested Ready: %#v %v (reads=%d)", got, err, calls)
+	}
+}
