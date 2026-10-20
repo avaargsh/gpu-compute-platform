@@ -318,4 +318,4 @@ func TestRealKindObserverShortLivedSATokenAndBoundJob(t *testing.T) {
 	// This exercises the FIRST deletion-aware GET on a real API server.
 	// The second-GET transition remains covered deterministically by the
 	// race tests added in #163 and #164, not by this cluster test.
-}}
+}
