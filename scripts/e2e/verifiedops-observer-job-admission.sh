@@ -47,6 +47,15 @@ if kubectl apply --dry-run=server -f "$mutated" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Keep the environment list length unchanged while replacing one required key
+# with a duplicate of another. This proves name uniqueness is enforced rather
+# than relying only on the exact list length.
+sed 's/VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID/VERIFIEDOPS_DISPATCHER_KEY_ID/' "$manifest" > "$mutated"
+if kubectl apply --dry-run=server -f "$mutated" >/dev/null 2>&1; then
+  echo 'Admission policy accepted duplicate Observer environment variable names' >&2
+  exit 1
+fi
+
 # A user must not bypass the Job policy by directly creating a Pod that selects
 # the signer-bearing ServiceAccount and overrides the process.
 if cat <<'POD' | kubectl apply --dry-run=server -f - >/dev/null 2>&1
