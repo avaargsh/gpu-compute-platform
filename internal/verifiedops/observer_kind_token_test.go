@@ -143,6 +143,40 @@ func TestRealKindObserverShortLivedSATokenAndBoundJob(t *testing.T) {
 	if err != nil || evidence.Observation.Code != OutcomePending || evidence.Subject.JobUID != string(job.UID) {
 		t.Fatalf("pending real-API evidence was misverified: %#v %v", evidence, err)
 	}
+	// Real TokenRequest-only Kubernetes client must run under an independently
+	// pinned dispatcher ticket before it can create an Observer signature.
+	dispatcherPub, dispatcherKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	workTicket := ObserverWorkTicket{
+		Challenge: challenge,
+		Expected:  binding,
+		IssuedAt:  now.Add(-time.Second).Format(time.RFC3339Nano),
+		ExpiresAt: now.Add(time.Minute).Format(time.RFC3339Nano),
+	}
+	request, err := AuthorObserverWorkTicket(workTicket, ObserverSigner{
+		KeyID: "dispatcher-test-only", Signer: dispatcherKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := ApproveObserverWorkTicket(request, ObserverTrust{
+		KeyID: "dispatcher-test-only", PublicKey: dispatcherPub,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workerProof, workerState, err := RunApprovedObserverWork(ctx, reader, approved,
+		ObserverSigner{KeyID: "kind-ephemeral-only", Signer: private})
+	if err != nil || workerState.Code != OutcomePending {
+		t.Fatalf("real bearer-only signed work-ticket observation: %#v err %v", workerState, err)
+	}
+	if _, err := VerifyObservedJobEnvelope(workerProof,
+		ObserverTrust{KeyID: "kind-ephemeral-only", PublicKey: pub}, challenge, binding); err != nil {
+		t.Fatalf("real bearer-only ticket proof was not verifiable: %v", err)
+	}
 	stale := binding
 	stale.JobUID = types.UID("old-replaced-job-uid")
 	view, err = NewJobObserver(reader).Observe(ctx, stale)
