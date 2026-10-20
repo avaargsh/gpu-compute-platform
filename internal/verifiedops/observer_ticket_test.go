@@ -215,7 +215,6 @@ func TestObserverRunnerSignsJobDeletionRaceAsUnproven(t *testing.T) {
 	}
 }
 
-
 func TestObserverRunnerRejectsTicketExpiredAfterApprovalBeforeKubernetesAccess(t *testing.T) {
 	_, raw, trust, _ := workTicketFixture(t)
 	approved, err := ApproveObserverWorkTicket(raw, trust)
