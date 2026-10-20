@@ -12,6 +12,7 @@ kubectl apply --dry-run=server -f deploy/kubernetes/verifiedops-observer/rbac.ya
 # example digest and key IDs with reviewed values before installing.
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-policy.example.yaml >/dev/null
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-job-policy.yaml >/dev/null
+kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o yaml
 kubectl wait --for=condition=Accepted validatingadmissionpolicy/verifiedops-observer-job-envelope --timeout=30s >/dev/null
 kubectl apply --dry-run=server -f "$manifest" >/dev/null
 
