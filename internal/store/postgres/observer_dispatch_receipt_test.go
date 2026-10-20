@@ -192,3 +192,44 @@ func TestDispatchAndRecordDeliveryFailureLeavesNoReceipt(t *testing.T) {
 		t.Fatalf("failed delivery must not persist an observation receipt, got %d", receipts)
 	}
 }
+
+func TestDispatchAndRecordRejectsOversizedEvidenceWithoutReceipt(t *testing.T) {
+	store, input := prepareTrustedObserverIssue(t)
+	_, dispatcherPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observerPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerObserverTrustForTest(t, store, input.ClusterID,
+		verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPub})
+
+	runner := observerEvidenceRunnerFunc(func(context.Context, []byte) ([]byte, error) {
+		return make([]byte, maxObserverEvidenceEnvelopeBytes+1), nil
+	})
+	_, err = store.DispatchAndRecordSignedObservedJob(context.Background(),
+		makeObserverScope(input),
+		verifiedops.ObserverSigner{KeyID: "dispatcher", Signer: dispatcherPriv},
+		"observer", runner)
+	if !errors.Is(err, verifiedops.ErrObserverUntrusted) {
+		t.Fatalf("oversized evidence must fail closed, got %v", err)
+	}
+
+	var challenges, receipts int
+	if err := store.db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM verified_observer_challenges`).Scan(&challenges); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM verified_observer_nonce_receipts`).Scan(&receipts); err != nil {
+		t.Fatal(err)
+	}
+	if challenges != 1 {
+		t.Fatalf("expected one short-lived challenge after delivery, got %d", challenges)
+	}
+	if receipts != 0 {
+		t.Fatalf("oversized evidence created %d receipts", receipts)
+	}
+}
