@@ -32,48 +32,20 @@ type ObservedJobReceipt struct {
 
 // RecordSignedObservedJobProof admits one signed observation receipt. It retries
 // bounded PostgreSQL serialization/deadlock failures because concurrent exact
-// retries must be idempotent rather than spuriously fail under transaction
-// contention. Each attempt re-runs the complete trusted-scope, challenge,
-// signature and replay checks in a fresh transaction.
+// retries must be idempotent. Each attempt repeats all trusted-scope, challenge,
+// signature and replay checks in a fresh serializable transaction.
 func (s *Store) RecordSignedObservedJobProof(
 	ctx context.Context, envelope []byte, trust verifiedops.ObserverTrust,
 	scope ObserverChallengeScope, nonce string,
 ) (ObservedJobReceipt, error) {
+	var empty ObservedJobReceipt
 	const maxAttempts = 8
-	var empty ObservedJobReceipt
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		receipt, err := s.recordSignedObservedJobProofOnce(ctx, envelope, trust, scope, nonce)
-		if err == nil {
-			return receipt, nil
-		}
-		var stateErr interface{ SQLState() string }
-		if !errors.As(err, &stateErr) || (stateErr.SQLState() != "40001" && stateErr.SQLState() != "40P01") || attempt == maxAttempts-1 {
-			return empty, err
-		}
-		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return empty, ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return empty, fmt.Errorf("observer receipt transaction retry exhausted")
-}
-
-func (s *Store) recordSignedObservedJobProofOnce(
-	ctx context.Context, envelope []byte, trust verifiedops.ObserverTrust,
-	scope ObserverChallengeScope, nonce string,
-) (ObservedJobReceipt, error) {
-	var empty ObservedJobReceipt
-	const maxAttempts = 4
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		receipt, err := s.recordSignedObservedJobProofOnce(ctx, envelope, trust, scope, nonce)
 		if err == nil || !isRetryableObserverTransactionError(err) || attempt == maxAttempts-1 {
 			return receipt, err
 		}
-		delay := time.Duration(attempt+1) * 10 * time.Millisecond
-		timer := time.NewTimer(delay)
+		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
