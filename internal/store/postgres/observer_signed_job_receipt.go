@@ -32,15 +32,9 @@ type ObservedJobReceipt struct {
 
 // RecordSignedObservedJobProof admits one signed observation receipt. It retries
 // bounded PostgreSQL serialization/deadlock failures because concurrent exact
-// retries are required to be idempotent, not spuriously fail with SQLSTATE 40001.
-// Every attempt re-runs the complete trusted-scope, challenge, signature and
-// replay checks in a fresh transaction.
-// RecordSignedObservedJobProof retries only PostgreSQL serialization failures.
-// Concurrent identical submissions may both validate the same challenge; under
-// SERIALIZABLE isolation PostgreSQL can abort one transaction with SQLSTATE
-// 40001. Retrying the complete transaction lets that caller observe the
-// committed receipt and preserve exact-retry idempotency without weakening the
-// nonce uniqueness or replay checks.
+// retries must be idempotent rather than spuriously fail under transaction
+// contention. Each attempt re-runs the complete trusted-scope, challenge,
+// signature and replay checks in a fresh transaction.
 func (s *Store) RecordSignedObservedJobProof(
 	ctx context.Context, envelope []byte, trust verifiedops.ObserverTrust,
 	scope ObserverChallengeScope, nonce string,
@@ -53,7 +47,7 @@ func (s *Store) RecordSignedObservedJobProof(
 			return receipt, nil
 		}
 		var stateErr interface{ SQLState() string }
-		if !errors.As(err, &stateErr) || stateErr.SQLState() != "40001" || attempt == maxAttempts-1 {
+		if !errors.As(err, &stateErr) || (stateErr.SQLState() != "40001" && stateErr.SQLState() != "40P01") || attempt == maxAttempts-1 {
 			return empty, err
 		}
 		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
