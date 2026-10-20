@@ -352,7 +352,7 @@ func TestDeletionRaceSignedObserverWorkIsDurableNonPositive(t *testing.T) {
 		t.Fatalf("deletion race became a positive receipt: %#v %v", receipt, err)
 	}
 	retry, err := New(store.db).RecordSignedObservedJobProof(
-		ctx, envelope, trust, makeObserverScope(input), issued.Challenge.Nonce)
+		ctx, envelope, trust.KeyID, makeObserverScope(input), issued.Challenge.Nonce)
 	if err != nil || retry.EnvelopeSHA256 != receipt.EnvelopeSHA256 ||
 		retry.Observation.Code != verifiedops.OwnershipUnproven {
 		t.Fatalf("durable negative receipt retry was not idempotent: %#v %v", retry, err)
