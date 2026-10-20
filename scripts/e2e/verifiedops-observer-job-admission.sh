@@ -56,6 +56,23 @@ if kubectl apply --dry-run=server -f "$mutated" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Init containers execute arbitrary code before the pinned Observer process
+# and could read the signer/ticket volumes. Keep the Job otherwise unchanged.
+awk '
+  /^      containers:$/ && !inserted {
+    print "      initContainers:"
+    print "        - name: injected-init"
+    print "          image: busybox:1.36"
+    print "          command: [\"sh\", \"-c\", \"id\"]"
+    inserted=1
+  }
+  { print }
+' "$manifest" > "$mutated"
+if kubectl apply --dry-run=server -f "$mutated" >/dev/null 2>&1; then
+  echo 'Admission policy accepted an injected Observer init container' >&2
+  exit 1
+fi
+
 # A user must not bypass the Job policy by directly creating a Pod that selects
 # the signer-bearing ServiceAccount and overrides the process.
 if cat <<'POD' | kubectl apply --dry-run=server -f - >/dev/null 2>&1
