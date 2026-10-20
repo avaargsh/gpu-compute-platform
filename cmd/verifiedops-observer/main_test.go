@@ -222,3 +222,33 @@ func TestDisabledExampleObserverJobHasProjectedTokenAndNoPrivilegedHostPath(t *t
 		t.Fatal(err)
 	}
 }
+
+func TestObserverOnceRejectsHardLinkedSignerInput(t *testing.T) {
+	for _, source := range []string{"ticket", "root"} {
+		t.Run(source, func(t *testing.T) {
+			cfg, client, _, _, _ := fixtureCLI(t)
+			var input string
+			switch source {
+			case "ticket":
+				input = cfg.ticketFile
+			case "root":
+				input = cfg.dispatcherPublicKeyFile
+			}
+			// A hardlink bypasses O_NOFOLLOW and Clean(path) equality.
+			// Alias the already-opened input to the key's inode.
+			if err := os.Remove(input); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Link(cfg.observerPrivateKeyFile, input); err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			if err := runOnce(context.Background(), cfg, client, &output); err == nil {
+				t.Fatal("hardlinked signing key accepted as untrusted input")
+			}
+			if output.Len() != 0 || len(client.Actions()) != 0 {
+				t.Fatalf("hardlinked key reached Kubernetes or emitted proof: actions=%v", client.Actions())
+			}
+		})
+	}
+}
