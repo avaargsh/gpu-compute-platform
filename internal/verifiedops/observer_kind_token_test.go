@@ -289,7 +289,7 @@ func TestRealKindObserverShortLivedSATokenAndBoundJob(t *testing.T) {
 	issued := time.Now().UTC()
 	deletedTicket := ObserverWorkTicket{
 		Challenge: deletedChallenge, Expected: binding,
-		IssuedAt: issued.Add(-time.Second).Format(time.RFC3339Nano),
+		IssuedAt:  issued.Add(-time.Second).Format(time.RFC3339Nano),
 		ExpiresAt: issued.Add(time.Minute).Format(time.RFC3339Nano),
 	}
 	deletedRequest, err := AuthorObserverWorkTicket(deletedTicket, ObserverSigner{
