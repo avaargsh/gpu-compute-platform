@@ -56,7 +56,12 @@ func (s *Store) RecordSignedObservedJobProof(
 		return empty, verifiedops.ErrObserverUntrusted
 	}
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	// READ COMMITTED is deliberate: FOR UPDATE on the issued challenge is the
+	// serialization point for every submission using this nonce. Subsequent
+	// statements see the committed winner, making exact retries idempotent
+	// instead of failing SSI with SQLSTATE 40001. The shared (cluster_id,
+	// nonce) primary key still fences cross-version replay.
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return empty, err
 	}
