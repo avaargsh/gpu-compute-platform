@@ -92,7 +92,7 @@ kubectl delete validatingadmissionpolicy verifiedops-observer-vap-canary --wait=
 # the operator-pinned digest. Neither negative fixture is persisted.
 unsafe="$(mktemp)"
 update_manifest="$(mktemp)"
-trap 'rm -f "$unsafe" "$unsafe.err" "$update_manifest"' EXIT
+trap 'rm -f "$canary_err" "$unsafe" "$unsafe.err" "$update_manifest"' EXIT
 sed '/image: example.invalid\/verifiedops-observer@/a\          command: ["sh"]' "$manifest" > "$unsafe"
 if kubectl create --dry-run=server -f "$unsafe" >/dev/null 2>"$unsafe.err"; then
   echo 'Observer Job with command override was admitted' >&2
