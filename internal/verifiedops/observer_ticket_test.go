@@ -214,3 +214,38 @@ func TestObserverRunnerSignsJobDeletionRaceAsUnproven(t *testing.T) {
 		t.Fatalf("signed deletion must remain non-positive: %#v %v", verified, err)
 	}
 }
+
+
+func TestObserverRunnerRejectsTicketExpiredAfterApprovalBeforeKubernetesAccess(t *testing.T) {
+	_, raw, trust, _ := workTicketFixture(t)
+	approved, err := ApproveObserverWorkTicket(raw, trust)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The signature was valid when approved, but dispatch/queue delay can make
+	// the short-lived ticket stale before the runner gets CPU time.
+	approved.expiresAt = time.Now().UTC().Add(-time.Second)
+	_, job, pod, node := fixture()
+	client := fake.NewSimpleClientset(job, pod, node)
+	fakeObserverIdentity(client, ObserverIdentityUsername, nil)
+	_, observation, err := RunApprovedObserverWork(
+		context.Background(), client, approved,
+		ObserverSigner{KeyID: "observer-only", Signer: makeTestObserverKey(t)},
+	)
+	if !errors.Is(err, ErrObserverUntrusted) || observation.Code != "" {
+		t.Fatalf("expired approved ticket reached observation/signing: %#v %v", observation, err)
+	}
+	if len(client.Actions()) != 0 {
+		t.Fatalf("expired ticket touched Kubernetes before rejection: %v", client.Actions())
+	}
+}
+
+func makeTestObserverKey(t *testing.T) ed25519.PrivateKey {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
