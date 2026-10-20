@@ -31,15 +31,27 @@ kubectl apply --dry-run=server -f "$manifest" >/dev/null
 # the operator-pinned digest. Neither negative fixture is persisted.
 unsafe="$(mktemp)"
 update_manifest="$(mktemp)"
-trap 'rm -f "$unsafe" "$update_manifest"' EXIT
+trap 'rm -f "$unsafe" "$unsafe.err" "$update_manifest"' EXIT
 sed '/image: example.invalid\/verifiedops-observer@/a\          command: ["sh"]' "$manifest" > "$unsafe"
-if kubectl apply --dry-run=server -f "$unsafe" >/dev/null 2>&1; then
+if kubectl create --dry-run=server -f "$unsafe" >/dev/null 2>"$unsafe.err"; then
   echo 'Observer Job with command override was admitted' >&2
+  cat "$unsafe" >&2
+  exit 1
+fi
+if ! grep -Eiq 'denied|forbidden|validation' "$unsafe.err"; then
+  echo 'Observer command-override fixture failed for a reason other than an admission rejection' >&2
+  cat "$unsafe.err" >&2
   exit 1
 fi
 sed 's#example.invalid/verifiedops-observer@sha256:0000000000000000000000000000000000000000000000000000000000000000#attacker.invalid/observer@sha256:1111111111111111111111111111111111111111111111111111111111111111#' "$manifest" > "$unsafe"
-if kubectl apply --dry-run=server -f "$unsafe" >/dev/null 2>&1; then
+if kubectl create --dry-run=server -f "$unsafe" >/dev/null 2>"$unsafe.err"; then
   echo 'Observer Job with unpinned image was admitted' >&2
+  cat "$unsafe" >&2
+  exit 1
+fi
+if ! grep -Eiq 'denied|forbidden|validation' "$unsafe.err"; then
+  echo 'Observer unpinned-image fixture failed for a reason other than an admission rejection' >&2
+  cat "$unsafe.err" >&2
   exit 1
 fi
 
