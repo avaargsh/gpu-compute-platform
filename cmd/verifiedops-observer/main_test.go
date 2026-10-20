@@ -242,6 +242,9 @@ func TestObserverOnceRejectsHardLinkedSignerInput(t *testing.T) {
 			if err := os.Link(cfg.observerPrivateKeyFile, input); err != nil {
 				t.Fatal(err)
 			}
+			if err := rejectSignerInputAlias(cfg); err == nil {
+				t.Fatal("hardlinked key alias passed inode identity validation")
+			}
 			var output bytes.Buffer
 			if err := runOnce(context.Background(), cfg, client, &output); err == nil {
 				t.Fatal("hardlinked signing key accepted as untrusted input")
