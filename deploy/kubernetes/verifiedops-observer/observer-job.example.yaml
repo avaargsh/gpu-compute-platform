@@ -1,0 +1,103 @@
+# NON-PRODUCTION, DISABLED BY DEFAULT. Operator MUST set a reviewed image
+# digest, provision independent signer and dispatcher trust root, and verify
+# the SecretProviderClass before deliberately unsuspending this Job.
+# No observer signing material or work ticket is stored in this repository.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: verifiedops-observer-once-example
+  namespace: verifiedops-observer
+  labels:
+    app.kubernetes.io/component: verifiedops-observer
+spec:
+  suspend: true
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: verifiedops-observer
+    spec:
+      serviceAccountName: verifiedops-observer
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: observer
+          # Intentional unusable digest placeholder until reviewed by operator.
+          image: example.invalid/verifiedops-observer@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: VERIFIEDOPS_TICKET_FILE
+              value: /run/verifiedops/ticket/ticket.dsse.json
+            - name: VERIFIEDOPS_DISPATCHER_PUBKEY_FILE
+              value: /run/verifiedops/root/dispatcher.pub.b64
+            - name: VERIFIEDOPS_DISPATCHER_KEY_ID
+              value: operator-provisioned-dispatcher-key-id
+            - name: VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE
+              value: /run/verifiedops/identity/observer.pk8.pem
+            - name: VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID
+              value: operator-provisioned-observer-key-id
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          volumeMounts:
+            - name: kubernetes-api-access
+              mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              readOnly: true
+            - name: signed-work-ticket
+              mountPath: /run/verifiedops/ticket
+              readOnly: true
+            - name: pinned-dispatcher-root
+              mountPath: /run/verifiedops/root
+              readOnly: true
+            - name: external-signer
+              mountPath: /run/verifiedops/identity
+              readOnly: true
+      volumes:
+        - name: kubernetes-api-access
+          projected:
+            defaultMode: 0444
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 600
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        fieldPath: metadata.namespace
+        - name: signed-work-ticket
+          secret:
+            secretName: verifiedops-observer-once-ticket
+            optional: false
+        - name: pinned-dispatcher-root
+          configMap:
+            name: verifiedops-observer-dispatcher-pinned-root
+            optional: false
+        - name: external-signer
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: verifiedops-observer-external-signing-key
