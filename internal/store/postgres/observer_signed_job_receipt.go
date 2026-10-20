@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -35,13 +36,13 @@ type ObservedJobReceipt struct {
 // retries must be idempotent. Each attempt repeats all trusted-scope, challenge,
 // signature and replay checks in a fresh serializable transaction.
 func (s *Store) RecordSignedObservedJobProof(
-	ctx context.Context, envelope []byte, trust verifiedops.ObserverTrust,
+	ctx context.Context, envelope []byte, observerKeyID string,
 	scope ObserverChallengeScope, nonce string,
 ) (ObservedJobReceipt, error) {
 	var empty ObservedJobReceipt
 	const maxAttempts = 8
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		receipt, err := s.recordSignedObservedJobProofOnce(ctx, envelope, trust, scope, nonce)
+		receipt, err := s.recordSignedObservedJobProofOnce(ctx, envelope, observerKeyID, scope, nonce)
 		if err == nil || !isRetryableObserverTransactionError(err) || attempt == maxAttempts-1 {
 			return receipt, err
 		}
@@ -85,7 +86,7 @@ func isRetryableObserverTransactionError(err error) bool {
 // records observed outcomes, including PENDING, but never issues a final
 // AUTHORIZED_AND_VERIFIED verdict.
 func (s *Store) recordSignedObservedJobProofOnce(
-	ctx context.Context, envelope []byte, trust verifiedops.ObserverTrust,
+	ctx context.Context, envelope []byte, observerKeyID string,
 	scope ObserverChallengeScope, nonce string,
 ) (ObservedJobReceipt, error) {
 	var empty ObservedJobReceipt
@@ -94,7 +95,8 @@ func (s *Store) recordSignedObservedJobProofOnce(
 	}
 	if !bindingOperationID.MatchString(scope.OperationID) || !signedObserverNonce.MatchString(nonce) ||
 		scope.ClusterID == "" || scope.ProjectID == "" || scope.WorkloadID == "" ||
-		scope.Generation <= 0 || strings.TrimSpace(scope.JobUID) == "" {
+		scope.Generation <= 0 || strings.TrimSpace(scope.JobUID) == "" ||
+		strings.TrimSpace(observerKeyID) == "" || len(observerKeyID) > 128 {
 		return empty, verifiedops.ErrObserverUntrusted
 	}
 
@@ -103,6 +105,29 @@ func (s *Store) recordSignedObservedJobProofOnce(
 		return empty, err
 	}
 	defer tx.Rollback()
+
+	// Resolve the trust root from the DBA-controlled, cluster-scoped registry.
+	// The FOR SHARE row lock prevents revocation/rotation from racing admission.
+	var publicKey []byte
+	err = tx.QueryRowContext(ctx, `
+SELECT public_key
+FROM verified_observer_signing_keys
+WHERE cluster_id=$1 AND key_id=$2
+  AND valid_from <= clock_timestamp()
+  AND (valid_until IS NULL OR valid_until > clock_timestamp())
+  AND revoked_at IS NULL
+FOR SHARE
+`, scope.ClusterID, observerKeyID).Scan(&publicKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return empty, verifiedops.ErrObserverUntrusted
+	}
+	if err != nil {
+		return empty, err
+	}
+	if len(publicKey) != ed25519.PublicKeySize {
+		return empty, verifiedops.ErrObserverUntrusted
+	}
+	trust := verifiedops.ObserverTrust{KeyID: observerKeyID, PublicKey: ed25519.PublicKey(publicKey)}
 
 	// Canonical order matches the previous nonce sink: Desired -> original
 	// CREATE UID -> server Challenge -> nonce receipt.
@@ -157,7 +182,7 @@ JOIN project_bindings AS pb
   AND pb.namespace=b.namespace
 WHERE b.operation_id=$1 AND b.cluster_id=$2 AND b.workload_id=$3
   AND b.generation=$4
-FOR SHARE OF b
+FOR SHARE OF b, p, pb
 `, scope.OperationID, scope.ClusterID, scope.WorkloadID, scope.Generation).Scan(
 		&project, &namespace, &name, &uid)
 	if errors.Is(err, sql.ErrNoRows) {
