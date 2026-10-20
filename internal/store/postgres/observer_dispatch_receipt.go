@@ -2,8 +2,8 @@ package postgres
 
 import (
 	"context"
-	"crypto/ed25519"
 	"fmt"
+	"strings"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
@@ -22,7 +22,7 @@ type ObserverEvidenceRunner interface {
 // joining the existing database ticket issuer, an independently isolated
 // Observer runner, and the PostgreSQL receipt admission transaction.
 //
-// scope, dispatcherSigner and observerTrust MUST be resolved by trusted
+// scope, dispatcher signer and Observer key ID MUST be resolved by trusted
 // server-side configuration/orchestration, never from an HTTP request or
 // unsigned Agent/Observer payload. This method does not expose an endpoint,
 // configure key custody, prove the adapter's deployment identity, or issue an
@@ -31,7 +31,7 @@ func (s *Store) DispatchAndRecordSignedObservedJob(
 	ctx context.Context,
 	scope ObserverChallengeScope,
 	dispatcherSigner verifiedops.ObserverSigner,
-	observerTrust verifiedops.ObserverTrust,
+	observerKeyID string,
 	runner ObserverEvidenceRunner,
 ) (ObservedJobReceipt, error) {
 	var empty ObservedJobReceipt
@@ -39,8 +39,7 @@ func (s *Store) DispatchAndRecordSignedObservedJob(
 		return empty, fmt.Errorf("postgres database is required")
 	}
 	if runner == nil || dispatcherSigner.Signer == nil ||
-		dispatcherSigner.KeyID == "" || observerTrust.KeyID == "" ||
-		len(observerTrust.PublicKey) != ed25519.PublicKeySize {
+		dispatcherSigner.KeyID == "" || strings.TrimSpace(observerKeyID) == "" || len(observerKeyID) > 128 {
 		return empty, verifiedops.ErrObserverUntrusted
 	}
 
@@ -66,7 +65,7 @@ func (s *Store) DispatchAndRecordSignedObservedJob(
 		return empty, verifiedops.ErrObserverUntrusted
 	}
 	receipt, err := s.RecordSignedObservedJobProof(
-		ctx, envelope, observerTrust, scope, issued.Challenge.Nonce)
+		ctx, envelope, observerKeyID, scope, issued.Challenge.Nonce)
 	if err != nil {
 		return empty, fmt.Errorf("admit signed Observer evidence: %w", err)
 	}
