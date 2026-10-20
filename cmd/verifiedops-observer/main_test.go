@@ -1,0 +1,224 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
+	authenticationv1 "k8s.io/api/authentication/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	fake "k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
+	"sigs.k8s.io/yaml"
+)
+
+const testImageDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func fixtureCLI(t *testing.T) (observerConfig, *fake.Clientset, verifiedops.ObserverSubject, verifiedops.ExpectedJob, ed25519.PublicKey) {
+	t.Helper()
+	base := t.TempDir()
+	public, dispatcher, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observerPub, observerPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	expected := verifiedops.ExpectedJob{
+		Namespace: "reviewed-project", Name: "job-project-a", JobUID: types.UID("original-create-uid"), Generation: 1,
+		ContainerName: "workload", ImageDigest: testImageDigest,
+	}
+	subject := verifiedops.ObserverSubject{
+		OperationID: strings.Repeat("a", 32), ClusterID: "cluster-a", ProjectID: "project-a", WorkloadID: "project-a",
+		Generation: 1, JobUID: string(expected.JobUID), Nonce: strings.Repeat("b", 64),
+	}
+	ticket := verifiedops.ObserverWorkTicket{
+		Challenge: subject, Expected: expected,
+		IssuedAt:  now.Add(-time.Second).Format(time.RFC3339Nano),
+		ExpiresAt: now.Add(time.Minute).Format(time.RFC3339Nano),
+	}
+	envelope, err := verifiedops.AuthorObserverWorkTicket(ticket, verifiedops.ObserverSigner{KeyID: "dispatcher", Signer: dispatcher})
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(observerPriv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	cfg := observerConfig{
+		ticketFile:              filepath.Join(base, "ticket.dsse.json"),
+		dispatcherPublicKeyFile: filepath.Join(base, "root.pub.b64"),
+		dispatcherKeyID:         "dispatcher",
+		observerPrivateKeyFile:  filepath.Join(base, "observer.pk8.pem"),
+		observerKeyID:           "observer",
+	}
+	for _, f := range []struct {
+		name string
+		data []byte
+		perm os.FileMode
+	}{
+		{cfg.ticketFile, envelope, 0o600},
+		{cfg.dispatcherPublicKeyFile, []byte(base64.StdEncoding.EncodeToString(public)), 0o600},
+		{cfg.observerPrivateKeyFile, keyPEM, 0o600},
+	} {
+		if err := os.WriteFile(f.name, f.data, f.perm); err != nil {
+			t.Fatal(err)
+		}
+	}
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: expected.Name, Namespace: expected.Namespace, UID: expected.JobUID,
+			ResourceVersion: "19", Labels: map[string]string{"ai.compute/workload": expected.Name},
+			Annotations: map[string]string{"ai.compute/generation": "1"}},
+		Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "workload", Image: "registry.example/train@" + testImageDigest}},
+		}}},
+	}
+	client := fake.NewSimpleClientset(job)
+	client.PrependReactor("create", "selfsubjectreviews", func(a ktesting.Action) (bool, runtime.Object, error) {
+		return true, &authenticationv1.SelfSubjectReview{Status: authenticationv1.SelfSubjectReviewStatus{
+			UserInfo: authenticationv1.UserInfo{Username: verifiedops.ObserverIdentityUsername},
+		}}, nil
+	})
+	return cfg, client, subject, expected, observerPub
+}
+
+func TestObserverOnceSignsOnlyRealPendingEvidence(t *testing.T) {
+	cfg, client, subject, expected, observerPub := fixtureCLI(t)
+	var out bytes.Buffer
+	if err := runOnce(context.Background(), cfg, client, &out); err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := verifiedops.VerifyObservedJobEnvelope(bytes.TrimSpace(out.Bytes()),
+		verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPub}, subject, expected)
+	if err != nil || evidence.Observation.Code != verifiedops.OutcomePending {
+		t.Fatalf("not a signed real pending read: %#v %v", evidence, err)
+	}
+	for _, a := range client.Actions() {
+		if a.GetVerb() != "get" && a.GetVerb() != "list" && a.GetResource().Resource != "selfsubjectreviews" {
+			t.Fatalf("one-shot observer mutated Kubernetes: %v", a)
+		}
+	}
+}
+
+func TestObserverOnceFailClosedForWorldReadableKeyAndSymlink(t *testing.T) {
+	for _, mode := range []string{"world-readable", "symlink"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg, client, _, _, _ := fixtureCLI(t)
+			switch mode {
+			case "world-readable":
+				if err := os.Chmod(cfg.observerPrivateKeyFile, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			case "symlink":
+				target := cfg.observerPrivateKeyFile
+				link := filepath.Join(filepath.Dir(target), "linked-private-key")
+				if err := os.Symlink(target, link); err != nil {
+					t.Fatal(err)
+				}
+				cfg.observerPrivateKeyFile = link
+			}
+			var out bytes.Buffer
+			if err := runOnce(context.Background(), cfg, client, &out); err == nil || out.Len() != 0 {
+				t.Fatalf("insecure signer produced evidence: %v", err)
+			}
+			if len(client.Actions()) != 0 {
+				t.Fatalf("rejected signer still accessed Kubernetes: %v", client.Actions())
+			}
+		})
+	}
+}
+
+func TestObserverConfigRequiresExternalAbsoluteIdentityPaths(t *testing.T) {
+	env := map[string]string{
+		"VERIFIEDOPS_TICKET_FILE":               "/ticket",
+		"VERIFIEDOPS_DISPATCHER_PUBKEY_FILE":    "/root-pub",
+		"VERIFIEDOPS_DISPATCHER_KEY_ID":         "dispatcher",
+		"VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE": "/signer",
+		"VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID":   "observer",
+	}
+	get := func(k string) string { return env[k] }
+	if _, err := configFromEnv(get); err != nil {
+		t.Fatal(err)
+	}
+	env["VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE"] = "../relative-key"
+	if _, err := configFromEnv(get); err == nil {
+		t.Fatal("relative key path was accepted")
+	}
+	env["VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE"] = "/ticket"
+	if _, err := configFromEnv(get); err == nil {
+		t.Fatal("same file used for ticket and private key")
+	}
+}
+
+func TestDisabledExampleObserverJobHasProjectedTokenAndNoPrivilegedHostPath(t *testing.T) {
+	content, err := os.ReadFile("../../deploy/kubernetes/verifiedops-observer/observer-job.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var job batchv1.Job
+	if err := yaml.UnmarshalStrict(content, &job); err != nil {
+		t.Fatal(err)
+	}
+	if job.Spec.Suspend == nil || !*job.Spec.Suspend || job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
+		t.Fatal("example Job must be suspended and must not retry")
+	}
+	pod := job.Spec.Template.Spec
+	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken || pod.ServiceAccountName != "verifiedops-observer" ||
+		pod.SecurityContext == nil || pod.SecurityContext.RunAsNonRoot == nil || !*pod.SecurityContext.RunAsNonRoot {
+		t.Fatal("untrusted Pod inherits token or wrong identity")
+	}
+	if len(pod.Containers) != 1 || pod.Containers[0].SecurityContext == nil {
+		t.Fatal("must have one isolated Observer container")
+	}
+	c := pod.Containers[0]
+	if c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation ||
+		c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem ||
+		!strings.Contains(c.Image, "@sha256:") {
+		t.Fatal("sample workload has unsafe container security settings")
+	}
+	hasProjected, hasCSI := false, false
+	for _, volume := range pod.Volumes {
+		if volume.HostPath != nil {
+			t.Fatal("hostPath not allowed")
+		}
+		if volume.Projected != nil {
+			for _, src := range volume.Projected.Sources {
+				if src.ServiceAccountToken != nil && src.ServiceAccountToken.ExpirationSeconds != nil &&
+					*src.ServiceAccountToken.ExpirationSeconds <= 600 {
+					hasProjected = true
+				}
+			}
+		}
+		if volume.CSI != nil && volume.CSI.ReadOnly != nil && *volume.CSI.ReadOnly {
+			hasCSI = true
+		}
+	}
+	if !hasProjected || !hasCSI {
+		t.Fatal("need bounded projected token and read-only external signer mount")
+	}
+	// Ensure no bundled key material or unreviewed container process starts.
+	if bytes.Contains(content, []byte("BEGIN PRIVATE KEY")) {
+		t.Fatal("key material in manifest")
+	}
+	if _, err := json.Marshal(job); err != nil {
+		t.Fatal(err)
+	}
+}
