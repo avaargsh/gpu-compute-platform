@@ -47,6 +47,7 @@ type Observation struct {
 	PodResourceVersion string
 	NodeName           string
 	NodeUID            types.UID
+	NodeResourceVersion string
 	ImageID            string
 }
 
@@ -201,6 +202,7 @@ func (o *JobObserver) Observe(ctx context.Context, w ExpectedJob) (Observation, 
 		return observed, nil
 	}
 	observed.NodeUID = node.UID
+	observed.NodeResourceVersion = node.ResourceVersion
 	observed.NodeName = node.Name
 	// Re-read both objects: an old LIST or a replaced Job cannot authorize
 	// attribution of the new resource under a reused name.
@@ -223,6 +225,18 @@ func (o *JobObserver) Observe(ctx context.Context, w ExpectedJob) (Observation, 
 	}
 	if latestPod.UID != observed.PodUID || latestPod.ResourceVersion != observed.PodResourceVersion ||
 		!controllerOwnedBy(latestPod, w.JobUID) || !readyPod(latestPod) {
+		return Observation{Code: OwnershipUnproven}, nil
+	}
+	// Re-read Node too: a replaced or drained Node cannot authorize Ready.
+	latestNode, err := o.client.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return unavailable, nil
+	}
+	if err != nil {
+		return unavailable, err
+	}
+	if latestNode.UID != observed.NodeUID ||
+		latestNode.ResourceVersion != observed.NodeResourceVersion || !readyNode(latestNode) {
 		return Observation{Code: OwnershipUnproven}, nil
 	}
 	observed.Code = PODReadyObserved

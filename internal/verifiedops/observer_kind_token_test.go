@@ -2,6 +2,9 @@ package verifiedops
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"strings"
 	"fmt"
 	"os"
 	"testing"
@@ -118,6 +121,25 @@ func TestRealKindObserverShortLivedSATokenAndBoundJob(t *testing.T) {
 	view, err := NewJobObserver(reader).Observe(ctx, binding)
 	if err != nil || view.Code != OutcomePending || view.JobUID != job.UID {
 		t.Fatalf("actual token could not observe bound but pending Job: %#v err %v", view, err)
+	}
+	// Proof generation uses the short-lived SA bearer client, not kind
+	// admin credentials. The test key is ephemeral and never deployed.
+	pub, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil { t.Fatal(err) }
+	challenge := ObserverSubject{
+		OperationID: strings.Repeat("a", 32), ClusterID: "real-kind",
+		ProjectID: observerProjectA, WorkloadID: job.Name,
+		Generation: 1, JobUID: string(job.UID), Nonce: strings.Repeat("b", 64),
+	}
+	signed, signedState, err := NewJobObserver(reader).ObserveAndSign(ctx, challenge, binding,
+		ObserverSigner{KeyID: "kind-ephemeral-only", Signer: private})
+	if err != nil || signedState.Code != OutcomePending {
+		t.Fatalf("real SA sign pending evidence: %#v %v", signedState, err)
+	}
+	evidence, err := VerifyObservedJobEnvelope(signed,
+		ObserverTrust{KeyID: "kind-ephemeral-only", PublicKey: pub}, challenge, binding)
+	if err != nil || evidence.Observation.Code != OutcomePending || evidence.Subject.JobUID != string(job.UID) {
+		t.Fatalf("pending real-API evidence was misverified: %#v %v", evidence, err)
 	}
 	stale := binding
 	stale.JobUID = types.UID("old-replaced-job-uid")
