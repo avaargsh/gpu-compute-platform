@@ -366,7 +366,6 @@ FROM verified_observer_nonce_receipts WHERE cluster_id=$1 AND nonce=$2
 	}
 }
 
-
 var errObserverDispatcherSignerUnavailable = errors.New("test dispatcher signer unavailable")
 
 type unavailableObserverDispatcherSigner struct {
