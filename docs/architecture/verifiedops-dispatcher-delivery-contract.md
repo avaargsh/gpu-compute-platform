@@ -1,6 +1,6 @@
 # Verified Operations dispatcher delivery contract
 
-Status: proposal for issue #169. This document defines a narrow integration boundary; it does not claim a production dispatcher, KMS/CSI key custody, GPU-ready evidence, or a final authorization verdict exists.
+Status: internal integration contract for issue #169; this documents the trusted adapter boundary and does not claim production delivery is deployed. This document defines a narrow integration boundary; it does not claim a production dispatcher, KMS/CSI key custody, GPU-ready evidence, or a final authorization verdict exists.
 
 ## Purpose
 
@@ -10,7 +10,7 @@ Connect the existing internal primitives into one fail-closed workflow:
 2. PostgreSQL issues a short-lived Challenge and IssueSignedObserverWork produces a signed, domain-separated ticket;
 3. a reviewed isolated execution adapter delivers only that ticket and the pinned trust/configuration references to the independent Observer;
 4. the Observer emits one bounded DSSE observation envelope;
-5. a trusted receipt adapter resolves the original Challenge scope and independently pinned Observer trust root, then invokes RecordSignedObservedJobProof;
+5. a trusted receipt adapter resolves the original Challenge scope and passes only the Observer key ID to RecordSignedObservedJobProof; PostgreSQL resolves the Ed25519 key from the DBA-controlled cluster-scoped trust registry in the same READ COMMITTED transaction; the server-issued Challenge row is locked FOR UPDATE as the v1/v2 nonce serialization point;
 6. the caller receives a receipt identity and evidence-only observation state.
 
 This is a control-plane integration contract, not a new public API or a new execution engine.
@@ -55,12 +55,12 @@ The Observer emits exactly one DSSE envelope on its evidence channel. The receiv
 - a small explicit maximum envelope size and bounded read/deadline;
 - no more than one envelope per execution attempt;
 - a known predicate type and supported schema version;
-- a trusted Observer key ID mapped from server-side configuration;
+- a trusted Observer key ID mapped to an active row in the DBA-controlled `verified_observer_signing_keys` registry for the exact cluster; the caller must not provide a public key, and unknown/foreign/not-yet-valid/expired/revoked keys fail closed;
 - challenge/nonce/scope reconstructed from durable server records, not accepted from untrusted request fields;
 - exact retry is idempotent; changed bytes for the same (cluster_id, nonce) fail closed;
 - retries never widen scope, extend Challenge TTL, or replace the original Job UID.
 
-The receiver then calls Store.RecordSignedObservedJobProof with independently resolved trust and scope. The receipt remains evidence-only.
+The receiver calls Store.RecordSignedObservedJobProof with the trusted key ID, trusted scope and issued nonce. PostgreSQL locks the active key, original CREATE/ACK identity and project binding while verifying and storing the receipt. The receipt remains evidence-only.
 
 ## State and failure handling
 
