@@ -45,3 +45,35 @@ The ticket expiry is a second freshness bound alongside the separately
 enforced PostgreSQL challenge TTL and nonce-receipt uniqueness. A duplicated
 work ticket may produce repeat observations; the backend remains
 responsible for transactionally rejecting altered or replayed evidence.
+
+
+## Admission enforcement for the Observer namespace
+
+The example policy bundle is
+`deploy/kubernetes/verifiedops-observer/observer-admission-policy.example.yaml`.
+It installs Kubernetes `ValidatingAdmissionPolicy` plus bindings scoped to
+the `verifiedops-observer` namespace label. The Job policy pins the image
+string and constrains the ServiceAccount, token-mount behavior, process
+overrides, container security context, environment-variable sources, volume
+sources, and read-only mount paths. A separate Pod policy prevents bypassing
+the Job policy by creating a Pod directly.
+
+**This is a non-production template.** Before installing in production, an
+operator must replace the `example.invalid/...sha256:000...000` image in both
+policy expressions with the reviewed immutable Observer image digest and
+review the manifest. The policy deliberately fails closed when the submitted
+image does not exactly match. Only trusted cluster administrators may create
+or modify these cluster-scoped policies and bindings.
+
+Run `bash scripts/e2e/verifiedops-observer-job-admission.sh` against a real
+Kubernetes API server to verify policy installation, acceptance of the
+suspended template, and rejection of an unsafe Job and a direct-Pod process
+override. This acceptance does not prove production key isolation: RBAC must
+also prevent untrusted users from changing the pinned trust-root ConfigMap,
+ticket Secret, CSI provider configuration, policies, or bindings. The
+operator must review those controls separately. The sample image remains
+unusable and the Job remains suspended until an explicitly reviewed deployment.
+
+The policy constrains admission-time workload shape; it is not a production
+Dispatcher delivery adapter, does not establish trusted challenge transport,
+and does not enable `AUTHORIZED_AND_VERIFIED`.
