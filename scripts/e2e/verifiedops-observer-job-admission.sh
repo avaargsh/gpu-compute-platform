@@ -36,7 +36,7 @@ fi
 sed 's/name: verifiedops-observer-once-example/name: verifiedops-observer-policy-update-test/' "$manifest" > "$update_manifest"
 kubectl apply -f "$update_manifest" >/dev/null
 kubectl -n verifiedops-observer patch job verifiedops-observer-policy-update-test --type=merge --patch '{"spec":{"suspend":false}}' --dry-run=server >/dev/null
-if kubectl -n verifiedops-observer patch job verifiedops-observer-policy-update-test --type=json --patch='[{"op":"replace","path":"/spec/template/spec/containers/0/image","value":"attacker.invalid/observer@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]' --dry-run=server >/dev/null 2>&1; then
+if kubectl -n verifiedops-observer patch job verifiedops-observer-policy-update-test --type=json --patch='[{"op":"replace","path":"/spec/suspend","value":false},{"op":"replace","path":"/spec/template/spec/containers/0/image","value":"attacker.invalid/observer@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]' --dry-run=server >/dev/null 2>&1; then
   echo 'Observer Job template mutation during unsuspend was admitted' >&2
   exit 1
 fi
