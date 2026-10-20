@@ -13,11 +13,11 @@ import (
 func makeObserverScope(b JobCreateUIDBinding) ObserverChallengeScope {
 	return ObserverChallengeScope{
 		OperationID: b.OperationID,
-		ClusterID: b.ClusterID,
-		ProjectID: b.ProjectID,
-		WorkloadID: b.WorkloadID,
-		Generation: b.Generation,
-		JobUID: b.JobUID,
+		ClusterID:   b.ClusterID,
+		ProjectID:   b.ProjectID,
+		WorkloadID:  b.WorkloadID,
+		Generation:  b.Generation,
+		JobUID:      b.JobUID,
 	}
 }
 
@@ -45,7 +45,7 @@ func TestObserverChallengeRequiresOriginalCreateACKAndExactScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name string
+		name   string
 		change func(*ObserverChallengeScope)
 	}{
 		{"foreign-project", func(x *ObserverChallengeScope) { x.ProjectID = "foreign-project" }},
@@ -131,7 +131,8 @@ WHERE cluster_id=$1 AND nonce=$2
 	expiredRaw, expiredTrust := signedNonceFixture(t, expired)
 	if _, err := store.db.ExecContext(ctx, `
 UPDATE verified_observer_challenges
-SET expires_at=clock_timestamp()-interval '1 second'
+SET issued_at=clock_timestamp()-interval '3 minutes',
+    expires_at=clock_timestamp()-interval '1 second'
 WHERE cluster_id=$1 AND nonce=$2
 `, binding.ClusterID, second.Nonce); err != nil {
 		t.Fatal(err)

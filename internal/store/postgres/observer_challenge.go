@@ -24,17 +24,17 @@ const observerChallengeTTL = 2 * time.Minute
 // checks this scope against the original audited CREATE response.
 type ObserverChallengeScope struct {
 	OperationID string
-	ClusterID domain.ID
-	ProjectID string
-	WorkloadID domain.ID
-	Generation int64
-	JobUID string
+	ClusterID   domain.ID
+	ProjectID   string
+	WorkloadID  domain.ID
+	Generation  int64
+	JobUID      string
 }
 
 type ObserverChallenge struct {
 	ObserverChallengeScope
-	Nonce string
-	IssuedAt time.Time
+	Nonce     string
+	IssuedAt  time.Time
 	ExpiresAt time.Time
 }
 
