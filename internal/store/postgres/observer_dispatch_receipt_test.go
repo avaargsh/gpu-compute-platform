@@ -39,7 +39,7 @@ func TestDispatchAndRecordSignedObservedJobEndToEnd(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: input.JobName, Namespace: input.Namespace, UID: types.UID(input.JobUID),
 			ResourceVersion: "ack-rv",
-			Labels: map[string]string{"ai.compute/workload": input.JobName},
+			Labels:      map[string]string{"ai.compute/workload": input.JobName},
 			Annotations: map[string]string{"ai.compute/generation": "1"},
 		},
 		Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
