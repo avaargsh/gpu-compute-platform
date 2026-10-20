@@ -108,6 +108,9 @@ func VerifyObserverEnvelope(raw []byte, trust ObserverTrust, want ObserverSubjec
 // Duplicate-key detection remains a separate fail-closed admission requirement;
 // this offline primitive must not be used as a final authorization verdict.
 func strictObserverJSON(raw []byte, target any) error {
+	if err := rejectDuplicateJSONKeys(raw); err != nil {
+		return err
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(target); err != nil {
@@ -115,6 +118,66 @@ func strictObserverJSON(raw []byte, target any) error {
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
+		return ErrObserverUntrusted
+	}
+	return nil
+}
+
+// rejectDuplicateJSONKeys validates JSON token structure and rejects duplicate
+// keys at every nested object level before typed decoding. Decoder alone
+// otherwise silently accepts last-key-wins aliases in signed evidence.
+func rejectDuplicateJSONKeys(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var visit func() error
+	visit = func() error {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		delim, ok := tok.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delim {
+		case '{':
+			seen := make(map[string]struct{})
+			for dec.More() {
+				key, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				name, ok := key.(string)
+				if !ok {
+					return ErrObserverUntrusted
+				}
+				if _, exists := seen[name]; exists {
+					return ErrObserverUntrusted
+				}
+				seen[name] = struct{}{}
+				if err := visit(); err != nil {
+					return err
+				}
+			}
+		case '[':
+			for dec.More() {
+				if err := visit(); err != nil {
+					return err
+				}
+			}
+		default:
+			return ErrObserverUntrusted
+		}
+		end, err := dec.Token()
+		if err != nil || end != json.Delim(map[json.Delim]rune{'{': '}', '[': ']'}[delim]) {
+			return ErrObserverUntrusted
+		}
+		return nil
+	}
+	if err := visit(); err != nil {
+		return err
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
 		return ErrObserverUntrusted
 	}
 	return nil
