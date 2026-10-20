@@ -140,13 +140,13 @@ func TestRealKindObserverJobDeletionOnSecondGET(t *testing.T) {
 		t.Fatalf("real short-lived Observer SA token missing: %v", err)
 	}
 	reader, err := kubernetes.NewForConfig(&rest.Config{
-		Host: adminCfg.Host,
+		Host:        adminCfg.Host,
 		BearerToken: token.Status.Token,
 		TLSClientConfig: rest.TLSClientConfig{
-			CAData: adminCfg.TLSClientConfig.CAData,
-			CAFile: adminCfg.TLSClientConfig.CAFile,
+			CAData:     adminCfg.TLSClientConfig.CAData,
+			CAFile:     adminCfg.TLSClientConfig.CAFile,
 			ServerName: adminCfg.TLSClientConfig.ServerName,
-			Insecure: adminCfg.TLSClientConfig.Insecure,
+			Insecure:   adminCfg.TLSClientConfig.Insecure,
 		},
 	})
 	if err != nil {
@@ -186,16 +186,16 @@ func TestRealKindObserverJobDeletionOnSecondGET(t *testing.T) {
 	suspended := true
 	job, err := admin.BatchV1().Jobs(observerProjectA).Create(ctx, &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-			Labels: map[string]string{"ai.compute/workload": name},
+			Name:        name,
+			Labels:      map[string]string{"ai.compute/workload": name},
 			Annotations: map[string]string{"ai.compute/generation": "1"},
-			Finalizers: []string{finalizer},
+			Finalizers:  []string{finalizer},
 		},
 		Spec: batchv1.JobSpec{
 			Suspend: &suspended,
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
 				RestartPolicy: corev1.RestartPolicyNever,
-				Containers: []corev1.Container{{Name: "workload", Image: "example.invalid/blocked@" + digest}},
+				Containers:    []corev1.Container{{Name: "workload", Image: "example.invalid/blocked@" + digest}},
 			}},
 		},
 	}, metav1.CreateOptions{})
@@ -216,8 +216,7 @@ func TestRealKindObserverJobDeletionOnSecondGET(t *testing.T) {
 			t.Logf("remove deletion-race finalizer: %v", patchErr)
 		}
 		if deleteErr := admin.BatchV1().Jobs(observerProjectA).Delete(cleanupCtx, name,
-			metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &job.UID}});
-			deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+			metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &job.UID}}); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
 			t.Logf("delete deletion-race test Job: %v", deleteErr)
 		}
 	}()
@@ -233,11 +232,11 @@ func TestRealKindObserverJobDeletionOnSecondGET(t *testing.T) {
 			}},
 		},
 		Spec: corev1.PodSpec{
-			NodeName: nodeName,
+			NodeName:   nodeName,
 			Containers: []corev1.Container{{Name: "workload", Image: "example.invalid/blocked@" + digest}},
 		},
 		Status: corev1.PodStatus{
-			Phase: corev1.PodRunning,
+			Phase:      corev1.PodRunning,
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 			ContainerStatuses: []corev1.ContainerStatus{{
 				Name: "workload", Ready: true,
@@ -265,7 +264,7 @@ func TestRealKindObserverJobDeletionOnSecondGET(t *testing.T) {
 	now := time.Now().UTC()
 	rawTicket, err := AuthorObserverWorkTicket(ObserverWorkTicket{
 		Challenge: challenge, Expected: expected,
-		IssuedAt: now.Add(-time.Second).Format(time.RFC3339Nano),
+		IssuedAt:  now.Add(-time.Second).Format(time.RFC3339Nano),
 		ExpiresAt: now.Add(time.Minute).Format(time.RFC3339Nano),
 	}, ObserverSigner{KeyID: "real-kind-dispatch-fixture", Signer: dispatchKey})
 	if err != nil {
