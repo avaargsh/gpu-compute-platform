@@ -50,10 +50,12 @@ spec:
             "VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE",
             "VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID"
           ] && !has(e.valueFrom)) &&
+          c.env.all(e, c.env.filter(other, other.name == e.name).size() == 1) &&
           c.env.all(e,
             e.name == "VERIFIEDOPS_TICKET_FILE" ? e.value == "/run/verifiedops/ticket/ticket.dsse.json" :
             e.name == "VERIFIEDOPS_DISPATCHER_PUBKEY_FILE" ? e.value == "/run/verifiedops/root/dispatcher.pub.b64" :
-            e.name == "VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE" ? e.value == "/run/verifiedops/identity/observer.pk8.pem" : true
+            e.name == "VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE" ? e.value == "/run/verifiedops/identity/observer.pk8.pem" :
+            e.name in ["VERIFIEDOPS_DISPATCHER_KEY_ID", "VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID"] ? e.value.size() > 0 : true
           )
         )
     - message: "VerifiedOps Job volumes must be the reviewed bounded ticket, trust-root, token and read-only signer sources"
@@ -158,10 +160,12 @@ spec:
             "VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE",
             "VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID"
           ] && !has(e.valueFrom)) &&
+          c.env.all(e, c.env.filter(other, other.name == e.name).size() == 1) &&
           c.env.all(e,
             e.name == "VERIFIEDOPS_TICKET_FILE" ? e.value == "/run/verifiedops/ticket/ticket.dsse.json" :
             e.name == "VERIFIEDOPS_DISPATCHER_PUBKEY_FILE" ? e.value == "/run/verifiedops/root/dispatcher.pub.b64" :
-            e.name == "VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE" ? e.value == "/run/verifiedops/identity/observer.pk8.pem" : true
+            e.name == "VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE" ? e.value == "/run/verifiedops/identity/observer.pk8.pem" :
+            e.name in ["VERIFIEDOPS_DISPATCHER_KEY_ID", "VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID"] ? e.value.size() > 0 : true
           )
         )
     - message: "Direct Observer Pods must mount only the approved read-only ticket, trust root, token and external signer volumes"
