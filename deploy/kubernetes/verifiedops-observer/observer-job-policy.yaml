@@ -17,7 +17,7 @@ spec:
     - name: dedicated-observer-namespace
       expression: object.metadata.namespace == 'verifiedops-observer'
   validations:
-    - expression: has(object.metadata.labels) && object.metadata.labels['app.kubernetes.io/component'] == 'verifiedops-observer' && object.metadata.name.startsWith('verifiedops-observer-')
+    - expression: has(object.metadata.labels) && object.metadata.labels['app.kubernetes.io/component'] == 'verifiedops-observer' && (object.metadata.name.startsWith('verifiedops-observer-') || object.metadata.generateName.startsWith('verifiedops-observer-'))
       message: only explicitly named Verified Operations Observer Jobs are allowed
     - expression: object.spec.backoffLimit == 0 && object.spec.activeDeadlineSeconds <= 120 && object.spec.ttlSecondsAfterFinished <= 300 && !has(object.spec.podFailurePolicy) && !has(object.spec.successPolicy) && !has(object.spec.backoffLimitPerIndex) && !has(object.spec.maxFailedIndexes)
       message: Observer Jobs must be one-shot, bounded, and must not define alternate retry or success policies

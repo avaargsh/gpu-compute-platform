@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Validate the intentionally suspended operator template against a REAL kind
-# API server. No signing material, work ticket or workload is created.
+# API server. No signing material or work ticket is created; the only persisted
+# test Job is suspended and is deleted before this script exits.
 manifest=deploy/kubernetes/verifiedops-observer/observer-job.example.yaml
 kubectl apply --dry-run=server -f deploy/kubernetes/verifiedops-observer/rbac.yaml >/dev/null
 
@@ -19,7 +20,7 @@ kubectl apply --dry-run=server -f "$manifest" >/dev/null
 unsafe="$(mktemp)"
 update_manifest="$(mktemp)"
 trap 'rm -f "$unsafe" "$update_manifest"' EXIT
-sed '/image: example.invalid\/verifiedops-observer@/a\\          command: ["sh"]' "$manifest" > "$unsafe"
+sed '/image: example.invalid\/verifiedops-observer@/a\          command: ["sh"]' "$manifest" > "$unsafe"
 if kubectl apply --dry-run=server -f "$unsafe" >/dev/null 2>&1; then
   echo 'Observer Job with command override was admitted' >&2
   exit 1
