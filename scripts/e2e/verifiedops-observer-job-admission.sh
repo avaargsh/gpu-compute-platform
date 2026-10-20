@@ -6,6 +6,12 @@ set -euo pipefail
 # test Job is suspended and is deleted before this script exits.
 manifest=deploy/kubernetes/verifiedops-observer/observer-job.example.yaml
 kubectl apply --dry-run=server -f deploy/kubernetes/verifiedops-observer/rbac.yaml >/dev/null
+namespace_component="$(kubectl get namespace verifiedops-observer -o jsonpath='{.metadata.labels.app\.kubernetes\.io/component}')"
+if [[ "$namespace_component" != "verifiedops-observer" ]]; then
+  echo "Observer namespace is missing its required policy-scope label: app.kubernetes.io/component=$namespace_component" >&2
+  kubectl get namespace verifiedops-observer --show-labels >&2 || true
+  exit 1
+fi
 
 # Install the operator-pinned image/key-provider parameters and the API-server
 # policy. This is an ephemeral kind fixture; production must replace the
