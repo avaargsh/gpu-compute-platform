@@ -75,11 +75,14 @@ spec:
         app.kubernetes.io/component: verifiedops-observer
   validationActions: ["Deny"]
 VAP_CANARY
-if kubectl create --dry-run=server -f "$manifest" >/dev/null 2>"$canary_err"; then
-  echo "VAP canary failed: API server admitted a Job despite a matching deny-all policy" >&2
+# Use a real CREATE rather than dry-run: this isolates whether the API
+# server invokes VAP on ordinary admission requests. The reviewed template is
+# suspended, and is deleted immediately if the canary unexpectedly admits it.
+if kubectl create -f "$manifest" >/dev/null 2>"$canary_err"; then
+  kubectl delete -f "$manifest" --wait=true >/dev/null 2>&1 || true
+  echo "VAP canary failed: API server admitted a suspended Job despite a matching deny-all policy" >&2
   kubectl get validatingadmissionpolicy verifiedops-observer-vap-canary -o yaml >&2 || true
   kubectl get validatingadmissionpolicybinding verifiedops-observer-vap-canary -o yaml >&2 || true
-  rm -f "$canary_err"
   exit 1
 fi
 if ! grep -Eiq 'denied|forbidden|validation|temporary VAP engine canary' "$canary_err"; then
