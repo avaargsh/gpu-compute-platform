@@ -8,14 +8,14 @@ spec:
     apiVersion: v1
     kind: ConfigMap
   matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: verifiedops-observer
     resourceRules:
       - apiGroups: ["batch"]
         apiVersions: ["v1"]
         operations: ["CREATE", "UPDATE"]
         resources: ["jobs"]
-  matchConditions:
-    - name: dedicated-observer-namespace
-      expression: request.namespace == 'verifiedops-observer'
   validations:
     - expression: has(object.metadata.labels) && object.metadata.labels['app.kubernetes.io/component'] == 'verifiedops-observer' && (object.metadata.name.startsWith('verifiedops-observer-') || object.metadata.generateName.startsWith('verifiedops-observer-')) && (!has(object.metadata.finalizers) || object.metadata.finalizers.size() == 0) && (!has(object.metadata.ownerReferences) || object.metadata.ownerReferences.size() == 0)
       message: only explicitly named Verified Operations Observer Jobs are allowed
