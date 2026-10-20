@@ -22,7 +22,7 @@ type ObserverEvidenceRunner interface {
 // joining the existing database ticket issuer, an independently isolated
 // Observer runner, and the PostgreSQL receipt admission transaction.
 //
-// scope, dispatcherSigner and observerTrust MUST be resolved by trusted
+// scope, dispatcher signer and Observer key ID MUST be resolved by trusted
 // server-side configuration/orchestration, never from an HTTP request or
 // unsigned Agent/Observer payload. This method does not expose an endpoint,
 // configure key custody, prove the adapter's deployment identity, or issue an
