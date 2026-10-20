@@ -20,6 +20,16 @@ import (
 
 const v2Digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+func registerObserverTrustForTest(t *testing.T, store *Store, clusterID interface{}, trust verifiedops.ObserverTrust) {
+	t.Helper()
+	if _, err := store.db.ExecContext(context.Background(), `
+INSERT INTO verified_observer_signing_keys (cluster_id,key_id,public_key,valid_from)
+VALUES ($1,$2,$3,clock_timestamp()-interval '1 minute')
+`, clusterID, trust.KeyID, []byte(trust.PublicKey)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func pendingV2Proof(t *testing.T) (*Store, JobCreateUIDBinding, ObserverChallenge, []byte, verifiedops.ObserverTrust) {
 	t.Helper()
 	store, binding := newCreateUIDFixture(t)
@@ -64,6 +74,7 @@ WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
 	if err != nil {
 		t.Fatal(err)
 	}
+	registerObserverTrustForTest(t, store, binding.ClusterID, verifiedops.ObserverTrust{KeyID: "pinned-test-only", PublicKey: pub})
 	raw, observed, err := verifiedops.NewJobObserver(fake.NewSimpleClientset(job)).ObserveAndSign(
 		ctx, subject, expected, verifiedops.ObserverSigner{KeyID: "pinned-test-only", Signer: priv})
 	if err != nil || observed.Code != verifiedops.OutcomePending {
@@ -76,7 +87,7 @@ func TestSignedObservedJobV2DurablePendingAndCrossVersionReplay(t *testing.T) {
 	store, binding, challenge, raw, trust := pendingV2Proof(t)
 	ctx := context.Background()
 	scope := makeObserverScope(binding)
-	receipt, err := store.RecordSignedObservedJobProof(ctx, raw, trust, scope, challenge.Nonce)
+	receipt, err := store.RecordSignedObservedJobProof(ctx, raw, trust.KeyID, scope, challenge.Nonce)
 	if err != nil || receipt.Observation.Code != verifiedops.OutcomePending {
 		t.Fatalf("v2 evidence not accepted as pending: %#v %v", receipt, err)
 	}
@@ -195,12 +206,12 @@ func TestSignedObservedJobV2WrongRootAndAlteredEnvelope(t *testing.T) {
 	ctx := context.Background()
 	invalidTrust := trust
 	invalidTrust.KeyID = "another-observer-key"
-	if _, err := store.RecordSignedObservedJobProof(ctx, raw, invalidTrust, makeObserverScope(binding), challenge.Nonce); !errors.Is(err, verifiedops.ErrObserverUntrusted) {
+	if _, err := store.RecordSignedObservedJobProof(ctx, raw, invalidTrust.KeyID, makeObserverScope(binding), challenge.Nonce); !errors.Is(err, verifiedops.ErrObserverUntrusted) {
 		t.Fatalf("foreign signer accepted: %v", err)
 	}
 	altered := append([]byte(nil), raw...)
 	altered[len(altered)-8] ^= 1
-	if _, err := store.RecordSignedObservedJobProof(ctx, altered, trust, makeObserverScope(binding), challenge.Nonce); !errors.Is(err, verifiedops.ErrObserverUntrusted) {
+	if _, err := store.RecordSignedObservedJobProof(ctx, altered, trust.KeyID, makeObserverScope(binding), challenge.Nonce); !errors.Is(err, verifiedops.ErrObserverUntrusted) {
 		t.Fatalf("altered envelope accepted: %v", err)
 	}
 }
@@ -235,5 +246,54 @@ func TestSignedObservedJobV2ConcurrentExactRetriesCommitOneReceipt(t *testing.T)
 		"SELECT count(*) FROM verified_observer_nonce_receipts WHERE cluster_id=$1 AND nonce=$2",
 		binding.ClusterID, challenge.Nonce).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("concurrent proof created %d receipts: %v", count, err)
+	}
+}
+
+func TestSignedObservedJobV2RequiresActiveClusterScopedTrustRoot(t *testing.T) {
+	for _, mode := range []string{"unknown-key", "revoked", "expired", "not-yet-valid", "foreign-cluster"} {
+		t.Run(mode, func(t *testing.T) {
+			store, binding, challenge, raw, trust := pendingV2Proof(t)
+			ctx := context.Background()
+			scope := makeObserverScope(binding)
+			keyID := trust.KeyID
+			switch mode {
+			case "unknown-key":
+				keyID = "not-registered"
+			case "revoked":
+				_, err := store.db.ExecContext(ctx, `
+UPDATE verified_observer_signing_keys SET revoked_at=clock_timestamp()
+WHERE cluster_id=$1 AND key_id=$2
+`, binding.ClusterID, keyID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "expired":
+				_, err := store.db.ExecContext(ctx, `
+UPDATE verified_observer_signing_keys SET valid_until=clock_timestamp()-interval '1 second'
+WHERE cluster_id=$1 AND key_id=$2
+`, binding.ClusterID, keyID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "not-yet-valid":
+				_, err := store.db.ExecContext(ctx, `
+UPDATE verified_observer_signing_keys SET valid_from=clock_timestamp()+interval '1 minute'
+WHERE cluster_id=$1 AND key_id=$2
+`, binding.ClusterID, keyID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "foreign-cluster":
+				scope.ClusterID = "foreign-cluster"
+			}
+			_, err := store.RecordSignedObservedJobProof(ctx, raw, keyID, scope, challenge.Nonce)
+			if !errors.Is(err, verifiedops.ErrObserverUntrusted) {
+				t.Fatalf("inactive or foreign trust root accepted: %v", err)
+			}
+			var count int
+			if err := store.db.QueryRowContext(ctx, "SELECT count(*) FROM verified_observer_nonce_receipts").Scan(&count); err != nil || count != 0 {
+				t.Fatalf("untrusted root consumed receipt: count=%d err=%v", count, err)
+			}
+		})
 	}
 }
