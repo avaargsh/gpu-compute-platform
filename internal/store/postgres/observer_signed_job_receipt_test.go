@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -201,5 +202,38 @@ func TestSignedObservedJobV2WrongRootAndAlteredEnvelope(t *testing.T) {
 	altered[len(altered)-8] ^= 1
 	if _, err := store.RecordSignedObservedJobProof(ctx, altered, trust, makeObserverScope(binding), challenge.Nonce); !errors.Is(err, verifiedops.ErrObserverUntrusted) {
 		t.Fatalf("altered envelope accepted: %v", err)
+	}
+}
+
+func TestSignedObservedJobV2ConcurrentExactRetriesCommitOneReceipt(t *testing.T) {
+	store, binding, challenge, raw, trust := pendingV2Proof(t)
+	ctx := context.Background()
+	scope := makeObserverScope(binding)
+	const workers = 8
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := store.RecordSignedObservedJobProof(ctx, raw, trust, scope, challenge.Nonce)
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent identical proof must be idempotent: %v", err)
+		}
+	}
+	var count int
+	if err := store.db.QueryRowContext(ctx,
+		"SELECT count(*) FROM verified_observer_nonce_receipts WHERE cluster_id=$1 AND nonce=$2",
+		binding.ClusterID, challenge.Nonce).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("concurrent proof created %d receipts: %v", count, err)
 	}
 }

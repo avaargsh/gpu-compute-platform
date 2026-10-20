@@ -31,7 +31,34 @@ const observerEvidenceClockSkew = 30 * time.Second
 // The first matching proof is recorded once; an identical retry is a
 // harmless idempotent read, but a changed proof or cross-operation nonce
 // is rejected. There is NO positive authorization/outcome verdict here.
+// RecordSignedObserverNonce retries bounded PostgreSQL transaction aborts so
+// exact concurrent v1 retries can observe the one durable receipt. Every retry
+// repeats all scope, challenge, signature and replay checks in a fresh transaction.
 func (s *Store) RecordSignedObserverNonce(ctx context.Context, envelope []byte,
+	trust verifiedops.ObserverTrust, want verifiedops.ObserverSubject) error {
+	const maxAttempts = 8
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		err := s.recordSignedObserverNonceOnce(ctx, envelope, trust, want)
+		if err == nil || !isRetryableObserverTransactionError(err) || attempt == maxAttempts-1 {
+			return err
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return fmt.Errorf("observer nonce transaction retry exhausted")
+}
+
+func (s *Store) recordSignedObserverNonceOnce(ctx context.Context, envelope []byte,
 	trust verifiedops.ObserverTrust, want verifiedops.ObserverSubject) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("postgres database is required")
