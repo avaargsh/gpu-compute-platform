@@ -16,14 +16,14 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
-	podE2EProject = "verifiedops-token-a"
+	podE2EProject    = "verifiedops-token-a"
 	podE2EObserverNS = "verifiedops-observer"
 )
 
@@ -68,15 +68,15 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 
 	job, err := admin.BatchV1().Jobs(podE2EProject).Create(ctx, &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: jobName,
-			Labels: map[string]string{"ai.compute/workload": jobName},
+			Name:        jobName,
+			Labels:      map[string]string{"ai.compute/workload": jobName},
 			Annotations: map[string]string{"ai.compute/generation": "1"},
 		},
 		Spec: batchv1.JobSpec{
 			Suspend: func() *bool { v := true; return &v }(),
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
 				RestartPolicy: corev1.RestartPolicyNever,
-				Containers: []corev1.Container{{Name: "workload", Image: "example.invalid/blocked@" + digest}},
+				Containers:    []corev1.Container{{Name: "workload", Image: "example.invalid/blocked@" + digest}},
 			}},
 		},
 	}, metav1.CreateOptions{})
@@ -106,7 +106,7 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 	now := time.Now().UTC()
 	ticket, err := verifiedops.AuthorObserverWorkTicket(verifiedops.ObserverWorkTicket{
 		Challenge: subject, Expected: expected,
-		IssuedAt: now.Add(-time.Second).Format(time.RFC3339Nano),
+		IssuedAt:  now.Add(-time.Second).Format(time.RFC3339Nano),
 		ExpiresAt: now.Add(time.Minute).Format(time.RFC3339Nano),
 	}, verifiedops.ObserverSigner{KeyID: dispatcherID, Signer: dispatchKey})
 	if err != nil {
@@ -121,11 +121,11 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 
 	_, err = admin.CoreV1().Secrets(podE2EObserverNS).Create(ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: podE2EObserverNS},
-		Type: corev1.SecretTypeOpaque,
+		Type:       corev1.SecretTypeOpaque,
 		Data: map[string][]byte{
-			"ticket.dsse.json": ticket,
+			"ticket.dsse.json":   ticket,
 			"dispatcher.pub.b64": root,
-			"observer.pk8.pem": privatePEM,
+			"observer.pk8.pem":   privatePEM,
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
@@ -138,7 +138,7 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 			Labels: map[string]string{"app.kubernetes.io/component": "verifiedops-observer-e2e"},
 		},
 		Spec: corev1.PodSpec{
-			ServiceAccountName: "verifiedops-observer",
+			ServiceAccountName:           "verifiedops-observer",
 			AutomountServiceAccountToken: &falseValue,
 			RestartPolicy: corev1.RestartPolicyNever,
 			SecurityContext: &corev1.PodSecurityContext{
