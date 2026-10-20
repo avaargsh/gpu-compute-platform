@@ -205,7 +205,7 @@ func TestSignedObservedJobV2WrongRootAndAlteredEnvelope(t *testing.T) {
 	ctx := context.Background()
 	invalidTrust := trust
 	invalidTrust.KeyID = "another-observer-key"
-	if _, err := store.RecordSignedObservedJobProof(ctx, raw, invalidTrust, makeObserverScope(binding), challenge.Nonce); !errors.Is(err, verifiedops.ErrObserverUntrusted) {
+	if _, err := store.RecordSignedObservedJobProof(ctx, raw, invalidTrust.KeyID, makeObserverScope(binding), challenge.Nonce); !errors.Is(err, verifiedops.ErrObserverUntrusted) {
 		t.Fatalf("foreign signer accepted: %v", err)
 	}
 	altered := append([]byte(nil), raw...)
