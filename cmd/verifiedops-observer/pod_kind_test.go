@@ -15,8 +15,8 @@ import (
 	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -75,7 +75,7 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 		Spec: batchv1.JobSpec{
 			Suspend: func() *bool { v := true; return &v }(),
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
-				RestartPolicy: corev1.RestartPolicyNever,
+				RestartPolicy:                corev1.RestartPolicyNever,
 				Containers:    []corev1.Container{{Name: "workload", Image: "example.invalid/blocked@" + digest}},
 			}},
 		},
@@ -142,19 +142,19 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 			AutomountServiceAccountToken: &falseValue,
 			RestartPolicy: corev1.RestartPolicyNever,
 			SecurityContext: &corev1.PodSecurityContext{
-				RunAsNonRoot: func() *bool { v := true; return &v }(),
-				RunAsUser: func() *int64 { v := int64(65532); return &v }(),
-				RunAsGroup: func() *int64 { v := int64(65532); return &v }(),
+				RunAsNonRoot:   func() *bool { v := true; return &v }(),
+				RunAsUser:      func() *int64 { v := int64(65532); return &v }(),
+				RunAsGroup:     func() *int64 { v := int64(65532); return &v }(),
 				SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 			},
 			InitContainers: []corev1.Container{{
-				Name: "stage-ephemeral-e2e-credentials",
-				Image: "busybox:1.36",
+				Name:    "stage-ephemeral-e2e-credentials",
+				Image:   "busybox:1.36",
 				Command: []string{"sh", "-ec", "cp /secret/ticket.dsse.json /work/ticket.dsse.json; cp /secret/dispatcher.pub.b64 /work/dispatcher.pub.b64; cp /secret/observer.pk8.pem /work/observer.pk8.pem; chown 65532:65532 /work/*; chmod 0400 /work/observer.pk8.pem; chmod 0444 /work/ticket.dsse.json /work/dispatcher.pub.b64"},
 				SecurityContext: &corev1.SecurityContext{
-					RunAsUser: func() *int64 { v := int64(0); return &v }(),
+					RunAsUser:                func() *int64 { v := int64(0); return &v }(),
 					AllowPrivilegeEscalation: &falseValue,
-					Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+					Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 				},
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "credentials", MountPath: "/secret", ReadOnly: true},
@@ -176,7 +176,7 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 				},
 				Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{"cpu": resource.MustParse("20m"), "memory": resource.MustParse("64Mi")},
-					Limits: corev1.ResourceList{"cpu": resource.MustParse("250m"), "memory": resource.MustParse("256Mi")},
+					Limits:   corev1.ResourceList{"cpu": resource.MustParse("250m"), "memory": resource.MustParse("256Mi")},
 				},
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "kubernetes-api-access", MountPath: "/var/run/secrets/kubernetes.io/serviceaccount", ReadOnly: true},
