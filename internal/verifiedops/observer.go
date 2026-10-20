@@ -225,7 +225,8 @@ func (o *JobObserver) Observe(ctx context.Context, w ExpectedJob) (Observation, 
 		}
 		return unavailable, err
 	}
-	if !jobIdentity(latestJob, w) || latestJob.ResourceVersion != observed.JobResourceVersion {
+	if !jobIdentity(latestJob, w) || latestJob.DeletionTimestamp != nil ||
+		latestJob.ResourceVersion != observed.JobResourceVersion {
 		return Observation{Code: OwnershipUnproven}, nil
 	}
 	latestPod, err := o.client.CoreV1().Pods(w.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
