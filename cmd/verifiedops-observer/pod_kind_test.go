@@ -75,7 +75,7 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 		Spec: batchv1.JobSpec{
 			Suspend: func() *bool { v := true; return &v }(),
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
-				RestartPolicy:                corev1.RestartPolicyNever,
+				RestartPolicy: corev1.RestartPolicyNever,
 				Containers:    []corev1.Container{{Name: "workload", Image: "example.invalid/blocked@" + digest}},
 			}},
 		},
@@ -140,7 +140,7 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 		Spec: corev1.PodSpec{
 			ServiceAccountName:           "verifiedops-observer",
 			AutomountServiceAccountToken: &falseValue,
-			RestartPolicy: corev1.RestartPolicyNever,
+			RestartPolicy:                corev1.RestartPolicyNever,
 			SecurityContext: &corev1.PodSecurityContext{
 				RunAsNonRoot:   func() *bool { v := true; return &v }(),
 				RunAsUser:      func() *int64 { v := int64(65532); return &v }(),
