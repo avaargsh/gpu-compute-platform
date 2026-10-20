@@ -76,6 +76,17 @@ func TestObserverNonceDurableReplayFenceWithOriginalACK(t *testing.T) {
 	if err := store.RecordJobCreateUID(ctx, binding); err != nil {
 		t.Fatal(err)
 	}
+	challenge, err := store.IssueObserverChallenge(ctx, ObserverChallengeScope{
+		OperationID: binding.OperationID, ClusterID: binding.ClusterID,
+		ProjectID: binding.ProjectID, WorkloadID: binding.WorkloadID,
+		Generation: binding.Generation, JobUID: binding.JobUID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want.Nonce = challenge.Nonce
+	want.ObservedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	raw, trust = signedNonceFixture(t, want)
 	if err := store.RecordSignedObserverNonce(ctx, raw, trust, want); err != nil {
 		t.Fatalf("first valid signed proof denied: %v", err)
 	}

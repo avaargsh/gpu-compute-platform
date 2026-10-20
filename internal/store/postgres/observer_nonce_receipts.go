@@ -27,6 +27,7 @@ const observerEvidenceClockSkew = 30 * time.Second
 // INTERNAL sink: trust must be loaded from a separately controlled root;
 // expected context must not come from an unauthenticated caller.
 //
+// Only an unexpired, server-issued challenge permits a first receipt.
 // The first matching proof is recorded once; an identical retry is a
 // harmless idempotent read, but a changed proof or cross-operation nonce
 // is rejected. There is NO positive authorization/outcome verdict here.
@@ -86,6 +87,49 @@ FOR SHARE OF b
 	}
 	if persistedProject != want.ProjectID || persistedUID != want.JobUID {
 		return ErrObserverNonceUnproven
+	}
+
+	// The challenge row MUST be locked and checked in the same transaction
+	// as inserting the signed-proof receipt. Neither a guessed nonce nor
+	// one issued for another operation can produce a valid receipt.
+	var challengeOperation, challengeProject, challengeWorkload, challengeUID string
+	var challengeGeneration int64
+	var issuedAt, expiresAt time.Time
+	err = tx.QueryRowContext(ctx, `
+SELECT operation_id,project_id,workload_id,generation,job_uid,issued_at,expires_at
+FROM verified_observer_challenges
+WHERE cluster_id=$1 AND nonce=$2
+FOR UPDATE
+`, want.ClusterID, want.Nonce).Scan(
+		&challengeOperation, &challengeProject, &challengeWorkload, &challengeGeneration,
+		&challengeUID, &issuedAt, &expiresAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrObserverChallengeMissing
+	}
+	if err != nil {
+		return err
+	}
+	if challengeOperation != want.OperationID || challengeProject != want.ProjectID ||
+		challengeWorkload != want.WorkloadID || challengeGeneration != want.Generation ||
+		challengeUID != want.JobUID {
+		return ErrObserverChallengeMismatch
+	}
+	// Use PostgreSQL clock_timestamp for expiry; a stale request must not
+	// revive a challenge by supplying a forged signed wall-clock timestamp.
+	var challengeAlive bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT clock_timestamp() < $1::timestamptz`, expiresAt).Scan(&challengeAlive); err != nil {
+		return err
+	}
+	if !challengeAlive {
+		return ErrObserverChallengeExpired
+	}
+	// Do not accept proof claiming observation before challenge issuance.
+	// A bounded 30s lag permits real Observer/DB clock skew, not a retry
+	// from before this independent challenge was created.
+	if observed.Before(issuedAt.Add(-observerEvidenceClockSkew)) {
+		return ErrObserverChallengeMismatch
 	}
 
 	_, err = tx.ExecContext(ctx, `

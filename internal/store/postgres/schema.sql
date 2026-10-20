@@ -142,6 +142,26 @@ CREATE TABLE IF NOT EXISTS provider_job_create_uid_bindings (
 );
 
 
+-- Server-issued 256-bit challenges: no user-facing issuance endpoint.
+-- Recording a matching receipt atomically consumes a challenge under row lock.
+-- Never use a client-submitted nonce as a substitute for this row.
+CREATE TABLE IF NOT EXISTS verified_observer_challenges (
+    cluster_id TEXT NOT NULL,
+    nonce TEXT NOT NULL CHECK (nonce ~ '^[0-9a-f]{64}$'),
+    operation_id TEXT NOT NULL CHECK (operation_id ~ '^[0-9a-f]{32}$'),
+    project_id TEXT NOT NULL,
+    workload_id TEXT NOT NULL,
+    generation BIGINT NOT NULL CHECK (generation > 0),
+    job_uid TEXT NOT NULL,
+    issued_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (cluster_id, nonce),
+    CHECK (expires_at > issued_at)
+);
+
+CREATE INDEX IF NOT EXISTS verified_observer_challenges_operation_idx
+    ON verified_observer_challenges (operation_id, cluster_id, workload_id, generation);
+
 -- Independent signed Observer evidence nonce ledger. Not an operation
 -- verdict, nor a substitute for a server-issued challenge protocol.
 -- UNIQUE (cluster, nonce) fences cross-operation and altered-proof replay.
