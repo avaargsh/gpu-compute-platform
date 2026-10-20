@@ -13,7 +13,11 @@ kubectl apply --dry-run=server -f deploy/kubernetes/verifiedops-observer/rbac.ya
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-policy.example.yaml >/dev/null
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-job-policy.yaml >/dev/null
 kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o yaml
-kubectl wait --for=condition=Accepted validatingadmissionpolicy/verifiedops-observer-job-envelope --timeout=30s >/dev/null
+# Prove the policy is active through API-server enforcement below rather than relying
+# on the optional Accepted status condition, which may remain unset on kind's
+# API server despite the policy object being installed. The positive dry-run must
+# admit the reviewed template and the negative dry-runs must reject mutations.
+
 kubectl apply --dry-run=server -f "$manifest" >/dev/null
 
 # Prove the policy rejects a mutable process and an image that differs from
