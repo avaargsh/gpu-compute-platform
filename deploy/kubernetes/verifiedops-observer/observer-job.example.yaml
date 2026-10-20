@@ -45,6 +45,9 @@ spec:
             - name: VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID
               value: operator-provisioned-observer-key-id
           securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:

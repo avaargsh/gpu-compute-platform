@@ -191,28 +191,106 @@ func TestDisabledExampleObserverJobHasProjectedTokenAndNoPrivilegedHostPath(t *t
 	c := pod.Containers[0]
 	if c.SecurityContext.AllowPrivilegeEscalation == nil || *c.SecurityContext.AllowPrivilegeEscalation ||
 		c.SecurityContext.ReadOnlyRootFilesystem == nil || !*c.SecurityContext.ReadOnlyRootFilesystem ||
+		c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged ||
+		c.SecurityContext.RunAsNonRoot == nil || !*c.SecurityContext.RunAsNonRoot ||
+		c.SecurityContext.RunAsUser == nil || *c.SecurityContext.RunAsUser != 65532 ||
+		c.SecurityContext.RunAsGroup == nil || *c.SecurityContext.RunAsGroup != 65532 ||
+		c.SecurityContext.Capabilities == nil || len(c.SecurityContext.Capabilities.Drop) != 1 ||
+		c.SecurityContext.Capabilities.Drop[0] != "ALL" ||
+		len(c.Ports) != 0 || len(c.EnvFrom) != 0 || len(c.Command) != 0 || len(c.Args) != 0 ||
 		!strings.Contains(c.Image, "@sha256:") {
-		t.Fatal("sample workload has unsafe container security settings")
+		t.Fatal("sample workload has unsafe container security settings or overridable process")
 	}
-	hasProjected, hasCSI := false, false
+	// The Observer must receive only the ticket, pinned dispatcher public root,
+	// projected short-lived API identity and the externally provisioned signer.
+	// In particular, it must never inherit database credentials or arbitrary envFrom.
+	wantEnv := map[string]bool{
+		"VERIFIEDOPS_TICKET_FILE":               true,
+		"VERIFIEDOPS_DISPATCHER_PUBKEY_FILE":    true,
+		"VERIFIEDOPS_DISPATCHER_KEY_ID":         true,
+		"VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE": true,
+		"VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID":   true,
+	}
+	if len(c.Env) != len(wantEnv) {
+		t.Fatalf("unexpected Observer environment surface: %#v", c.Env)
+	}
+	for _, env := range c.Env {
+		if !wantEnv[env.Name] || env.ValueFrom != nil {
+			t.Fatalf("unapproved Observer environment source: %#v", env)
+		}
+		delete(wantEnv, env.Name)
+	}
+	if len(wantEnv) != 0 {
+		t.Fatalf("required Observer environment variables missing: %#v", wantEnv)
+	}
+	if pod.SecurityContext.RunAsUser == nil || *pod.SecurityContext.RunAsUser != 65532 ||
+		pod.SecurityContext.RunAsGroup == nil || *pod.SecurityContext.RunAsGroup != 65532 ||
+		pod.SecurityContext.SeccompProfile == nil || pod.SecurityContext.SeccompProfile.Type != "RuntimeDefault" {
+		t.Fatal("sample Pod must use the reviewed non-root UID/GID and RuntimeDefault seccomp")
+	}
+	if len(pod.Volumes) != 4 {
+		t.Fatalf("unexpected Observer volume surface: %#v", pod.Volumes)
+	}
+	hasProjected, hasCSI, hasTicket, hasRoot := false, false, false, false
 	for _, volume := range pod.Volumes {
 		if volume.HostPath != nil {
 			t.Fatal("hostPath not allowed")
 		}
-		if volume.Projected != nil {
+		switch volume.Name {
+		case "kubernetes-api-access":
+			if volume.Projected == nil || volume.Secret != nil || volume.ConfigMap != nil || volume.CSI != nil {
+				t.Fatal("API identity must be an explicit projected volume")
+			}
 			for _, src := range volume.Projected.Sources {
 				if src.ServiceAccountToken != nil && src.ServiceAccountToken.ExpirationSeconds != nil &&
 					*src.ServiceAccountToken.ExpirationSeconds <= 600 {
 					hasProjected = true
 				}
 			}
-		}
-		if volume.CSI != nil && volume.CSI.ReadOnly != nil && *volume.CSI.ReadOnly {
+		case "signed-work-ticket":
+			if volume.Secret == nil || volume.Secret.SecretName != "verifiedops-observer-once-ticket" ||
+				volume.Secret.Optional == nil || *volume.Secret.Optional {
+				t.Fatal("ticket must come from the required, dedicated ticket Secret")
+			}
+			hasTicket = true
+		case "pinned-dispatcher-root":
+			if volume.ConfigMap == nil || volume.ConfigMap.Name != "verifiedops-observer-dispatcher-pinned-root" ||
+				volume.ConfigMap.Optional == nil || *volume.ConfigMap.Optional {
+				t.Fatal("dispatcher trust root must be pinned in the required ConfigMap")
+			}
+			hasRoot = true
+		case "external-signer":
+			if volume.CSI == nil || volume.CSI.Driver != "secrets-store.csi.k8s.io" ||
+				volume.CSI.ReadOnly == nil || !*volume.CSI.ReadOnly ||
+				volume.CSI.VolumeAttributes["secretProviderClass"] != "verifiedops-observer-external-signing-key" {
+				t.Fatal("signer must come from the reviewed read-only external CSI provider")
+			}
 			hasCSI = true
+		default:
+			t.Fatalf("unapproved Observer volume: %q", volume.Name)
 		}
 	}
-	if !hasProjected || !hasCSI {
-		t.Fatal("need bounded projected token and read-only external signer mount")
+	if !hasProjected || !hasCSI || !hasTicket || !hasRoot {
+		t.Fatal("need bounded projected token, required ticket/root and read-only external signer mount")
+	}
+	wantMounts := map[string]string{
+		"kubernetes-api-access":  "/var/run/secrets/kubernetes.io/serviceaccount",
+		"signed-work-ticket":     "/run/verifiedops/ticket",
+		"pinned-dispatcher-root": "/run/verifiedops/root",
+		"external-signer":        "/run/verifiedops/identity",
+	}
+	if len(c.VolumeMounts) != len(wantMounts) {
+		t.Fatalf("unexpected Observer mount surface: %#v", c.VolumeMounts)
+	}
+	for _, mount := range c.VolumeMounts {
+		wantPath, ok := wantMounts[mount.Name]
+		if !ok || mount.MountPath != wantPath || !mount.ReadOnly {
+			t.Fatalf("unapproved or writable Observer mount: %#v", mount)
+		}
+		delete(wantMounts, mount.Name)
+	}
+	if len(wantMounts) != 0 {
+		t.Fatalf("required Observer mounts missing: %#v", wantMounts)
 	}
 	// Ensure no bundled key material or unreviewed container process starts.
 	if bytes.Contains(content, []byte("BEGIN PRIVATE KEY")) {
