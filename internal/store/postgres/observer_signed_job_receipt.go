@@ -181,7 +181,7 @@ JOIN project_bindings AS pb
   AND pb.namespace=b.namespace
 WHERE b.operation_id=$1 AND b.cluster_id=$2 AND b.workload_id=$3
   AND b.generation=$4
-FOR SHARE OF b
+FOR SHARE OF b, p, pb
 `, scope.OperationID, scope.ClusterID, scope.WorkloadID, scope.Generation).Scan(
 		&project, &namespace, &name, &uid)
 	if errors.Is(err, sql.ErrNoRows) {
