@@ -19,7 +19,8 @@ spec:
     - message: "VerifiedOps Jobs must use the dedicated Observer identity and disable implicit token mounting"
       expression: >-
         object.spec.template.spec.serviceAccountName == "verifiedops-observer" &&
-        object.spec.template.spec.automountServiceAccountToken == false
+        object.spec.template.spec.automountServiceAccountToken == false &&
+        (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.size() == 0)
     - message: "VerifiedOps Job must use the reviewed non-root Pod security context"
       expression: >-
         object.spec.template.spec.securityContext.runAsNonRoot == true &&
@@ -131,6 +132,7 @@ spec:
       expression: >-
         object.spec.serviceAccountName == "verifiedops-observer" &&
         object.spec.automountServiceAccountToken == false &&
+        (!has(object.spec.initContainers) || object.spec.initContainers.size() == 0) &&
         object.spec.restartPolicy == "Never" &&
         object.spec.securityContext.runAsNonRoot == true &&
         object.spec.securityContext.runAsUser == 65532 &&
