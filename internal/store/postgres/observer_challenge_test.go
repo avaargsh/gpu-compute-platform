@@ -144,3 +144,29 @@ WHERE cluster_id=$1 AND nonce=$2
 		t.Fatalf("unexpired earlier challenge must be unaffected: %v", err)
 	}
 }
+
+func TestObserverChallengeInvalidatedByWorkloadDeletion(t *testing.T) {
+	store, binding := newCreateUIDFixture(t)
+	ctx := context.Background()
+	if err := store.PrepareJobCreateAttempt(ctx, durableAttempt(binding)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordJobCreateUID(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := store.IssueObserverChallenge(ctx, makeObserverScope(binding))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := subjectForChallenge(challenge)
+	raw, trust := signedNonceFixture(t, want)
+	if err := store.MarkDesiredDeleting(ctx, binding.ClusterID, "Workload", binding.WorkloadID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.IssueObserverChallenge(ctx, makeObserverScope(binding)); !errors.Is(err, ErrObserverNonceUnproven) {
+		t.Fatalf("new challenge minted during deletion: %v", err)
+	}
+	if err := store.RecordSignedObserverNonce(ctx, raw, trust, want); !errors.Is(err, ErrObserverNonceUnproven) {
+		t.Fatalf("pre-delete challenge consumed after deletion request: %v", err)
+	}
+}

@@ -60,6 +60,28 @@ func (s *Store) IssueObserverChallenge(ctx context.Context, scope ObserverChalle
 	}
 	defer tx.Rollback()
 
+	// Never issue or consume an operation challenge after the Desired has
+	// advanced to another generation or entered deletion. Canonical lock
+	// order is Desired first, then provider identity and challenge rows.
+	var generation int64
+	var desiredProject string
+	var deleting sql.NullTime
+	err := tx.QueryRowContext(ctx, `
+SELECT generation,spec->>'projectID',deletion_timestamp
+FROM desired_resources
+WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
+FOR SHARE
+`, scope.ClusterID,scope.WorkloadID).Scan(&generation,&desiredProject,&deleting)
+	if errors.Is(err,sql.ErrNoRows) {
+		return ObserverChallenge{}, ErrObserverNonceUnproven
+	}
+	if err != nil {
+		return ObserverChallenge{},err
+	}
+	if generation!=scope.Generation || desiredProject!=scope.ProjectID || deleting.Valid {
+		return ObserverChallenge{}, ErrObserverNonceUnproven
+	}
+
 	// The immutable candidate was written only after a durable PREPARED
 	// and a real CREATE response while the owning Agent held its lease.
 	var project, uid string
@@ -93,10 +115,11 @@ FOR SHARE OF b
 	err = tx.QueryRowContext(ctx, `
 INSERT INTO verified_observer_challenges
  (cluster_id,nonce,operation_id,project_id,workload_id,generation,job_uid,expires_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,clock_timestamp()+interval '2 minutes')
+VALUES ($1,$2,$3,$4,$5,$6,$7,clock_timestamp()+($8 * interval '1 second'))
 RETURNING issued_at, expires_at
 `, scope.ClusterID, challenge.Nonce, scope.OperationID, scope.ProjectID,
-		scope.WorkloadID, scope.Generation, scope.JobUID).Scan(&challenge.IssuedAt, &challenge.ExpiresAt)
+		scope.WorkloadID, scope.Generation, scope.JobUID,
+		int64(observerChallengeTTL/time.Second)).Scan(&challenge.IssuedAt, &challenge.ExpiresAt)
 	if err != nil {
 		return ObserverChallenge{}, err
 	}

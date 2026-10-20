@@ -6,6 +6,8 @@ This is the **internal** issuance/consumption layer, not a public endpoint.
   precise cluster/project/Workload/generation/Operation ID/Job UID scope.
 - PostgreSQL independently requires that original immutable Management CREATE
   audit and an actual Agent-reported Job CREATE response candidate existed.
+- A current nondeleting Desired Workload of the same generation and project
+  is required at issuance AND at evidence consumption, fenced by row locks.
 - The server generates 32 bytes with `crypto/rand` and stores a random 64-char
   lowercase hex nonce with PostgreSQL `issued_at` and `expires_at` (2 min).
 - `RecordSignedObserverNonce` only accepts an independently trusted/pinned

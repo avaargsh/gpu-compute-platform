@@ -61,6 +61,27 @@ func (s *Store) RecordSignedObserverNonce(ctx context.Context, envelope []byte,
 	}
 	defer tx.Rollback()
 
+	// Recheck current Desired before binding evidence; a challenge that was
+	// minted before delete-request/generation change cannot certify it.
+	var desiredGeneration int64
+	var desiredProject string
+	var deleting sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+SELECT generation,spec->>'projectID',deletion_timestamp
+FROM desired_resources
+WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
+FOR SHARE
+`, want.ClusterID,want.WorkloadID).Scan(&desiredGeneration,&desiredProject,&deleting)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrObserverNonceUnproven
+	}
+	if err != nil {
+		return err
+	}
+	if desiredGeneration!=want.Generation || desiredProject!=want.ProjectID || deleting.Valid {
+		return ErrObserverNonceUnproven
+	}
+
 	// Correlate the signed subject to the authenticated Agent's actual
 	// CREATE response, never a Kubernetes GET or same-name adoption.
 	// The audit row is immutable; UID binding exists only after PREPARED.
