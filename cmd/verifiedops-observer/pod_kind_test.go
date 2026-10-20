@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -174,8 +175,8 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 					Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 				},
 				Resources: corev1.ResourceRequirements{
-					Requests: corev1.ResourceList{"cpu": resourceMustParse("20m"), "memory": resourceMustParse("64Mi")},
-					Limits: corev1.ResourceList{"cpu": resourceMustParse("250m"), "memory": resourceMustParse("256Mi")},
+					Requests: corev1.ResourceList{"cpu": resource.MustParse("20m"), "memory": resource.MustParse("64Mi")},
+					Limits: corev1.ResourceList{"cpu": resource.MustParse("250m"), "memory": resource.MustParse("256Mi")},
 				},
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "kubernetes-api-access", MountPath: "/var/run/secrets/kubernetes.io/serviceaccount", ReadOnly: true},
