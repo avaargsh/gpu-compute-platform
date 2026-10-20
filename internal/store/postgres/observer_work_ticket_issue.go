@@ -157,7 +157,7 @@ RETURNING issued_at,expires_at
 	}
 	work := verifiedops.ObserverWorkTicket{
 		Challenge: challenge, Expected: expected,
-		IssuedAt: issuedAt.UTC().Format(time.RFC3339Nano),
+		IssuedAt:  issuedAt.UTC().Format(time.RFC3339Nano),
 		ExpiresAt: expiresAt.UTC().Format(time.RFC3339Nano),
 	}
 	envelope, err := verifiedops.AuthorObserverWorkTicket(work, signer)
