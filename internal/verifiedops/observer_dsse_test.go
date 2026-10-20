@@ -63,25 +63,25 @@ func TestSignedObserverEnvelopeRejectsDuplicateJSONKeys(t *testing.T) {
 	want := ObserverSubject{OperationID: "op", ClusterID: "cluster", ProjectID: "project", WorkloadID: "workload", Generation: 1, JobUID: "uid", Nonce: "nonce", ObservedAt: "2026-10-20T01:00:00Z"}
 	trust := ObserverTrust{KeyID: "trusted", PublicKey: pub}
 	for _, tc := range []struct {
-		name string
+		name    string
 		payload string
-		outer bool
+		outer   bool
 	}{
-		{"duplicate predicate key", `{"_type":"https://in-toto.io/Statement/v1","predicateType":"https://gpupanel.dev/attestation/observer/v1","subject":[{"name":"k8s-job:uid","digest":{"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],"predicate":{"operationId":"op","operationId":"op","clusterId":"cluster","projectId":"project","workloadId":"workload","generation":1,"jobUid":"uid","nonce":"nonce","observedAt":"2026-10-20T01:00:00Z"}}`,false},
-		{"duplicate digest key", `{"_type":"https://in-toto.io/Statement/v1","predicateType":"https://gpupanel.dev/attestation/observer/v1","subject":[{"name":"k8s-job:uid","digest":{"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],"predicate":{"operationId":"op","clusterId":"cluster","projectId":"project","workloadId":"workload","generation":1,"jobUid":"uid","nonce":"nonce","observedAt":"2026-10-20T01:00:00Z"}}`,false},
-		{"duplicate outer payload", "",true},
+		{"duplicate predicate key", `{"_type":"https://in-toto.io/Statement/v1","predicateType":"https://gpupanel.dev/attestation/observer/v1","subject":[{"name":"k8s-job:uid","digest":{"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],"predicate":{"operationId":"op","operationId":"op","clusterId":"cluster","projectId":"project","workloadId":"workload","generation":1,"jobUid":"uid","nonce":"nonce","observedAt":"2026-10-20T01:00:00Z"}}`, false},
+		{"duplicate digest key", `{"_type":"https://in-toto.io/Statement/v1","predicateType":"https://gpupanel.dev/attestation/observer/v1","subject":[{"name":"k8s-job:uid","digest":{"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}],"predicate":{"operationId":"op","clusterId":"cluster","projectId":"project","workloadId":"workload","generation":1,"jobUid":"uid","nonce":"nonce","observedAt":"2026-10-20T01:00:00Z"}}`, false},
+		{"duplicate outer payload", "", true},
 	} {
-		t.Run(tc.name,func(t *testing.T){
+		t.Run(tc.name, func(t *testing.T) {
 			var raw []byte
 			if tc.outer {
-				raw=[]byte(`{"payloadType":"application/vnd.in-toto+json","payload":"AA==","payload":"AA==","signatures":[]}`)
-			}else{
-				p:=[]byte(tc.payload)
-				e:=SignedObserverEnvelope{PayloadType:ObserverPayloadType,Payload:base64.StdEncoding.EncodeToString(p),Signatures:[]ObserverSignature{{KeyID:trust.KeyID,Sig:base64.StdEncoding.EncodeToString(ed25519.Sign(priv,dssePAE(ObserverPayloadType,p)))}}}
-				raw,_=json.Marshal(e)
+				raw = []byte(`{"payloadType":"application/vnd.in-toto+json","payload":"AA==","payload":"AA==","signatures":[]}`)
+			} else {
+				p := []byte(tc.payload)
+				e := SignedObserverEnvelope{PayloadType: ObserverPayloadType, Payload: base64.StdEncoding.EncodeToString(p), Signatures: []ObserverSignature{{KeyID: trust.KeyID, Sig: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, dssePAE(ObserverPayloadType, p)))}}}
+				raw, _ = json.Marshal(e)
 			}
-			if _,err:=VerifyObserverEnvelope(raw,trust,want);!errors.Is(err,ErrObserverUntrusted){
-				t.Fatalf("duplicate JSON key accepted: %v",err)
+			if _, err := VerifyObserverEnvelope(raw, trust, want); !errors.Is(err, ErrObserverUntrusted) {
+				t.Fatalf("duplicate JSON key accepted: %v", err)
 			}
 		})
 	}
