@@ -162,6 +162,25 @@ CREATE TABLE IF NOT EXISTS verified_observer_challenges (
 CREATE INDEX IF NOT EXISTS verified_observer_challenges_operation_idx
     ON verified_observer_challenges (operation_id, cluster_id, workload_id, generation);
 
+-- DBA-controlled observer verification roots, scoped to one cluster. The
+-- runtime path can only SELECT and row-lock a currently trusted key; key
+-- registration, validity changes and revocation require an external DBA flow.
+CREATE TABLE IF NOT EXISTS verified_observer_signing_keys (
+    cluster_id TEXT NOT NULL,
+    key_id TEXT NOT NULL CHECK (length(key_id) BETWEEN 1 AND 128),
+    public_key BYTEA NOT NULL CHECK (octet_length(public_key) = 32),
+    valid_from TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    valid_until TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    PRIMARY KEY (cluster_id, key_id),
+    CHECK (valid_until IS NULL OR valid_until > valid_from)
+);
+
+CREATE INDEX IF NOT EXISTS verified_observer_signing_keys_active_idx
+    ON verified_observer_signing_keys (cluster_id, key_id)
+    WHERE revoked_at IS NULL;
+
 -- Independent signed Observer evidence nonce ledger. Not an operation
 -- verdict, nor a substitute for a server-issued challenge protocol.
 -- UNIQUE (cluster, nonce) fences cross-operation and altered-proof replay.
