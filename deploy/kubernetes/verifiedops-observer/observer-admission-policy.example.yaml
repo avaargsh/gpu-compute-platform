@@ -127,12 +127,17 @@ spec:
         apiVersions: ["v1"]
         operations: ["CREATE", "UPDATE"]
         resources: ["pods"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["pods/ephemeralcontainers"]
   validations:
-    - message: "VerifiedOps Pods must use the dedicated identity, bounded token and reviewed Pod security context"
+    - message: "VerifiedOps Pods must use the dedicated identity, bounded token and reviewed Pod security context, without init or ephemeral containers"
       expression: >-
         object.spec.serviceAccountName == "verifiedops-observer" &&
         object.spec.automountServiceAccountToken == false &&
         (!has(object.spec.initContainers) || object.spec.initContainers.size() == 0) &&
+        (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0) &&
         object.spec.restartPolicy == "Never" &&
         object.spec.securityContext.runAsNonRoot == true &&
         object.spec.securityContext.runAsUser == 65532 &&
