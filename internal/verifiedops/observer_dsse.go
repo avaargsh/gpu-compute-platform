@@ -5,9 +5,9 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 )
 
@@ -103,7 +103,6 @@ func VerifyObserverEnvelope(raw []byte, trust ObserverTrust, want ObserverSubjec
 	}
 	return out, nil
 }
-
 
 // strictObserverJSON rejects trailing documents and unknown struct fields.
 // Duplicate-key detection remains a separate fail-closed admission requirement;
