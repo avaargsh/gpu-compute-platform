@@ -153,7 +153,6 @@ func TestObserverNonceScopeFreshnessAndSignatureFailClosed(t *testing.T) {
 	}
 }
 
-
 func TestObserverNonceConcurrentExactRetriesCommitOneReceipt(t *testing.T) {
 	store, binding := newCreateUIDFixture(t)
 	ctx := context.Background()
