@@ -21,12 +21,12 @@ const expectedKueueContainer = "workload"
 // ObservedJobReceipt is a signed *observation* receipt, not a proof of
 // authorization, an authenticated Observer deployment, or a success verdict.
 type ObservedJobReceipt struct {
-	OperationID string
-	ClusterID domain.ID
-	Nonce string
-	PredicateType string
-	Observation verifiedops.Observation
-	ObservedAt time.Time
+	OperationID    string
+	ClusterID      domain.ID
+	Nonce          string
+	PredicateType  string
+	Observation    verifiedops.Observation
+	ObservedAt     time.Time
 	EnvelopeSHA256 string
 }
 
@@ -227,7 +227,7 @@ WHERE cluster_id=$1 AND nonce=$2
 	return ObservedJobReceipt{
 		OperationID: scope.OperationID, ClusterID: scope.ClusterID, Nonce: nonce,
 		PredicateType: verifiedops.ObservedJobPredicateType,
-		Observation: proof.Observation, ObservedAt: observed,
+		Observation:   proof.Observation, ObservedAt: observed,
 		EnvelopeSHA256: envelopeDigest,
 	}, nil
 }
