@@ -59,6 +59,13 @@ func NewJobObserver(readOnlyClient kubernetes.Interface) *JobObserver {
 	return &JobObserver{client: readOnlyClient}
 }
 
+// ValidExpectedJob is a read-only input validation predicate shared with
+// the trusted PostgreSQL receipt admission. It does not grant authority.
+func ValidExpectedJob(w ExpectedJob) bool { return validExpected(w) }
+
+// ValidPinnedImageDigest refuses unpinned image claims in a v2 receipt.
+func ValidPinnedImageDigest(d string) bool { return digestPattern.MatchString(d) }
+
 func validExpected(w ExpectedJob) bool {
 	return w.Namespace != "" && w.Name != "" && w.JobUID != "" && w.Generation > 0 &&
 		w.ContainerName != "" && digestPattern.MatchString(w.ImageDigest)

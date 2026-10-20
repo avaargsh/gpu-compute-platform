@@ -174,11 +174,20 @@ CREATE TABLE IF NOT EXISTS verified_observer_nonce_receipts (
     generation BIGINT NOT NULL CHECK (generation > 0),
     job_uid TEXT NOT NULL,
     signer_key_id TEXT NOT NULL,
+    predicate_type TEXT NOT NULL DEFAULT 'https://gpupanel.dev/attestation/observer/v1',
+    observation_json JSONB,
     envelope_sha256 TEXT NOT NULL CHECK (envelope_sha256 ~ '^[0-9a-f]{64}$'),
     observed_at TIMESTAMPTZ NOT NULL,
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     PRIMARY KEY (cluster_id, nonce)
 );
+
+-- Additive upgrade for databases provisioned before v2 observed-job receipts.
+ALTER TABLE verified_observer_nonce_receipts
+    ADD COLUMN IF NOT EXISTS predicate_type TEXT NOT NULL
+      DEFAULT 'https://gpupanel.dev/attestation/observer/v1';
+ALTER TABLE verified_observer_nonce_receipts
+    ADD COLUMN IF NOT EXISTS observation_json JSONB;
 
 CREATE INDEX IF NOT EXISTS verified_observer_nonce_operation_idx
     ON verified_observer_nonce_receipts (operation_id, cluster_id, workload_id, generation);
