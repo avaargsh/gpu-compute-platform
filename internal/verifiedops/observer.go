@@ -40,15 +40,15 @@ type ExpectedJob struct {
 // Observation is a fresh, read-only Kubernetes correlation, not signed proof.
 // POD_READY_OBSERVED must never be promoted to AUTHORIZED_AND_VERIFIED.
 type Observation struct {
-	Code               string
-	JobUID             types.UID
-	JobResourceVersion string
-	PodUID             types.UID
-	PodResourceVersion string
-	NodeName           string
-	NodeUID            types.UID
+	Code                string
+	JobUID              types.UID
+	JobResourceVersion  string
+	PodUID              types.UID
+	PodResourceVersion  string
+	NodeName            string
+	NodeUID             types.UID
 	NodeResourceVersion string
-	ImageID            string
+	ImageID             string
 }
 
 // JobObserver must be constructed with a separate Kubernetes read-only identity.

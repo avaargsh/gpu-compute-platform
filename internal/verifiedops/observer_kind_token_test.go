@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"strings"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -125,7 +125,9 @@ func TestRealKindObserverShortLivedSATokenAndBoundJob(t *testing.T) {
 	// Proof generation uses the short-lived SA bearer client, not kind
 	// admin credentials. The test key is ephemeral and never deployed.
 	pub, private, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	challenge := ObserverSubject{
 		OperationID: strings.Repeat("a", 32), ClusterID: "real-kind",
 		ProjectID: observerProjectA, WorkloadID: job.Name,
