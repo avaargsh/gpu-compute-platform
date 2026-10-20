@@ -82,7 +82,7 @@ func (s *Store) recordSignedObserverNonceOnce(ctx context.Context, envelope []by
 	sum := sha256.Sum256(envelope)
 	digest := hex.EncodeToString(sum[:])
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
 	}
