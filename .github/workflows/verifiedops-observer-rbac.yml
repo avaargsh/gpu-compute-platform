@@ -7,6 +7,8 @@ on:
       - "deploy/kubernetes/verifiedops-observer/**"
       - "scripts/e2e/verifiedops-observer-*.sh"
       - "internal/verifiedops/**"
+      - "cmd/verifiedops-observer/**"
+      - "Dockerfile"
       - ".github/workflows/verifiedops-observer-rbac.yml"
   workflow_dispatch:
 
@@ -16,7 +18,7 @@ permissions:
 jobs:
   observer-rbac:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Shell syntax and minimal RBAC checks
@@ -41,6 +43,14 @@ jobs:
         env:
           VERIFIEDOPS_OBSERVER_TOKEN_E2E: "1"
         run: go test ./internal/verifiedops -run '^TestRealKindObserver(ShortLivedSATokenAndBoundJob|JobDeletionOnSecondGET)$' -count=1 -timeout=180s -v
+      - name: Build independent one-shot Observer Pod image for kind (test-only fixture)
+        run: |
+          docker build --target verifiedops-observer-e2e --tag verifiedops-observer:e2e .
+          kind load docker-image --name verifiedops-rbac-ci verifiedops-observer:e2e
+      - name: Execute independent Observer Pod and verify actual DSSE evidence
+        env:
+          VERIFIEDOPS_OBSERVER_POD_E2E: "1"
+        run: go test ./cmd/verifiedops-observer -run '^TestRealKindObserverPodSignsPendingEvidence$' -count=1 -timeout=180s -v
       - name: Failure diagnostics
         if: failure()
         run: |
