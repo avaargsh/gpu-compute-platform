@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -33,15 +34,15 @@ type ObservedJobReceipt struct {
 // RecordSignedObservedJobProof admits one signed observation receipt. It retries
 // bounded PostgreSQL serialization/deadlock failures because concurrent exact
 // retries must be idempotent. Each attempt repeats all trusted-scope, challenge,
-// signature and replay checks in a fresh serializable transaction.
+// signature and replay checks in a fresh transaction.
 func (s *Store) RecordSignedObservedJobProof(
-	ctx context.Context, envelope []byte, trust verifiedops.ObserverTrust,
+	ctx context.Context, envelope []byte, observerKeyID string,
 	scope ObserverChallengeScope, nonce string,
 ) (ObservedJobReceipt, error) {
 	var empty ObservedJobReceipt
 	const maxAttempts = 8
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		receipt, err := s.recordSignedObservedJobProofOnce(ctx, envelope, trust, scope, nonce)
+		receipt, err := s.recordSignedObservedJobProofOnce(ctx, envelope, observerKeyID, scope, nonce)
 		if err == nil || !isRetryableObserverTransactionError(err) || attempt == maxAttempts-1 {
 			return receipt, err
 		}
@@ -74,7 +75,7 @@ func isRetryableObserverTransactionError(err error) bool {
 	}
 }
 
-// recordSignedObservedJobProofOnce performs one serializable receipt-admission
+// recordSignedObservedJobProofOnce performs one receipt-admission
 // attempt. Scope and trust must originate from separate trusted orchestration.
 // Expected namespace/name/UID/image are reconstructed from persisted
 // Management Desired + project binding + original CREATE ACK, not from the
@@ -94,15 +95,40 @@ func (s *Store) recordSignedObservedJobProofOnce(
 	}
 	if !bindingOperationID.MatchString(scope.OperationID) || !signedObserverNonce.MatchString(nonce) ||
 		scope.ClusterID == "" || scope.ProjectID == "" || scope.WorkloadID == "" ||
-		scope.Generation <= 0 || strings.TrimSpace(scope.JobUID) == "" {
+		scope.Generation <= 0 || strings.TrimSpace(scope.JobUID) == "" ||
+		strings.TrimSpace(observerKeyID) == "" || len(observerKeyID) > 128 {
 		return empty, verifiedops.ErrObserverUntrusted
 	}
 
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return empty, err
 	}
 	defer tx.Rollback()
+
+	// Resolve the Observer trust root from the DBA-controlled cluster registry.
+	// FOR SHARE prevents a concurrent revocation/validity update from racing
+	// receipt admission; the public key is never caller supplied.
+	var publicKey []byte
+	err = tx.QueryRowContext(ctx, `
+SELECT public_key
+FROM verified_observer_signing_keys
+WHERE cluster_id=$1 AND key_id=$2
+  AND valid_from <= clock_timestamp()
+  AND (valid_until IS NULL OR valid_until > clock_timestamp())
+  AND revoked_at IS NULL
+FOR SHARE
+`, scope.ClusterID, observerKeyID).Scan(&publicKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return empty, verifiedops.ErrObserverUntrusted
+	}
+	if err != nil {
+		return empty, err
+	}
+	if len(publicKey) != ed25519.PublicKeySize {
+		return empty, verifiedops.ErrObserverUntrusted
+	}
+	trust := verifiedops.ObserverTrust{KeyID: observerKeyID, PublicKey: ed25519.PublicKey(publicKey)}
 
 	// Canonical order matches the previous nonce sink: Desired -> original
 	// CREATE UID -> server Challenge -> nonce receipt.
@@ -239,7 +265,7 @@ INSERT INTO verified_observer_nonce_receipts
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
 ON CONFLICT (cluster_id,nonce) DO NOTHING
 `, scope.ClusterID, nonce, scope.OperationID, scope.ProjectID,
-		scope.WorkloadID, scope.Generation, scope.JobUID, trust.KeyID,
+		scope.WorkloadID, scope.Generation, scope.JobUID, observerKeyID,
 		verifiedops.ObservedJobPredicateType, string(obsBytes), envelopeDigest, observed)
 	if err != nil {
 		return empty, err
