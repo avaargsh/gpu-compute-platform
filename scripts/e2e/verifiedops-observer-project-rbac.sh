@@ -53,5 +53,5 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: verifiedops-observer
-    namespace: verifiedops-observer
+    namespace: $identity_namespace
 YAML
