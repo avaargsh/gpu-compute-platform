@@ -36,7 +36,7 @@ func TestRealKindObserverPodSignsPendingEvidence(t *testing.T) {
 		t.Skip("requires a real kind cluster with the reviewed project Role and preloaded Observer test image")
 	}
 	const project = "verifiedops-token-a"
-	const identityNamespace = "verifiedops-observer"
+	const identityNamespace = "verifiedops-observer-e2e"
 	const image = "verifiedops-observer:e2e"
 	const digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
