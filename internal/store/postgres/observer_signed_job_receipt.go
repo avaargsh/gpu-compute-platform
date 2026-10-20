@@ -30,17 +30,60 @@ type ObservedJobReceipt struct {
 	EnvelopeSHA256 string
 }
 
-// RecordSignedObservedJobProof is an INTERNAL, non-HTTP v2 receipt admission.
-// Its scope and trust root MUST originate from separate trusted orchestration.
-// The expected namespace/name/UID/image are reconstructed from persisted
-// Management Desired + project binding + original CREATE ACK, NOT the
+// RecordSignedObservedJobProof admits one signed observation receipt. It retries
+// bounded PostgreSQL serialization/deadlock failures because concurrent exact
+// retries are required to be idempotent, not spuriously fail with SQLSTATE 40001.
+// Every attempt re-runs the complete trusted-scope, challenge, signature and
+// replay checks in a fresh transaction.
+func (s *Store) RecordSignedObservedJobProof(
+	ctx context.Context, envelope []byte, trust verifiedops.ObserverTrust,
+	scope ObserverChallengeScope, nonce string,
+) (ObservedJobReceipt, error) {
+	var empty ObservedJobReceipt
+	const maxAttempts = 4
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		receipt, err := s.recordSignedObservedJobProofOnce(ctx, envelope, trust, scope, nonce)
+		if err == nil || !isRetryableObserverTransactionError(err) || attempt == maxAttempts-1 {
+			return receipt, err
+		}
+		delay := time.Duration(attempt+1) * 10 * time.Millisecond
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return empty, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return empty, fmt.Errorf("observer receipt transaction retry exhausted")
+}
+
+func isRetryableObserverTransactionError(err error) bool {
+	var state interface{ SQLState() string }
+	if !errors.As(err, &state) {
+		return false
+	}
+	switch state.SQLState() {
+	case "40001", "40P01": // serialization_failure, deadlock_detected
+		return true
+	default:
+		return false
+	}
+}
+
+// recordSignedObservedJobProofOnce performs one serializable receipt-admission
+// attempt. Scope and trust must originate from separate trusted orchestration.
+// Expected namespace/name/UID/image are reconstructed from persisted
+// Management Desired + project binding + original CREATE ACK, not from the
 // potentially attacker-authored signed assertion.
 //
-// The v1 and v2 predicates share the SAME (cluster, nonce) receipt table so
+// The v1 and v2 predicates share the same (cluster, nonce) receipt table so
 // a challenge cannot be consumed once under each protocol version. This
 // records observed outcomes, including PENDING, but never issues a final
 // AUTHORIZED_AND_VERIFIED verdict.
-func (s *Store) RecordSignedObservedJobProof(
+func (s *Store) recordSignedObservedJobProofOnce(
 	ctx context.Context, envelope []byte, trust verifiedops.ObserverTrust,
 	scope ObserverChallengeScope, nonce string,
 ) (ObservedJobReceipt, error) {
