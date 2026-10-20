@@ -46,7 +46,7 @@ func TestRealKindObserverShortLivedSATokenAndBoundJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	ttl := int64(600)
-	token, err := admin.CoreV1().ServiceAccounts("verifiedops-observer").CreateToken(
+	token, err := admin.CoreV1().ServiceAccounts("verifiedops-observer-e2e").CreateToken(
 		ctx, "verifiedops-observer", &authnv1.TokenRequest{
 			Spec: authnv1.TokenRequestSpec{ExpirationSeconds: &ttl},
 		}, metav1.CreateOptions{},
@@ -81,7 +81,7 @@ func TestRealKindObserverShortLivedSATokenAndBoundJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if self.Status.UserInfo.Username != "system:serviceaccount:verifiedops-observer:verifiedops-observer" {
+	if self.Status.UserInfo.Username != "system:serviceaccount:verifiedops-observer-e2e:verifiedops-observer" {
 		t.Fatalf("observer token authenticated as unexpected subject %q", self.Status.UserInfo.Username)
 	}
 
