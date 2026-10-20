@@ -107,3 +107,109 @@ spec:
     namespaceSelector:
       matchLabels:
         app.kubernetes.io/component: verifiedops-observer
+
+---
+# Direct Pods must satisfy the same security envelope: otherwise a user with
+# Pod-create permission could bypass the Job policy and select the signer SA.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: verifiedops-observer-pod-guard
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+  validations:
+    - message: "VerifiedOps Pods must use the dedicated identity, bounded token and reviewed Pod security context"
+      expression: >-
+        object.serviceAccountName == "verifiedops-observer" &&
+        object.automountServiceAccountToken == false &&
+        object.restartPolicy == "Never" &&
+        object.securityContext.runAsNonRoot == true &&
+        object.securityContext.runAsUser == 65532 &&
+        object.securityContext.runAsGroup == 65532 &&
+        object.securityContext.seccompProfile.type == "RuntimeDefault"
+    - message: "Direct Observer Pods must run only the pinned, non-overridable Observer process"
+      expression: >-
+        object.containers.size() == 1 &&
+        object.containers.all(c,
+          c.name == "observer" &&
+          c.image == "example.invalid/verifiedops-observer@sha256:0000000000000000000000000000000000000000000000000000000000000000" &&
+          (!has(c.command) || c.command.size() == 0) &&
+          (!has(c.args) || c.args.size() == 0) &&
+          (!has(c.ports) || c.ports.size() == 0) &&
+          (!has(c.envFrom) || c.envFrom.size() == 0) &&
+          c.securityContext.allowPrivilegeEscalation == false &&
+          c.securityContext.readOnlyRootFilesystem == true &&
+          c.securityContext.runAsNonRoot == true &&
+          c.securityContext.runAsUser == 65532 &&
+          c.securityContext.runAsGroup == 65532 &&
+          c.securityContext.capabilities.drop == ["ALL"] &&
+          c.env.size() == 5 &&
+          c.env.all(e, e.name in [
+            "VERIFIEDOPS_TICKET_FILE",
+            "VERIFIEDOPS_DISPATCHER_PUBKEY_FILE",
+            "VERIFIEDOPS_DISPATCHER_KEY_ID",
+            "VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE",
+            "VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID"
+          ] && !has(e.valueFrom)) &&
+          c.env.all(e,
+            e.name == "VERIFIEDOPS_TICKET_FILE" ? e.value == "/run/verifiedops/ticket/ticket.dsse.json" :
+            e.name == "VERIFIEDOPS_DISPATCHER_PUBKEY_FILE" ? e.value == "/run/verifiedops/root/dispatcher.pub.b64" :
+            e.name == "VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE" ? e.value == "/run/verifiedops/identity/observer.pk8.pem" : true
+          )
+        )
+    - message: "Direct Observer Pods must mount only the approved read-only ticket, trust root, token and external signer volumes"
+      expression: >-
+        object.volumes.size() == 4 &&
+        object.volumes.all(v,
+          v.name in ["kubernetes-api-access", "signed-work-ticket", "pinned-dispatcher-root", "external-signer"] &&
+          !has(v.hostPath)
+        ) &&
+        object.volumes.exists(v,
+          v.name == "kubernetes-api-access" &&
+          v.projected.sources.exists(s, has(s.serviceAccountToken) &&
+            s.serviceAccountToken.expirationSeconds <= 600)
+        ) &&
+        object.volumes.exists(v,
+          v.name == "signed-work-ticket" &&
+          v.secret.secretName == "verifiedops-observer-once-ticket" &&
+          v.secret.optional == false
+        ) &&
+        object.volumes.exists(v,
+          v.name == "pinned-dispatcher-root" &&
+          v.configMap.name == "verifiedops-observer-dispatcher-pinned-root" &&
+          v.configMap.optional == false
+        ) &&
+        object.volumes.exists(v,
+          v.name == "external-signer" &&
+          v.csi.driver == "secrets-store.csi.k8s.io" &&
+          v.csi.readOnly == true &&
+          v.csi.volumeAttributes.secretProviderClass == "verifiedops-observer-external-signing-key"
+        ) &&
+        object.containers.all(c,
+          c.volumeMounts.size() == 4 &&
+          c.volumeMounts.all(m, m.readOnly == true &&
+            (m.name == "kubernetes-api-access" ? m.mountPath == "/var/run/secrets/kubernetes.io/serviceaccount" :
+             m.name == "signed-work-ticket" ? m.mountPath == "/run/verifiedops/ticket" :
+             m.name == "pinned-dispatcher-root" ? m.mountPath == "/run/verifiedops/root" :
+             m.name == "external-signer" ? m.mountPath == "/run/verifiedops/identity" : false)
+          )
+        )
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: verifiedops-observer-pod-guard
+spec:
+  policyName: verifiedops-observer-pod-guard
+  validationActions: ["Deny"]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        app.kubernetes.io/component: verifiedops-observer
