@@ -13,7 +13,17 @@ kubectl apply --dry-run=server -f deploy/kubernetes/verifiedops-observer/rbac.ya
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-policy.example.yaml >/dev/null
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-job-policy.yaml >/dev/null
 kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o yaml
-kubectl wait --for=condition=Accepted validatingadmissionpolicy/verifiedops-observer-job-envelope --timeout=30s >/dev/null
+if ! kubectl wait --for=condition=Accepted validatingadmissionpolicy/verifiedops-observer-job-envelope --timeout=30s; then
+  echo 'Observer admission policy was not accepted by the API server; refusing to continue acceptance.' >&2
+  echo 'API server version:' >&2
+  kubectl version -o yaml >&2 || true
+  echo 'Policy status and CEL diagnostics:' >&2
+  kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o yaml >&2 || true
+  echo 'Policy binding and parameter resolution:' >&2
+  kubectl get validatingadmissionpolicybinding verifiedops-observer-job-envelope -o yaml >&2 || true
+  kubectl get configmap verifiedops-observer-policy -n verifiedops-observer -o yaml >&2 || true
+  exit 1
+fi
 kubectl apply --dry-run=server -f "$manifest" >/dev/null
 
 # Prove the policy rejects a mutable process and an image that differs from
