@@ -12,16 +12,17 @@ kubectl apply --dry-run=server -f deploy/kubernetes/verifiedops-observer/rbac.ya
 # example digest and key IDs with reviewed values before installing.
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-policy.example.yaml >/dev/null
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-job-policy.yaml >/dev/null
+# ValidatingAdmissionPolicy in Kubernetes 1.30-1.34 does not expose an
+# Accepted condition for kubectl wait. Its status reports observedGeneration
+# and typeChecking warnings; actual CEL evaluation is exercised by server-side
+# dry-run requests below. Do not wait on a condition the API server never sets.
 kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o yaml
-if ! kubectl wait --for=condition=Accepted validatingadmissionpolicy/verifiedops-observer-job-envelope --timeout=30s; then
-  echo 'Observer admission policy was not accepted by the API server; refusing to continue acceptance.' >&2
-  echo 'API server version:' >&2
+policy_generation="$(kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o jsonpath='{.metadata.generation}')"
+observed_generation="$(kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o jsonpath='{.status.observedGeneration}')"
+if [[ -z "$policy_generation" || "$observed_generation" != "$policy_generation" ]]; then
+  echo "Observer admission policy status is stale (generation=$policy_generation observedGeneration=$observed_generation); refusing to continue acceptance." >&2
   kubectl version -o yaml >&2 || true
-  echo 'Policy status and CEL diagnostics:' >&2
   kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o yaml >&2 || true
-  echo 'Policy binding and parameter resolution:' >&2
-  kubectl get validatingadmissionpolicybinding verifiedops-observer-job-envelope -o yaml >&2 || true
-  kubectl get configmap verifiedops-observer-policy -n verifiedops-observer -o yaml >&2 || true
   exit 1
 fi
 kubectl apply --dry-run=server -f "$manifest" >/dev/null
