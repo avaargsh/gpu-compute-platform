@@ -94,7 +94,7 @@ func TestSignedObservedJobV2DurablePendingAndCrossVersionReplay(t *testing.T) {
 	if receipt.Observation.Code == "AUTHORIZED_AND_VERIFIED" {
 		t.Fatal("receipt falsely authorized execution")
 	}
-	retry, err := New(store.db).RecordSignedObservedJobProof(ctx, raw, trust, scope, challenge.Nonce)
+	retry, err := New(store.db).RecordSignedObservedJobProof(ctx, raw, trust.KeyID, scope, challenge.Nonce)
 	if err != nil || retry.EnvelopeSHA256 != receipt.EnvelopeSHA256 {
 		t.Fatalf("durable retry not idempotent: %#v %v", retry, err)
 	}
@@ -120,22 +120,22 @@ func TestSignedObservedJobV2RejectsForgedScopeAndUnissuedChallenge(t *testing.T)
 	scope := makeObserverScope(binding)
 	wrong := scope
 	wrong.ProjectID = "other-project"
-	if _, err := store.RecordSignedObservedJobProof(ctx, raw, trust, wrong, challenge.Nonce); !errors.Is(err, ErrObserverNonceUnproven) {
+	if _, err := store.RecordSignedObservedJobProof(ctx, raw, trust.KeyID, wrong, challenge.Nonce); !errors.Is(err, ErrObserverNonceUnproven) {
 		t.Fatalf("wrong tenant accepted: %v", err)
 	}
 	wrong = scope
 	wrong.JobUID = "replacement-uid"
-	if _, err := store.RecordSignedObservedJobProof(ctx, raw, trust, wrong, challenge.Nonce); !errors.Is(err, ErrObserverNonceUnproven) {
+	if _, err := store.RecordSignedObservedJobProof(ctx, raw, trust.KeyID, wrong, challenge.Nonce); !errors.Is(err, ErrObserverNonceUnproven) {
 		t.Fatalf("same-name new UID accepted: %v", err)
 	}
-	if _, err := store.RecordSignedObservedJobProof(ctx, raw, trust, scope, strings.Repeat("f", 64)); !errors.Is(err, ErrObserverChallengeMissing) {
+	if _, err := store.RecordSignedObservedJobProof(ctx, raw, trust.KeyID, scope, strings.Repeat("f", 64)); !errors.Is(err, ErrObserverChallengeMissing) {
 		t.Fatalf("unissued nonce accepted: %v", err)
 	}
 	var count int
 	if err := store.db.QueryRowContext(ctx, "SELECT count(*) FROM verified_observer_nonce_receipts").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("bad evidence consumed nonce: %d %v", count, err)
 	}
-	if _, err := store.RecordSignedObservedJobProof(ctx, raw, trust, scope, challenge.Nonce); err != nil {
+	if _, err := store.RecordSignedObservedJobProof(ctx, raw, trust.KeyID, scope, challenge.Nonce); err != nil {
 		t.Fatalf("rejected attempts poisoned legitimate challenge: %v", err)
 	}
 }
@@ -169,7 +169,7 @@ WHERE cluster_id=$1 AND resource_id=$2
 					t.Fatal(err)
 				}
 			}
-			_, err := store.RecordSignedObservedJobProof(ctx, raw, trust, makeObserverScope(binding), challenge.Nonce)
+			_, err := store.RecordSignedObservedJobProof(ctx, raw, trust.KeyID, makeObserverScope(binding), challenge.Nonce)
 			var expected error = ErrObserverNonceUnproven
 			if mode == "expired" {
 				expected = ErrObserverChallengeExpired
@@ -196,7 +196,7 @@ func TestSignedObservedJobV2FirstSeenV1CannotConsumeAgain(t *testing.T) {
 	if err := store.RecordSignedObserverNonce(ctx, legacyRaw, legacyTrust, legacySubject); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.RecordSignedObservedJobProof(ctx, raw, trust, makeObserverScope(binding), challenge.Nonce); !errors.Is(err, ErrObserverEvidenceReplayed) {
+	if _, err := store.RecordSignedObservedJobProof(ctx, raw, trust.KeyID, makeObserverScope(binding), challenge.Nonce); !errors.Is(err, ErrObserverEvidenceReplayed) {
 		t.Fatalf("v2 bypassed v1 receipt: %v", err)
 	}
 }
@@ -229,7 +229,7 @@ func TestSignedObservedJobV2ConcurrentExactRetriesCommitOneReceipt(t *testing.T)
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := store.RecordSignedObservedJobProof(ctx, raw, trust, scope, challenge.Nonce)
+			_, err := store.RecordSignedObservedJobProof(ctx, raw, trust.KeyID, scope, challenge.Nonce)
 			errs <- err
 		}()
 	}
