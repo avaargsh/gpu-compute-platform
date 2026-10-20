@@ -226,8 +226,9 @@ func TestIssuedSignedTicketCanReachPendingV2ReceiptWithoutAuthorityVerdict(t *te
 	if err != nil || observation.Code != verifiedops.OutcomePending {
 		t.Fatalf("independent pending proof: %#v %v", observation, err)
 	}
+	registerObserverTrustForTest(t, store, input.ClusterID, verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPublic})
 	receipt, err := store.RecordSignedObservedJobProof(context.Background(), raw,
-		verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPublic},
+		"observer",
 		makeObserverScope(input), issued.Challenge.Nonce)
 	if err != nil || receipt.Observation.Code != verifiedops.OutcomePending {
 		t.Fatalf("signed ticket -> v2 receipt: %#v %v", receipt, err)
@@ -339,13 +340,14 @@ func TestDeletionRaceSignedObserverWorkIsDurableNonPositive(t *testing.T) {
 		}
 	}
 	trust := verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPub}
+	registerObserverTrustForTest(t, store, input.ClusterID, trust)
 	verified, err := verifiedops.VerifyObservedJobEnvelope(envelope, trust,
 		issued.Challenge, issued.Expected)
 	if err != nil || verified.Observation.Code != verifiedops.OwnershipUnproven {
 		t.Fatalf("signed deletion observation failed independent verification: %#v %v", verified, err)
 	}
 	receipt, err := store.RecordSignedObservedJobProof(
-		ctx, envelope, trust, makeObserverScope(input), issued.Challenge.Nonce)
+		ctx, envelope, trust.KeyID, makeObserverScope(input), issued.Challenge.Nonce)
 	if err != nil || receipt.Observation.Code != verifiedops.OwnershipUnproven {
 		t.Fatalf("deletion race became a positive receipt: %#v %v", receipt, err)
 	}
