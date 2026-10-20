@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -149,5 +150,54 @@ func TestObserverNonceScopeFreshnessAndSignatureFailClosed(t *testing.T) {
 	}
 	if err := store.RecordSignedObserverNonce(ctx, tampered, trust, base); !errors.Is(err, verifiedops.ErrObserverUntrusted) {
 		t.Fatalf("modified signed envelope accepted: %v", err)
+	}
+}
+
+
+func TestObserverNonceConcurrentExactRetriesCommitOneReceipt(t *testing.T) {
+	store, binding := newCreateUIDFixture(t)
+	ctx := context.Background()
+	if err := store.PrepareJobCreateAttempt(ctx, durableAttempt(binding)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordJobCreateUID(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := store.IssueObserverChallenge(ctx, makeObserverScope(binding))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := verifiedops.ObserverSubject{
+		OperationID: binding.OperationID, ClusterID: string(binding.ClusterID),
+		ProjectID: binding.ProjectID, WorkloadID: string(binding.WorkloadID),
+		Generation: binding.Generation, JobUID: binding.JobUID,
+		Nonce: challenge.Nonce, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	raw, trust := signedNonceFixture(t, want)
+	const workers = 8
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- store.RecordSignedObserverNonce(ctx, raw, trust, want)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent identical v1 proof must be idempotent: %v", err)
+		}
+	}
+	var count int
+	if err := store.db.QueryRowContext(ctx,
+		"SELECT count(*) FROM verified_observer_nonce_receipts WHERE cluster_id=$1 AND nonce=$2",
+		binding.ClusterID, challenge.Nonce).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("concurrent v1 proof created %d receipts: %v", count, err)
 	}
 }
