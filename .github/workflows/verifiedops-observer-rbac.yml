@@ -30,6 +30,8 @@ jobs:
           sudo mv /tmp/kind /usr/local/bin/kind
       - name: Provision real API server
         run: kind create cluster --name verifiedops-rbac-ci --image kindest/node:v1.34.0 --wait 120s
+      - name: API-server validate suspended Observer Job and immutable security envelope
+        run: bash scripts/e2e/verifiedops-observer-job-admission.sh
       - name: Validate Observer namespace, limited grants and cross-project denials
         run: bash scripts/e2e/verifiedops-observer-rbac-acceptance.sh
       - name: Prepare reviewed project for actual Observer token
