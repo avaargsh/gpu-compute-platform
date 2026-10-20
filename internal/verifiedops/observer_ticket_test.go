@@ -12,6 +12,7 @@ import (
 	"time"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	fake "k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
@@ -171,5 +172,45 @@ func TestObserverRunnerSignsPendingWithDistinctIdentity(t *testing.T) {
 		if a.GetVerb() != "get" && a.GetVerb() != "list" && a.GetResource().Resource != "selfsubjectreviews" {
 			t.Fatalf("observer mutated Kubernetes: %v", a)
 		}
+	}
+}
+
+// A dispatcher-approved work ticket and valid Observer SA are still not an
+// authorization verdict when the bound Job starts deleting during readback.
+func TestObserverRunnerSignsJobDeletionRaceAsUnproven(t *testing.T) {
+	ticket, raw, root, _ := workTicketFixture(t)
+	approved, err := ApproveObserverWorkTicket(raw, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, job, pod, node := fixture()
+	client := fake.NewSimpleClientset(job, pod, node)
+	fakeObserverIdentity(client, ObserverIdentityUsername, nil)
+	reads := 0
+	client.PrependReactor("get", "jobs", func(_ ktesting.Action) (bool, runtime.Object, error) {
+		reads++
+		if reads == 2 {
+			deleting := job.DeepCopy()
+			now := metav1.Now()
+			deleting.DeletionTimestamp = &now
+			// Preserve the original RV to prove the deletion fence is required.
+			return true, deleting, nil
+		}
+		return false, nil, nil
+	})
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, observed, err := RunApprovedObserverWork(context.Background(), client, approved,
+		ObserverSigner{KeyID: "independent-observer", Signer: key})
+	if err != nil || observed.Code != OwnershipUnproven || reads != 2 {
+		t.Fatalf("deleting Job was signed as Ready: %#v %v reads=%d", observed, err, reads)
+	}
+	verified, err := VerifyObservedJobEnvelope(proof,
+		ObserverTrust{KeyID: "independent-observer", PublicKey: pub},
+		ticket.Challenge, ticket.Expected)
+	if err != nil || verified.Observation.Code != OwnershipUnproven {
+		t.Fatalf("signed deletion must remain non-positive: %#v %v", verified, err)
 	}
 }

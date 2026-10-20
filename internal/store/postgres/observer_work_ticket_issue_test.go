@@ -12,11 +12,14 @@ import (
 	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
+	authenticationv1 "k8s.io/api/authentication/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	fake "k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 )
 
 const trustedTicketImage = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -229,5 +232,134 @@ func TestIssuedSignedTicketCanReachPendingV2ReceiptWithoutAuthorityVerdict(t *te
 	}
 	if receipt.Observation.Code == "AUTHORIZED_AND_VERIFIED" {
 		t.Fatal("no final authorization verdict is permitted")
+	}
+}
+
+// This crosses the durable CREATE+ACK / signed dispatcher / dedicated Observer
+// identity / signed Kubernetes evidence / PostgreSQL receipt boundary. A Job
+// that begins deletion at the final GET must remain non-positive even when a
+// fake read reports the same ResourceVersion. It is NOT a Kubernetes snapshot
+// transaction or a production identity attestation.
+func TestDeletionRaceSignedObserverWorkIsDurableNonPositive(t *testing.T) {
+	store, input := prepareTrustedObserverIssue(t)
+	ctx := context.Background()
+	dispatchPub, dispatchKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issued, err := store.IssueSignedObserverWork(ctx, makeObserverScope(input),
+		verifiedops.ObserverSigner{KeyID: "dispatcher", Signer: dispatchKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := verifiedops.ApproveObserverWorkTicket(issued.Ticket,
+		verifiedops.ObserverTrust{KeyID: "dispatcher", PublicKey: dispatchPub})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: input.JobName, Namespace: input.Namespace, UID: types.UID(input.JobUID),
+			ResourceVersion: "100",
+			Labels:          map[string]string{"ai.compute/workload": input.JobName},
+			Annotations:     map[string]string{"ai.compute/generation": "1"},
+		},
+		Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "workload", Image: "registry.invalid/train@" + trustedTicketImage}},
+		}}},
+	}
+	controller := true
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: input.JobName + "-pod", Namespace: input.Namespace,
+			UID: types.UID("ready-pod-uid"), ResourceVersion: "101",
+			Labels: map[string]string{"batch.kubernetes.io/controller-uid": input.JobUID},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "batch/v1", Kind: "Job", Name: input.JobName,
+				UID: types.UID(input.JobUID), Controller: &controller,
+			}},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "gpu-node", Containers: []corev1.Container{{
+				Name: "workload", Image: "registry.invalid/train@" + trustedTicketImage,
+			}},
+		},
+		Status: corev1.PodStatus{
+			Phase:      corev1.PodRunning,
+			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name: "workload", Ready: true, ImageID: "docker-pullable://registry.invalid/train@" + trustedTicketImage,
+			}},
+		},
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-node", UID: types.UID("node-uid"), ResourceVersion: "102"},
+		Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{
+			Type: corev1.NodeReady, Status: corev1.ConditionTrue,
+		}}},
+	}
+	client := fake.NewSimpleClientset(job, pod, node)
+	client.PrependReactor("create", "selfsubjectreviews", func(_ ktesting.Action) (bool, runtime.Object, error) {
+		return true, &authenticationv1.SelfSubjectReview{
+			Status: authenticationv1.SelfSubjectReviewStatus{
+				UserInfo: authenticationv1.UserInfo{Username: verifiedops.ObserverIdentityUsername},
+			},
+		}, nil
+	})
+	jobReads := 0
+	client.PrependReactor("get", "jobs", func(_ ktesting.Action) (bool, runtime.Object, error) {
+		jobReads++
+		if jobReads == 2 {
+			deleting := job.DeepCopy()
+			now := metav1.Now()
+			deleting.DeletionTimestamp = &now
+			// Deliberately preserve RV: the deletion guard must stand alone.
+			return true, deleting, nil
+		}
+		return false, nil, nil
+	})
+	observerPub, observerKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, observation, err := verifiedops.RunApprovedObserverWork(
+		ctx, client, approved, verifiedops.ObserverSigner{KeyID: "observer", Signer: observerKey})
+	if err != nil || observation.Code != verifiedops.OwnershipUnproven || jobReads != 2 {
+		t.Fatalf("deleting Job accepted as Ready: %#v %v (job GETs=%d)", observation, err, jobReads)
+	}
+	for _, action := range client.Actions() {
+		if action.GetResource().Resource == "selfsubjectreviews" {
+			continue
+		}
+		if action.GetVerb() != "get" && action.GetVerb() != "list" {
+			t.Fatalf("Observer mutated Kubernetes: %s %s", action.GetVerb(), action.GetResource().Resource)
+		}
+	}
+	trust := verifiedops.ObserverTrust{KeyID: "observer", PublicKey: observerPub}
+	verified, err := verifiedops.VerifyObservedJobEnvelope(envelope, trust,
+		issued.Challenge, issued.Expected)
+	if err != nil || verified.Observation.Code != verifiedops.OwnershipUnproven {
+		t.Fatalf("signed deletion observation failed independent verification: %#v %v", verified, err)
+	}
+	receipt, err := store.RecordSignedObservedJobProof(
+		ctx, envelope, trust, makeObserverScope(input), issued.Challenge.Nonce)
+	if err != nil || receipt.Observation.Code != verifiedops.OwnershipUnproven {
+		t.Fatalf("deletion race became a positive receipt: %#v %v", receipt, err)
+	}
+	retry, err := New(store.db).RecordSignedObservedJobProof(
+		ctx, envelope, trust, makeObserverScope(input), issued.Challenge.Nonce)
+	if err != nil || retry.EnvelopeSHA256 != receipt.EnvelopeSHA256 ||
+		retry.Observation.Code != verifiedops.OwnershipUnproven {
+		t.Fatalf("durable negative receipt retry was not idempotent: %#v %v", retry, err)
+	}
+	var count int
+	var storedCode string
+	if err := store.db.QueryRowContext(ctx, `
+SELECT count(*), max(observation_json->>'Code')
+FROM verified_observer_nonce_receipts WHERE cluster_id=$1 AND nonce=$2
+`, input.ClusterID, issued.Challenge.Nonce).Scan(&count, &storedCode); err != nil ||
+		count != 1 || storedCode != verifiedops.OwnershipUnproven {
+		t.Fatalf("incorrect durable negative receipt: count=%d code=%s err=%v", count, storedCode, err)
 	}
 }
