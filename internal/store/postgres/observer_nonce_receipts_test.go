@@ -6,8 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -22,15 +22,15 @@ func signedNonceFixture(t *testing.T, in verifiedops.ObserverSubject) ([]byte, v
 		t.Fatal(err)
 	}
 	statement := verifiedops.ObserverStatement{
-		Type: verifiedops.ObserverStatementType,
+		Type:          verifiedops.ObserverStatementType,
 		PredicateType: verifiedops.ObserverPredicateType,
-		Predicate: in,
+		Predicate:     in,
 	}
 	statement.Subject = append(statement.Subject, struct {
-		Name string `json:"name"`
+		Name   string            `json:"name"`
 		Digest map[string]string `json:"digest"`
 	}{
-		Name: "k8s-job:" + in.JobUID,
+		Name:   "k8s-job:" + in.JobUID,
 		Digest: map[string]string{"sha256": strings.Repeat("a", 64)},
 	})
 	payload, err := json.Marshal(statement)
@@ -43,10 +43,10 @@ func signedNonceFixture(t *testing.T, in verifiedops.ObserverSubject) ([]byte, v
 		fmt.Sprint(len(payload)) + " " + string(payload))
 	env := verifiedops.SignedObserverEnvelope{
 		PayloadType: verifiedops.ObserverPayloadType,
-		Payload: base64.StdEncoding.EncodeToString(payload),
+		Payload:     base64.StdEncoding.EncodeToString(payload),
 		Signatures: []verifiedops.ObserverSignature{{
 			KeyID: "observer-key",
-			Sig: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, pae)),
+			Sig:   base64.StdEncoding.EncodeToString(ed25519.Sign(priv, pae)),
 		}},
 	}
 	raw, err := json.Marshal(env)
@@ -63,7 +63,7 @@ func TestObserverNonceDurableReplayFenceWithOriginalACK(t *testing.T) {
 		OperationID: binding.OperationID, ClusterID: string(binding.ClusterID),
 		ProjectID: binding.ProjectID, WorkloadID: string(binding.WorkloadID),
 		Generation: binding.Generation, JobUID: binding.JobUID,
-		Nonce: strings.Repeat("a", 64),
+		Nonce:      strings.Repeat("a", 64),
 		ObservedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	raw, trust := signedNonceFixture(t, want)
