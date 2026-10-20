@@ -252,6 +252,23 @@ WHERE cluster_id=$1 AND nonce=$2 FOR UPDATE
 	if observed.Before(issuedAt.Add(-observerEvidenceClockSkew)) {
 		return empty, ErrObserverChallengeMismatch
 	}
+	// The Challenge lock can wait long enough for a key validity window to
+	// expire. Recheck the clock after acquiring all admission locks, before
+	// the receipt is written; the earlier FOR SHARE still fences revocation.
+	var keyStillActive bool
+	err = tx.QueryRowContext(ctx, `
+SELECT valid_from <= clock_timestamp()
+   AND (valid_until IS NULL OR valid_until > clock_timestamp())
+   AND revoked_at IS NULL
+FROM verified_observer_signing_keys
+WHERE cluster_id=$1 AND key_id=$2
+`, scope.ClusterID, observerKeyID).Scan(&keyStillActive)
+	if err != nil {
+		return empty, err
+	}
+	if !keyStillActive {
+		return empty, verifiedops.ErrObserverUntrusted
+	}
 	obsBytes, err := json.Marshal(proof.Observation)
 	if err != nil {
 		return empty, err
