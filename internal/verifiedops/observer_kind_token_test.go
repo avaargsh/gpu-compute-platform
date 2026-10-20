@@ -237,4 +237,85 @@ func TestRealKindObserverShortLivedSATokenAndBoundJob(t *testing.T) {
 	if err != nil || after.UID != job.UID {
 		t.Fatalf("forbidden delete changed actual Job: %s, err=%v", fmt.Sprint(after), err)
 	}
+
+	// Exercise actual API-server deletion semantics using the independently
+	// authenticated Observer bearer token. A dedicated finalizer retains the
+	// deleting Job long enough for the Observer to GET DeletionTimestamp.
+	// The Observer does not PATCH/DELETE: only the privileged test setup does.
+	const deletionFenceFinalizer = "verifiedops.gpupanel.dev/e2e-deletion-fence"
+	_, err = admin.BatchV1().Jobs(observerProjectA).Patch(ctx, job.Name,
+		types.MergePatchType,
+		[]byte(`{"metadata":{"finalizers":["verifiedops.gpupanel.dev/e2e-deletion-fence"]}}`),
+		metav1.PatchOptions{})
+	if err != nil {
+		t.Fatalf("cannot retain real Job for deletion test: %v", err)
+	}
+	defer func() {
+		cleanupCtx, done := context.WithTimeout(context.Background(), 15*time.Second)
+		defer done()
+		// Never leave a test Job stuck terminating, including on t.Fatal.
+		_, cleanupErr := admin.BatchV1().Jobs(observerProjectA).Patch(cleanupCtx, job.Name,
+			types.MergePatchType, []byte(`{"metadata":{"finalizers":[]}}`), metav1.PatchOptions{})
+		if cleanupErr != nil && !apierrors.IsNotFound(cleanupErr) {
+			t.Logf("remove e2e deletion finalizer: %v", cleanupErr)
+		}
+	}()
+	if err := admin.BatchV1().Jobs(observerProjectA).Delete(ctx, job.Name,
+		metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &job.UID}}); err != nil {
+		t.Fatalf("API server rejected UID-fenced DELETE: %v", err)
+	}
+	deleting, err := reader.BatchV1().Jobs(observerProjectA).Get(ctx, job.Name, metav1.GetOptions{})
+	if err != nil || deleting.UID != job.UID || deleting.ResourceVersion == "" ||
+		deleting.DeletionTimestamp == nil {
+		t.Fatalf("real Observer token cannot read API-server deletion: %#v %v", deleting, err)
+	}
+	foundFinalizer := false
+	for _, finalizer := range deleting.Finalizers {
+		if finalizer == deletionFenceFinalizer {
+			foundFinalizer = true
+		}
+	}
+	if !foundFinalizer {
+		t.Fatalf("deleting Job lost the test retention finalizer: %#v", deleting.Finalizers)
+	}
+	negative, err := NewJobObserver(reader).Observe(ctx, binding)
+	if err != nil || negative.Code != OutcomePending || negative.Code == PODReadyObserved {
+		t.Fatalf("deleting real Job became Ready: %#v %v", negative, err)
+	}
+	// Use a fresh test-only dispatcher ticket; no external dispatcher,
+	// production signer or PostgreSQL issuance is inferred by this test.
+	deletedChallenge := challenge
+	deletedChallenge.Nonce = strings.Repeat("c", 64)
+	issued := time.Now().UTC()
+	deletedTicket := ObserverWorkTicket{
+		Challenge: deletedChallenge, Expected: binding,
+		IssuedAt:  issued.Add(-time.Second).Format(time.RFC3339Nano),
+		ExpiresAt: issued.Add(time.Minute).Format(time.RFC3339Nano),
+	}
+	deletedRequest, err := AuthorObserverWorkTicket(deletedTicket, ObserverSigner{
+		KeyID: "dispatcher-test-only", Signer: dispatcherKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvedDeleted, err := ApproveObserverWorkTicket(deletedRequest, ObserverTrust{
+		KeyID: "dispatcher-test-only", PublicKey: dispatcherPub,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deletedProof, deletedState, err := RunApprovedObserverWork(ctx, reader, approvedDeleted,
+		ObserverSigner{KeyID: "kind-ephemeral-only", Signer: private})
+	if err != nil || deletedState.Code != OutcomePending {
+		t.Fatalf("deletion emitted positive or unsigned evidence: %#v %v", deletedState, err)
+	}
+	verifiedDeleted, err := VerifyObservedJobEnvelope(deletedProof,
+		ObserverTrust{KeyID: "kind-ephemeral-only", PublicKey: pub}, deletedChallenge, binding)
+	if err != nil || verifiedDeleted.Observation.Code != OutcomePending ||
+		verifiedDeleted.Observation.Code == PODReadyObserved {
+		t.Fatalf("deletion evidence was promoted to Ready: %#v %v", verifiedDeleted, err)
+	}
+	// This exercises the FIRST deletion-aware GET on a real API server.
+	// The second-GET transition remains covered deterministically by the
+	// race tests added in #163 and #164, not by this cluster test.
 }
