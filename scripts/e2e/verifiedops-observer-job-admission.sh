@@ -66,6 +66,14 @@ metadata:
   name: verifiedops-observer-vap-canary
 spec:
   policyName: verifiedops-observer-vap-canary
+  # Explicitly scope the binding to Job CREATE requests. Do not rely on an
+  # omitted matchResources field to exercise the VAP admission path.
+  matchResources:
+    resourceRules:
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["jobs"]
   validationActions: ["Deny"]
 VAP_CANARY
 # Use a real CREATE rather than dry-run: this isolates whether the API
