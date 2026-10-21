@@ -132,7 +132,7 @@ func TestRealKindObserverJobDeletionOnSecondGET(t *testing.T) {
 		t.Fatal(err)
 	}
 	ttl := int64(600)
-	token, err := admin.CoreV1().ServiceAccounts("verifiedops-observer-e2e").CreateToken(
+	token, err := admin.CoreV1().ServiceAccounts("verifiedops-observer").CreateToken(
 		ctx, "verifiedops-observer", &authnv1.TokenRequest{
 			Spec: authnv1.TokenRequestSpec{ExpirationSeconds: &ttl},
 		}, metav1.CreateOptions{})
