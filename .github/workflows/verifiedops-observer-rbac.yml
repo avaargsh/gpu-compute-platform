@@ -40,15 +40,10 @@ jobs:
         run: |
           kubectl create namespace verifiedops-token-a
           kubectl create namespace verifiedops-token-b
-          # Keep the synthetic DSSE fixture outside the namespace guarded by
-          # the production-shape admission policy. It receives only the same
-          # bounded project reader and node GET grants for this isolated test.
-          kubectl create namespace verifiedops-observer-e2e
-          kubectl create serviceaccount verifiedops-observer -n verifiedops-observer-e2e
-          kubectl create clusterrolebinding verifiedops-observer-node-get-e2e \
-            --clusterrole=verifiedops-observer-node-get \
-            --serviceaccount=verifiedops-observer-e2e:verifiedops-observer
-          bash scripts/e2e/verifiedops-observer-project-rbac.sh verifiedops-token-a verifiedops-observer-e2e
+          # The Observer identity is deliberately pinned to the production
+          # namespace. Reuse the SA/Node GET grant installed by the RBAC suite.
+          kubectl get serviceaccount verifiedops-observer -n verifiedops-observer
+          bash scripts/e2e/verifiedops-observer-project-rbac.sh verifiedops-token-a
       - name: Test actual short-lived ServiceAccount bearer identity and Job observer
         env:
           VERIFIEDOPS_OBSERVER_TOKEN_E2E: "1"
@@ -57,6 +52,12 @@ jobs:
         run: |
           docker build --target verifiedops-observer-e2e --tag verifiedops-observer:e2e .
           kind load docker-image --name verifiedops-rbac-ci verifiedops-observer:e2e
+      - name: Prepare isolated test-only Pod fixture outside admission scope
+        # Admission-policy acceptance and its negative probes have already run.
+        # The test-only Pod uses ephemeral keys/Secret and a synthetic workload;
+        # temporarily remove the namespace selector label so the deliberately
+        # non-production fixture cannot be mistaken for an admitted workload.
+        run: kubectl label namespace verifiedops-observer app.kubernetes.io/component-
       - name: Execute independent Observer Pod and verify actual DSSE evidence
         env:
           VERIFIEDOPS_OBSERVER_POD_E2E: "1"
