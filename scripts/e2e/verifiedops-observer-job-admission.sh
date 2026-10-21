@@ -40,9 +40,9 @@ canary_err="$(mktemp)"
 trap 'rm -f "$canary_err"' EXIT
 
 # Verify the API server actually evaluates VAP bindings in this cluster.
-# This deliberately-denying canary is ephemeral and is removed before testing
-# the production policy; if it does not deny, diagnose the admission substrate
-# rather than misattributing a pass/failure to the complex policy.
+# First use an intentionally unscoped canary to separate VAP engine behavior
+# from namespace-selector matching. It only targets batch/v1 Jobs and is removed
+# before testing the production policy; the sole test Job remains suspended.
 kubectl apply -f - >/dev/null <<'VAP_CANARY'
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
@@ -51,9 +51,6 @@ metadata:
 spec:
   failurePolicy: Fail
   matchConstraints:
-    namespaceSelector:
-      matchLabels:
-        app.kubernetes.io/component: verifiedops-observer
     resourceRules:
       - apiGroups: ["batch"]
         apiVersions: ["v1"]
@@ -69,10 +66,6 @@ metadata:
   name: verifiedops-observer-vap-canary
 spec:
   policyName: verifiedops-observer-vap-canary
-  matchResources:
-    namespaceSelector:
-      matchLabels:
-        app.kubernetes.io/component: verifiedops-observer
   validationActions: ["Deny"]
 VAP_CANARY
 # Use a real CREATE rather than dry-run: this isolates whether the API
@@ -80,7 +73,7 @@ VAP_CANARY
 # suspended, and is deleted immediately if the canary unexpectedly admits it.
 if kubectl create -f "$manifest" >/dev/null 2>"$canary_err"; then
   kubectl delete -f "$manifest" --wait=true >/dev/null 2>&1 || true
-  echo "VAP canary failed: API server admitted a suspended Job despite a matching deny-all policy" >&2
+  echo "VAP canary failed: API server admitted a suspended Job despite an unscoped deny-all policy" >&2
   kubectl get validatingadmissionpolicy verifiedops-observer-vap-canary -o yaml >&2 || true
   kubectl get validatingadmissionpolicybinding verifiedops-observer-vap-canary -o yaml >&2 || true
   exit 1
