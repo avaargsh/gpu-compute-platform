@@ -12,6 +12,14 @@ metadata:
 spec:
   suspend: true
   backoffLimit: 0
+  # The one-shot shape is stated explicitly instead of relying on API
+  # defaulting. The admission policy accepts both spellings: completions and
+  # parallelism default to 1 and completionMode defaults to NonIndexed, and a
+  # Job that only ever runs a single Pod with a Never restart policy is the
+  # only shape the Observer contract admits.
+  completions: 1
+  parallelism: 1
+  completionMode: NonIndexed
   activeDeadlineSeconds: 120
   ttlSecondsAfterFinished: 300
   template:

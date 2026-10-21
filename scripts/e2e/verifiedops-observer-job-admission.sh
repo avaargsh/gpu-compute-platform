@@ -13,10 +13,96 @@ if [[ "$namespace_component" != "verifiedops-observer" ]]; then
   exit 1
 fi
 
-# Install the operator-pinned image/key-provider parameters and the API-server
-# policy. This is an ephemeral kind fixture; production must replace the
-# example digest and key IDs with reviewed values before installing.
+# Install the operator-pinned image/key-provider parameters. This is an
+# ephemeral kind fixture; production must replace the example digest and key
+# IDs with reviewed values before installing.
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-policy.example.yaml >/dev/null
+canary_err="$(mktemp)"
+canary_manifest="$(mktemp)"
+unsafe="$(mktemp)"
+update_manifest="$(mktemp)"
+mutated="$(mktemp)"
+pod_base="$(mktemp)"
+pod_negative="$(mktemp)"
+one_shot="$(mktemp)"
+one_shot_err="$(mktemp)"
+# Single EXIT trap: remove every temporary created by this script. Reassigning
+# the trap later silently dropped earlier entries, so declare the full list once.
+trap 'rm -f "$canary_err" "$canary_manifest" "$unsafe" "$unsafe.err" "$update_manifest" "$mutated" "$pod_base" "$pod_negative" "$pod_negative.err" "$one_shot" "$one_shot_err"' EXIT
+
+# A one-shot probe is only proven by a named Observer Job admission policy
+# denying the request with its own one-shot message. The API server reports
+# the first matching Observer Job policy that denies a request, so either
+# installed template is accepted, but only together with that template's own
+# identity and message. An unrelated API, schema or kubectl failure is never
+# accepted as proof.
+envelope_denial="ValidatingAdmissionPolicy 'verifiedops-observer-job-envelope' with binding 'verifiedops-observer-job-envelope' denied request: Observer Jobs must run exactly one Pod with completions=1, parallelism=1, NonIndexed completion mode, no manual selector, and a Never restart policy"
+guard_denial="ValidatingAdmissionPolicy 'verifiedops-observer-job-guard' with binding 'verifiedops-observer-job-guard' denied request: VerifiedOps Job must be single-execution: completions=1, parallelism=1, NonIndexed completion mode, no manual selector, and a Never restart policy"
+one_shot_denial_re="$envelope_denial|$guard_denial"
+
+# assert_one_shot_denied requires the named denial above. It retries while the
+# request is still admitted, because API-server admission configuration is
+# propagated asynchronously after a policy or binding is created.
+assert_one_shot_denied() {
+  local label="$1" file="$2" pattern="$3"
+  local attempt denied=false
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if kubectl create --dry-run=server -f "$file" >/dev/null 2>"$one_shot_err"; then
+      sleep 1
+      continue
+    fi
+    if ! grep -Eq "$pattern" "$one_shot_err"; then
+      echo "Observer Job $label was rejected, but not by the expected admission policy message" >&2
+      cat "$one_shot_err" >&2
+      exit 1
+    fi
+    denied=true
+    break
+  done
+  if [[ "$denied" != true ]]; then
+    echo "Admission policy accepted an Observer Job with $label" >&2
+    cat "$file" >&2
+    exit 1
+  fi
+}
+
+# Install the shipped example template first and prove the one-shot contract
+# on its own: an operator who installs only this template must still be denied
+# a multi-completion Observer Job. The operator policy is therefore removed
+# for this window and re-installed below, so the proof does not depend on the
+# cluster starting without it.
+policy=deploy/kubernetes/verifiedops-observer/observer-admission-policy.example.yaml
+kubectl apply -f "$policy" >/dev/null
+kubectl delete validatingadmissionpolicybinding verifiedops-observer-job-envelope --ignore-not-found --wait=true >/dev/null
+kubectl delete validatingadmissionpolicy verifiedops-observer-job-envelope --ignore-not-found --wait=true >/dev/null
+sed 's/^  completions: 1$/  completions: 3/' "$manifest" > "$one_shot"
+guard_denied=false
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if kubectl create --dry-run=server -f "$one_shot" >/dev/null 2>"$one_shot_err"; then
+    # Not denied yet: the shipped template may not have propagated.
+    sleep 1
+    continue
+  fi
+  if grep -Fq "$envelope_denial" "$one_shot_err"; then
+    # The removed operator policy is still cached by the API server.
+    sleep 1
+    continue
+  fi
+  if ! grep -Fq "$guard_denial" "$one_shot_err"; then
+    echo 'Observer Job completions=3 was rejected, but not by the shipped example template policy message' >&2
+    cat "$one_shot_err" >&2
+    exit 1
+  fi
+  guard_denied=true
+  break
+done
+if [[ "$guard_denied" != true ]]; then
+  echo 'The shipped example template did not deny a multi-completion Observer Job' >&2
+  cat "$one_shot_err" >&2
+  exit 1
+fi
+
+# Install the API-server policy that pins the operator-reviewed parameters.
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-job-policy.yaml >/dev/null
 # Surface the complete admission matching chain before any negative test.
 kubectl get namespace verifiedops-observer --show-labels
@@ -35,21 +121,9 @@ if [[ -z "$policy_generation" || "$observed_generation" != "$policy_generation" 
   kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o yaml >&2 || true
   exit 1
 fi
-policy=deploy/kubernetes/verifiedops-observer/observer-admission-policy.example.yaml
-kubectl apply -f "$policy" >/dev/null
 # Allow the additional Job and Pod guards to propagate before probing.
 sleep 2
 kubectl apply --dry-run=server -f "$manifest" >/dev/null
-canary_err="$(mktemp)"
-canary_manifest="$(mktemp)"
-unsafe="$(mktemp)"
-update_manifest="$(mktemp)"
-mutated="$(mktemp)"
-pod_base="$(mktemp)"
-pod_negative="$(mktemp)"
-# Single EXIT trap: remove every temporary created by this script. Reassigning
-# the trap later silently dropped earlier entries, so declare the full list once.
-trap 'rm -f "$canary_err" "$canary_manifest" "$unsafe" "$unsafe.err" "$update_manifest" "$mutated" "$pod_base" "$pod_negative" "$pod_negative.err"' EXIT
 
 # Verify the API server actually evaluates VAP bindings in this cluster.
 # First use an intentionally unscoped canary to separate VAP engine behavior
@@ -157,6 +231,64 @@ if ! grep -Eiq 'denied|forbidden|validation' "$unsafe.err"; then
   exit 1
 fi
 
+# The one-shot contract of an Observer Job: exactly one completion, one
+# parallel Pod, the NonIndexed completion mode, no caller-owned selector and
+# a Never restart policy. backoffLimit=0 alone does not provide that, because
+# completions/parallelism decide how many Pods run, completionMode decides
+# whether the Job fans out, manualSelector lets the caller own the selector
+# instead of the controller, and restartPolicy=OnFailure lets the kubelet
+# re-run the Observer process in place.
+#
+# Positive baselines first: the reviewed example must stay admitted both when
+# it states the one-shot shape explicitly and when it relies on API
+# defaulting for completions, parallelism and completionMode.
+grep -v -E '^  (completions|parallelism|completionMode):' "$manifest" > "$one_shot"
+if ! kubectl create --dry-run=server -f "$one_shot" >/dev/null 2>"$one_shot_err"; then
+  echo 'Admission policy rejected the reviewed Observer Job that relies on API defaulting for the one-shot fields' >&2
+  cat "$one_shot_err" >&2
+  exit 1
+fi
+if ! kubectl create --dry-run=server -f "$manifest" >/dev/null 2>"$one_shot_err"; then
+  echo 'Admission policy rejected the reviewed Observer Job that states the one-shot shape explicitly' >&2
+  cat "$one_shot_err" >&2
+  exit 1
+fi
+
+# Each negative probe changes exactly one field of the reviewed example, so
+# the denial is attributable to that field and to the one-shot clause only.
+sed 's/^  completions: 1$/  completions: 3/' "$manifest" > "$one_shot"
+assert_one_shot_denied 'completions=3' "$one_shot" "$one_shot_denial_re"
+
+sed 's/^  parallelism: 1$/  parallelism: 3/' "$manifest" > "$one_shot"
+assert_one_shot_denied 'parallelism=3' "$one_shot" "$one_shot_denial_re"
+
+# Indexed completion mode is API-valid on its own: the API server defaults
+# completions and parallelism to 1 before validating it.
+sed 's/^  completionMode: NonIndexed$/  completionMode: Indexed/' "$manifest" > "$one_shot"
+assert_one_shot_denied 'completionMode=Indexed' "$one_shot" "$one_shot_denial_re"
+
+sed 's/^      restartPolicy: Never$/      restartPolicy: OnFailure/' "$manifest" > "$one_shot"
+assert_one_shot_denied 'restartPolicy=OnFailure' "$one_shot" "$one_shot_denial_re"
+
+# manualSelector cannot be probed as a single field: once the caller owns the
+# selector, the API schema requires an explicit spec.selector that matches
+# the Pod template labels, otherwise the request is rejected by schema
+# validation before admission ever runs. This probe is therefore a documented
+# TWO-field change (manualSelector plus the required selector) and it proves
+# the one-shot clause rejects a caller-owned selector; it does not isolate the
+# manualSelector clause on its own.
+awk '
+  /^  completions: 1$/ && !inserted {
+    print "  manualSelector: true"
+    print "  selector:"
+    print "    matchLabels:"
+    print "      app.kubernetes.io/component: verifiedops-observer"
+    inserted=1
+  }
+  { print }
+' "$manifest" > "$one_shot"
+assert_one_shot_denied 'manualSelector=true with a required matching selector' "$one_shot" "$one_shot_denial_re"
+
 # The only allowed UPDATE is the reviewed suspended Job's suspend=true -> false
 # transition. A template mutation in that same update must fail closed.
 sed 's/name: verifiedops-observer-once-example/name: verifiedops-observer-policy-update-test/' "$manifest" > "$update_manifest"
@@ -204,6 +336,10 @@ readfield() {
 [[ "$(readfield '{.spec.template.spec.volumes[0].projected.sources[0].serviceAccountToken.expirationSeconds}')" == 600 ]]
 [[ "$(readfield '{.spec.template.spec.volumes[3].csi.readOnly}')" == true ]]
 [[ "$(readfield '{.spec.backoffLimit}')" == 0 ]]
+[[ "$(readfield '{.spec.completions}')" == 1 ]]
+[[ "$(readfield '{.spec.parallelism}')" == 1 ]]
+[[ "$(readfield '{.spec.completionMode}')" == NonIndexed ]]
+[[ "$(readfield '{.spec.template.spec.restartPolicy}')" == Never ]]
 
 # The placeholder image digest must not accidentally become a runnable
 # release artifact. The suspended template must have no actual Job created.
