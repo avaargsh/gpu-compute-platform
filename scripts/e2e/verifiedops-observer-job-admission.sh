@@ -247,7 +247,143 @@ if kubectl apply --dry-run=server -f "$mutated" >/dev/null 2>&1; then
 fi
 
 # A user must not bypass the Job policy by directly creating a Pod that selects
-# the signer-bearing ServiceAccount and overrides the process.
+# the signer-bearing ServiceAccount and overrides the process, host namespace,
+# privilege or capability envelope. The probe base is the reviewed Job's Pod
+# template projected verbatim to a direct Pod (same identity, security context,
+# env, volumes and mounts; only restartPolicy is Pod-native and already Never),
+# so a single-field mutation isolates exactly one policy constraint.
+pod_base="$(mktemp)"
+cat <<'POD' > "$pod_base"
+apiVersion: v1
+kind: Pod
+metadata:
+  name: verifiedops-observer-direct-pod-probe
+  namespace: verifiedops-observer
+spec:
+  serviceAccountName: verifiedops-observer
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: observer
+      image: example.invalid/verifiedops-observer@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      env:
+        - name: VERIFIEDOPS_TICKET_FILE
+          value: /run/verifiedops/ticket/ticket.dsse.json
+        - name: VERIFIEDOPS_DISPATCHER_PUBKEY_FILE
+          value: /run/verifiedops/root/dispatcher.pub.b64
+        - name: VERIFIEDOPS_DISPATCHER_KEY_ID
+          value: operator-provisioned-dispatcher-key-id
+        - name: VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE
+          value: /run/verifiedops/identity/observer.pk8.pem
+        - name: VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID
+          value: operator-provisioned-observer-key-id
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      volumeMounts:
+        - name: kubernetes-api-access
+          mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+          readOnly: true
+        - name: signed-work-ticket
+          mountPath: /run/verifiedops/ticket
+          readOnly: true
+        - name: pinned-dispatcher-root
+          mountPath: /run/verifiedops/root
+          readOnly: true
+        - name: external-signer
+          mountPath: /run/verifiedops/identity
+          readOnly: true
+  volumes:
+    - name: kubernetes-api-access
+      projected:
+        defaultMode: 0444
+        sources:
+          - serviceAccountToken:
+              path: token
+              expirationSeconds: 600
+          - configMap:
+              name: kube-root-ca.crt
+              items:
+                - key: ca.crt
+                  path: ca.crt
+          - downwardAPI:
+              items:
+                - path: namespace
+                  fieldRef:
+                    fieldPath: metadata.namespace
+    - name: signed-work-ticket
+      secret:
+        secretName: verifiedops-observer-once-ticket
+        optional: false
+    - name: pinned-dispatcher-root
+      configMap:
+        name: verifiedops-observer-dispatcher-pinned-root
+        optional: false
+    - name: external-signer
+      csi:
+        driver: secrets-store.csi.k8s.io
+        readOnly: true
+        volumeAttributes:
+          secretProviderClass: verifiedops-observer-external-signing-key
+POD
+
+# Baseline: the unmutated projected Pod must be admitted by server dry-run, or
+# every downstream single-field denial is unattributable to that field.
+if ! kubectl apply --dry-run=server -f "$pod_base" >/dev/null 2>"$unsafe.err"; then
+  echo 'Baseline projected direct Observer Pod was rejected before any mutation' >&2
+  cat "$unsafe.err" >&2
+  exit 1
+fi
+
+# Each negative mutates exactly one projection field and asserts the policy's
+# own denial message (not merely any kubectl failure) so an unrelated error can
+# never be mistaken for the intended constraint.
+pod_negative="$(mktemp)"
+trap 'rm -f "$canary_err" "$unsafe" "$unsafe.err" "$update_manifest" "$pod_base" "$pod_negative" "$pod_negative.err"' EXIT
+assert_pod_denied() {
+  local label="$1" expected="$2"
+  if kubectl apply --dry-run=server -f "$pod_negative" >/dev/null 2>"$pod_negative.err"; then
+    echo "Admission policy accepted a direct Observer Pod with $label" >&2
+    cat "$pod_negative" >&2
+    exit 1
+  fi
+  if ! grep -Fq "$expected" "$pod_negative.err"; then
+    echo "Direct Observer Pod $label was not denied by the expected policy message" >&2
+    cat "$pod_negative.err" >&2
+    exit 1
+  fi
+}
+pod_sc_message='VerifiedOps Pods must use the dedicated identity, bounded token and reviewed Pod security context, without init or ephemeral containers'
+pod_container_message='Direct Observer Pods must run only the pinned, non-overridable Observer process'
+
+# Each host-namespace flag is a distinct Pod-level field; mutate exactly one.
+for host_field in hostNetwork hostPID hostIPC; do
+  sed "s/^  restartPolicy: Never$/  restartPolicy: Never\\n  ${host_field}: true/" "$pod_base" > "$pod_negative"
+  assert_pod_denied "${host_field}: true" "$pod_sc_message"
+done
+
+# Kubernetes schema itself rejects privileged:true together with
+# allowPrivilegeEscalation:false, so the realistic privileged bypass replaces
+# the (policy-mandated) privilege-escalation guard. Any admitted form must still
+# be denied by the policy's own privileged clause.
+sed 's/^        allowPrivilegeEscalation: false$/        privileged: true/' "$pod_base" > "$pod_negative"
+assert_pod_denied 'privileged: true' "$pod_container_message"
+
+sed 's/^          drop: \["ALL"\]$/          drop: ["ALL"]\n          add: ["NET_RAW"]/' "$pod_base" > "$pod_negative"
+assert_pod_denied 'capabilities add override' "$pod_container_message"
+
+# The original minimal bypass probe must also remain denied.
 if cat <<'POD' | kubectl apply --dry-run=server -f - >/dev/null 2>&1
 apiVersion: v1
 kind: Pod
