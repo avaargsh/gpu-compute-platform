@@ -1,0 +1,63 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: verifiedops-observer-job-envelope
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        app.kubernetes.io/component: verifiedops-observer
+    resourceRules:
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs"]
+  validations:
+    - expression: has(object.metadata.labels) && object.metadata.labels['app.kubernetes.io/component'] == 'verifiedops-observer' && (object.metadata.name.startsWith('verifiedops-observer-') || object.metadata.generateName.startsWith('verifiedops-observer-')) && (!has(object.metadata.finalizers) || object.metadata.finalizers.size() == 0) && (!has(object.metadata.ownerReferences) || object.metadata.ownerReferences.size() == 0)
+      message: only explicitly named Verified Operations Observer Jobs are allowed
+    - expression: object.spec.backoffLimit == 0 && object.spec.activeDeadlineSeconds <= 120 && object.spec.ttlSecondsAfterFinished <= 300 && !has(object.spec.podFailurePolicy) && !has(object.spec.successPolicy) && !has(object.spec.backoffLimitPerIndex) && !has(object.spec.maxFailedIndexes)
+      message: Observer Jobs must be one-shot, bounded, and must not define alternate retry or success policies
+    - expression: "request.operation == 'CREATE' ? object.spec.suspend == true : request.operation == 'UPDATE' ? oldObject.spec.suspend == true && object.spec.suspend == false && oldObject.spec.template == object.spec.template && oldObject.spec.backoffLimit == object.spec.backoffLimit && oldObject.spec.activeDeadlineSeconds == object.spec.activeDeadlineSeconds && oldObject.spec.ttlSecondsAfterFinished == object.spec.ttlSecondsAfterFinished && (has(oldObject.spec.completions) == has(object.spec.completions) && (!has(oldObject.spec.completions) || oldObject.spec.completions == object.spec.completions)) && (has(oldObject.spec.parallelism) == has(object.spec.parallelism) && (!has(oldObject.spec.parallelism) || oldObject.spec.parallelism == object.spec.parallelism)) && (has(oldObject.spec.completionMode) == has(object.spec.completionMode) && (!has(oldObject.spec.completionMode) || oldObject.spec.completionMode == object.spec.completionMode)) && (has(oldObject.spec.manualSelector) == has(object.spec.manualSelector) && (!has(oldObject.spec.manualSelector) || oldObject.spec.manualSelector == object.spec.manualSelector)) && (has(oldObject.spec.selector) == has(object.spec.selector) && (!has(oldObject.spec.selector) || oldObject.spec.selector == object.spec.selector)) && (has(oldObject.spec.podFailurePolicy) == has(object.spec.podFailurePolicy) && (!has(oldObject.spec.podFailurePolicy) || oldObject.spec.podFailurePolicy == object.spec.podFailurePolicy)) && (has(oldObject.spec.successPolicy) == has(object.spec.successPolicy) && (!has(oldObject.spec.successPolicy) || oldObject.spec.successPolicy == object.spec.successPolicy)) && (has(oldObject.spec.backoffLimitPerIndex) == has(object.spec.backoffLimitPerIndex) && (!has(oldObject.spec.backoffLimitPerIndex) || oldObject.spec.backoffLimitPerIndex == object.spec.backoffLimitPerIndex)) && (has(oldObject.spec.maxFailedIndexes) == has(object.spec.maxFailedIndexes) && (!has(oldObject.spec.maxFailedIndexes) || oldObject.spec.maxFailedIndexes == object.spec.maxFailedIndexes)) && (has(oldObject.metadata.annotations) == has(object.metadata.annotations) && (!has(oldObject.metadata.annotations) || oldObject.metadata.annotations == object.metadata.annotations)) && (has(oldObject.metadata.finalizers) == has(object.metadata.finalizers) && (!has(oldObject.metadata.finalizers) || oldObject.metadata.finalizers == object.metadata.finalizers)) && (has(oldObject.metadata.ownerReferences) == has(object.metadata.ownerReferences) && (!has(oldObject.metadata.ownerReferences) || oldObject.metadata.ownerReferences == object.metadata.ownerReferences)) && oldObject.metadata.labels == object.metadata.labels : false"
+      message: create suspended only; the sole permitted update is unsuspending the exact reviewed Job without changing its execution envelope
+    - expression: object.spec.template.spec.serviceAccountName == 'verifiedops-observer' && object.spec.template.spec.automountServiceAccountToken == false && object.spec.template.spec.securityContext.runAsNonRoot == true && object.spec.template.spec.securityContext.runAsUser == 65532 && object.spec.template.spec.securityContext.runAsGroup == 65532 && object.spec.template.spec.securityContext.seccompProfile.type == 'RuntimeDefault' && (!has(object.spec.template.spec.hostNetwork) || object.spec.template.spec.hostNetwork != true) && (!has(object.spec.template.spec.hostPID) || object.spec.template.spec.hostPID != true) && (!has(object.spec.template.spec.hostIPC) || object.spec.template.spec.hostIPC != true) && (!has(object.spec.template.spec.initContainers) || object.spec.template.spec.initContainers.size() == 0) && (!has(object.spec.template.spec.imagePullSecrets) || object.spec.template.spec.imagePullSecrets.size() == 0)
+      message: Observer Pod identity, non-root security context, token handling, and process isolation are mandatory
+    - expression: object.spec.template.spec.containers.size() == 1 && object.spec.template.spec.containers[0].name == 'observer' && object.spec.template.spec.containers[0].image == params.data.observerImage
+      message: the Observer image must exactly match the operator-pinned digest
+    - expression: has(object.spec.template.spec.containers[0].securityContext) && object.spec.template.spec.containers[0].securityContext.runAsNonRoot == true && object.spec.template.spec.containers[0].securityContext.runAsUser == 65532 && object.spec.template.spec.containers[0].securityContext.runAsGroup == 65532 && object.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation == false && object.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem == true && (!has(object.spec.template.spec.containers[0].securityContext.privileged) || object.spec.template.spec.containers[0].securityContext.privileged != true) && has(object.spec.template.spec.containers[0].securityContext.capabilities) && object.spec.template.spec.containers[0].securityContext.capabilities.drop == ['ALL']
+      message: Observer container must use the pinned non-root identity, read-only root filesystem, no privilege escalation, and drop all capabilities
+    - expression: (!has(object.spec.template.spec.containers[0].command) || object.spec.template.spec.containers[0].command.size() == 0) && (!has(object.spec.template.spec.containers[0].args) || object.spec.template.spec.containers[0].args.size() == 0) && (!has(object.spec.template.spec.containers[0].ports) || object.spec.template.spec.containers[0].ports.size() == 0) && (!has(object.spec.template.spec.containers[0].envFrom) || object.spec.template.spec.containers[0].envFrom.size() == 0) && (!has(object.spec.template.spec.containers[0].lifecycle) || object.spec.template.spec.containers[0].lifecycle == null) && (!has(object.spec.template.spec.containers[0].livenessProbe) || object.spec.template.spec.containers[0].livenessProbe == null) && (!has(object.spec.template.spec.containers[0].readinessProbe) || object.spec.template.spec.containers[0].readinessProbe == null) && (!has(object.spec.template.spec.containers[0].startupProbe) || object.spec.template.spec.containers[0].startupProbe == null) && (!has(object.spec.template.spec.containers[0].volumeDevices) || object.spec.template.spec.containers[0].volumeDevices.size() == 0)
+      message: Observer command, args, ports, and envFrom cannot be overridden
+    - expression: object.spec.template.spec.containers[0].env.size() == 5 && object.spec.template.spec.containers[0].env.all(e, !has(e.valueFrom)) && object.spec.template.spec.containers[0].env.exists(e, e.name == 'VERIFIEDOPS_TICKET_FILE' && e.value == '/run/verifiedops/ticket/ticket.dsse.json') && object.spec.template.spec.containers[0].env.exists(e, e.name == 'VERIFIEDOPS_DISPATCHER_PUBKEY_FILE' && e.value == '/run/verifiedops/root/dispatcher.pub.b64') && object.spec.template.spec.containers[0].env.exists(e, e.name == 'VERIFIEDOPS_DISPATCHER_KEY_ID' && e.value == params.data.dispatcherKeyID) && object.spec.template.spec.containers[0].env.exists(e, e.name == 'VERIFIEDOPS_OBSERVER_SIGNING_KEY_FILE' && e.value == '/run/verifiedops/identity/observer.pk8.pem') && object.spec.template.spec.containers[0].env.exists(e, e.name == 'VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID' && e.value == params.data.observerKeyID)
+      message: Observer may receive only the five reviewed, operator-pinned environment variables
+    - expression: object.spec.template.spec.volumes.size() == 4 && object.spec.template.spec.volumes.all(v, !has(v.hostPath) && v.name in ['kubernetes-api-access', 'signed-work-ticket', 'pinned-dispatcher-root', 'external-signer'])
+      message: Observer volumes must be the exact reviewed four-volume set and must not use hostPath
+    - expression: object.spec.template.spec.volumes.exists(v, v.name == 'kubernetes-api-access' && has(v.projected) && v.projected.sources.size() == 3 && v.projected.sources.exists(s, has(s.serviceAccountToken) && s.serviceAccountToken.path == 'token' && s.serviceAccountToken.expirationSeconds == 600 && !has(s.serviceAccountToken.audience)) && v.projected.sources.exists(s, has(s.configMap) && s.configMap.name == 'kube-root-ca.crt' && s.configMap.items.size() == 1 && s.configMap.items[0].key == 'ca.crt' && s.configMap.items[0].path == 'ca.crt') && v.projected.sources.exists(s, has(s.downwardAPI) && s.downwardAPI.items.size() == 1 && s.downwardAPI.items[0].path == 'namespace' && s.downwardAPI.items[0].fieldRef.fieldPath == 'metadata.namespace'))
+      message: Kubernetes identity must be an explicit projected token with a 600-second lifetime
+    - expression: object.spec.template.spec.volumes.exists(v, v.name == 'signed-work-ticket' && has(v.secret) && v.secret.secretName == 'verifiedops-observer-once-ticket' && v.secret.optional == false)
+      message: Observer work ticket must come from the dedicated required Secret
+    - expression: object.spec.template.spec.volumes.exists(v, v.name == 'pinned-dispatcher-root' && has(v.configMap) && v.configMap.name == 'verifiedops-observer-dispatcher-pinned-root' && v.configMap.optional == false)
+      message: Dispatcher public trust root must come from the dedicated required ConfigMap
+    - expression: object.spec.template.spec.volumes.exists(v, v.name == 'external-signer' && has(v.csi) && v.csi.driver == 'secrets-store.csi.k8s.io' && v.csi.readOnly == true && v.csi.volumeAttributes['secretProviderClass'] == params.data.secretProviderClass)
+      message: Observer private key must be mounted read-only through the operator-pinned external CSI provider
+    - expression: object.spec.template.spec.containers[0].volumeMounts.size() == 4 && object.spec.template.spec.containers[0].volumeMounts.all(m, m.readOnly == true && ((m.name == 'kubernetes-api-access' && m.mountPath == '/var/run/secrets/kubernetes.io/serviceaccount') || (m.name == 'signed-work-ticket' && m.mountPath == '/run/verifiedops/ticket') || (m.name == 'pinned-dispatcher-root' && m.mountPath == '/run/verifiedops/root') || (m.name == 'external-signer' && m.mountPath == '/run/verifiedops/identity'))) && object.spec.template.spec.containers[0].volumeMounts.exists(m, m.name == 'kubernetes-api-access' && m.mountPath == '/var/run/secrets/kubernetes.io/serviceaccount') && object.spec.template.spec.containers[0].volumeMounts.exists(m, m.name == 'signed-work-ticket' && m.mountPath == '/run/verifiedops/ticket') && object.spec.template.spec.containers[0].volumeMounts.exists(m, m.name == 'pinned-dispatcher-root' && m.mountPath == '/run/verifiedops/root') && object.spec.template.spec.containers[0].volumeMounts.exists(m, m.name == 'external-signer' && m.mountPath == '/run/verifiedops/identity')
+      message: Observer mounts must be read-only and limited to the four reviewed input paths
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: verifiedops-observer-job-envelope
+spec:
+  policyName: verifiedops-observer-job-envelope
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        app.kubernetes.io/component: verifiedops-observer
+  paramRef:
+    name: verifiedops-observer-policy
+    namespace: verifiedops-observer
+    parameterNotFoundAction: Deny
+  validationActions: ["Deny"]
