@@ -35,6 +35,10 @@ if [[ -z "$policy_generation" || "$observed_generation" != "$policy_generation" 
   kubectl get validatingadmissionpolicy verifiedops-observer-job-envelope -o yaml >&2 || true
   exit 1
 fi
+policy=deploy/kubernetes/verifiedops-observer/observer-admission-policy.example.yaml
+kubectl apply -f "$policy" >/dev/null
+# Allow the additional Job and Pod guards to propagate before probing.
+sleep 2
 kubectl apply --dry-run=server -f "$manifest" >/dev/null
 canary_err="$(mktemp)"
 canary_manifest="$(mktemp)"
@@ -205,4 +209,63 @@ if kubectl -n verifiedops-observer get job verifiedops-observer-once-example >/d
   echo 'Observer example was created by a dry-run acceptance test' >&2
   exit 1
 fi
-echo 'PASS: API-server dry-run and suspended least-privilege Observer Job assertions'
+
+# Prove the API server rejects an unsafe Job override (not merely that the
+# manifest looks correct client-side).
+mutated="$(mktemp)"
+trap 'rm -f "$mutated"' EXIT
+sed 's/allowPrivilegeEscalation: false/allowPrivilegeEscalation: true/' "$manifest" > "$mutated"
+if kubectl apply --dry-run=server -f "$mutated" >/dev/null 2>&1; then
+  echo 'Admission policy accepted an Observer Job with privilege escalation enabled' >&2
+  exit 1
+fi
+
+# Keep the environment list length unchanged while replacing one required key
+# with a duplicate of another. This proves name uniqueness is enforced rather
+# than relying only on the exact list length.
+sed 's/VERIFIEDOPS_OBSERVER_SIGNING_KEY_ID/VERIFIEDOPS_DISPATCHER_KEY_ID/' "$manifest" > "$mutated"
+if kubectl apply --dry-run=server -f "$mutated" >/dev/null 2>&1; then
+  echo 'Admission policy accepted duplicate Observer environment variable names' >&2
+  exit 1
+fi
+
+# Init containers execute arbitrary code before the pinned Observer process
+# and could read the signer/ticket volumes. Keep the Job otherwise unchanged.
+awk '
+  /^      containers:$/ && !inserted {
+    print "      initContainers:"
+    print "        - name: injected-init"
+    print "          image: busybox:1.36"
+    print "          command: [\"sh\", \"-c\", \"id\"]"
+    inserted=1
+  }
+  { print }
+' "$manifest" > "$mutated"
+if kubectl apply --dry-run=server -f "$mutated" >/dev/null 2>&1; then
+  echo 'Admission policy accepted an injected Observer init container' >&2
+  exit 1
+fi
+
+# A user must not bypass the Job policy by directly creating a Pod that selects
+# the signer-bearing ServiceAccount and overrides the process.
+if cat <<'POD' | kubectl apply --dry-run=server -f - >/dev/null 2>&1
+apiVersion: v1
+kind: Pod
+metadata:
+  name: observer-policy-bypass-probe
+  namespace: verifiedops-observer
+spec:
+  serviceAccountName: verifiedops-observer
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  containers:
+    - name: observer
+      image: example.invalid/verifiedops-observer@sha256:0000000000000000000000000000000000000000000000000000000000000000
+      command: ["sh", "-c", "id"]
+POD
+then
+  echo 'Admission policy accepted a direct Pod with an overridden process' >&2
+  exit 1
+fi
+
+echo 'PASS: API-server admission rejects unsafe Job overrides and direct-Pod bypasses'

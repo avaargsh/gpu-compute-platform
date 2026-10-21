@@ -5,8 +5,9 @@
 set -euo pipefail
 
 namespace="${1:-}"
+identity_namespace="${2:-verifiedops-observer}"
 if [[ ! "$namespace" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || (( ${#namespace} > 63 )); then
-  echo "usage: $0 <existing-project-namespace> (DNS-1123 label)" >&2
+  echo "usage: $0 <existing-project-namespace> [observer-identity-namespace] (DNS-1123 labels)" >&2
   exit 2
 fi
 case "$namespace" in
@@ -17,7 +18,11 @@ case "$namespace" in
 esac
 
 kubectl get namespace "$namespace" >/dev/null
-kubectl get serviceaccount verifiedops-observer -n verifiedops-observer >/dev/null
+if [[ ! "$identity_namespace" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || (( ${#identity_namespace} > 63 )); then
+  echo "invalid Observer identity namespace: $identity_namespace" >&2
+  exit 2
+fi
+kubectl get serviceaccount verifiedops-observer -n "$identity_namespace" >/dev/null
 
 # This Role is strictly namespace-scoped. The Observer's in-cluster client
 # requires GET job, LIST pods and GET pod. No Job/Pod mutation, exec/log,
@@ -48,5 +53,5 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: verifiedops-observer
-    namespace: verifiedops-observer
+    namespace: $identity_namespace
 YAML
