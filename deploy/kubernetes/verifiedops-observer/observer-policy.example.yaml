@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: verifiedops-observer-policy
+  namespace: verifiedops-observer
+  labels:
+    app.kubernetes.io/part-of: gpu-compute-platform
+    app.kubernetes.io/component: verifiedops-observer
+data:
+  # Replace with the exact operator-reviewed image digest in BOTH this ConfigMap
+  # and observer-job.example.yaml before installing a production policy.
+  observerImage: example.invalid/verifiedops-observer@sha256:0000000000000000000000000000000000000000000000000000000000000000
+  dispatcherKeyID: operator-provisioned-dispatcher-key-id
+  observerKeyID: operator-provisioned-observer-key-id
+  secretProviderClass: verifiedops-observer-external-signing-key

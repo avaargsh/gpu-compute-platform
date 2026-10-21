@@ -2,7 +2,8 @@ name: Verified Operations / real Observer RBAC boundaries
 
 on:
   pull_request:
-    branches: [master]
+    # Also run for stacked acceptance PRs based on the diagnostics branch.
+    branches: [master, fix/verifiedops-vap-acceptance-diagnostics]
     paths:
       - "deploy/kubernetes/verifiedops-observer/**"
       - "scripts/e2e/verifiedops-observer-*.sh"
