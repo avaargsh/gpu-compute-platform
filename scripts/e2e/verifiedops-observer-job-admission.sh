@@ -36,7 +36,7 @@ trap 'rm -f "$canary_err" "$canary_manifest" "$unsafe" "$unsafe.err" "$update_ma
 # installed template is accepted, but only together with that template's own
 # identity and message. An unrelated API, schema or kubectl failure is never
 # accepted as proof.
-envelope_denial="ValidatingAdmissionPolicy 'verifiedops-observer-job-envelope' with binding 'verifiedops-observer-job-envelope' denied request: Observer Jobs must run exactly one Pod with completions=1, parallelism=1, NonIndexed completion mode, no manual selector, and a Never restart policy"
+envelope_denial="ValidatingAdmissionPolicy 'verifiedops-observer-job-envelope' with binding 'verifiedops-observer-job-envelope' denied request: Observer Jobs must declare a one-shot configuration with completions=1, parallelism=1, NonIndexed completion mode, no manual selector, and a Never restart policy"
 guard_denial="ValidatingAdmissionPolicy 'verifiedops-observer-job-guard' with binding 'verifiedops-observer-job-guard' denied request: VerifiedOps Job must be single-execution: completions=1, parallelism=1, NonIndexed completion mode, no manual selector, and a Never restart policy"
 one_shot_denial_re="$envelope_denial|$guard_denial"
 

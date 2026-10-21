@@ -151,7 +151,7 @@ func assertOneShotClause(t *testing.T, policy admissionregistrationv1.Validating
 func TestObserverJobAdmissionPoliciesEnforceSingleExecutionShape(t *testing.T) {
 	envelope := findPolicy(t, readAdmissionPolicies(t, observerJobPolicyPath), "verifiedops-observer-job-envelope")
 	assertOneShotClause(t, envelope,
-		"Observer Jobs must run exactly one Pod with completions=1, parallelism=1, NonIndexed completion mode, no manual selector, and a Never restart policy")
+		"Observer Jobs must declare a one-shot configuration with completions=1, parallelism=1, NonIndexed completion mode, no manual selector, and a Never restart policy")
 
 	guard := findPolicy(t, readAdmissionPolicies(t, observerGuardPath), "verifiedops-observer-job-guard")
 	assertOneShotClause(t, guard,
