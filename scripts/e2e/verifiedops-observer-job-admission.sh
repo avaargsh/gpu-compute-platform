@@ -42,7 +42,14 @@ sleep 2
 kubectl apply --dry-run=server -f "$manifest" >/dev/null
 canary_err="$(mktemp)"
 canary_manifest="$(mktemp)"
-trap 'rm -f "$canary_err" "$canary_manifest"' EXIT
+unsafe="$(mktemp)"
+update_manifest="$(mktemp)"
+mutated="$(mktemp)"
+pod_base="$(mktemp)"
+pod_negative="$(mktemp)"
+# Single EXIT trap: remove every temporary created by this script. Reassigning
+# the trap later silently dropped earlier entries, so declare the full list once.
+trap 'rm -f "$canary_err" "$canary_manifest" "$unsafe" "$unsafe.err" "$update_manifest" "$mutated" "$pod_base" "$pod_negative" "$pod_negative.err"' EXIT
 
 # Verify the API server actually evaluates VAP bindings in this cluster.
 # First use an intentionally unscoped canary to separate VAP engine behavior
@@ -127,9 +134,6 @@ fi
 
 # Prove the policy rejects a mutable process and an image that differs from
 # the operator-pinned digest. Neither negative fixture is persisted.
-unsafe="$(mktemp)"
-update_manifest="$(mktemp)"
-trap 'rm -f "$canary_err" "$unsafe" "$unsafe.err" "$update_manifest"' EXIT
 sed '/image: example.invalid\/verifiedops-observer@/a\          command: ["sh"]' "$manifest" > "$unsafe"
 if kubectl create --dry-run=server -f "$unsafe" >/dev/null 2>"$unsafe.err"; then
   echo 'Observer Job with command override was admitted' >&2
@@ -212,8 +216,6 @@ fi
 
 # Prove the API server rejects an unsafe Job override (not merely that the
 # manifest looks correct client-side).
-mutated="$(mktemp)"
-trap 'rm -f "$mutated"' EXIT
 sed 's/allowPrivilegeEscalation: false/allowPrivilegeEscalation: true/' "$manifest" > "$mutated"
 if kubectl apply --dry-run=server -f "$mutated" >/dev/null 2>&1; then
   echo 'Admission policy accepted an Observer Job with privilege escalation enabled' >&2
@@ -251,8 +253,8 @@ fi
 # privilege or capability envelope. The probe base is the reviewed Job's Pod
 # template projected verbatim to a direct Pod (same identity, security context,
 # env, volumes and mounts; only restartPolicy is Pod-native and already Never),
-# so a single-field mutation isolates exactly one policy constraint.
-pod_base="$(mktemp)"
+# so a single-field mutation isolates exactly one policy constraint (the
+# privileged probe below is the documented exception).
 cat <<'POD' > "$pod_base"
 apiVersion: v1
 kind: Pod
@@ -346,11 +348,11 @@ if ! kubectl apply --dry-run=server -f "$pod_base" >/dev/null 2>"$unsafe.err"; t
   exit 1
 fi
 
-# Each negative mutates exactly one projection field and asserts the policy's
-# own denial message (not merely any kubectl failure) so an unrelated error can
-# never be mistaken for the intended constraint.
-pod_negative="$(mktemp)"
-trap 'rm -f "$canary_err" "$unsafe" "$unsafe.err" "$update_manifest" "$pod_base" "$pod_negative" "$pod_negative.err"' EXIT
+# Each negative asserts the policy's own denial message (not merely any kubectl
+# failure) so an unrelated error can never be mistaken for the intended
+# constraint. The host-flag and capabilities.add negatives mutate exactly one
+# projection field; the privileged negative is a documented two-field change
+# (see below) and is labeled as such.
 assert_pod_denied() {
   local label="$1" expected="$2"
   if kubectl apply --dry-run=server -f "$pod_negative" >/dev/null 2>"$pod_negative.err"; then
@@ -375,10 +377,17 @@ done
 
 # Kubernetes schema itself rejects privileged:true together with
 # allowPrivilegeEscalation:false, so the realistic privileged bypass replaces
-# the (policy-mandated) privilege-escalation guard. Any admitted form must still
-# be denied by the policy's own privileged clause.
+# the (policy-mandated) privilege-escalation guard. This is therefore a
+# TWO-field change (privileged added, allowPrivilegeEscalation removed), so it
+# proves the container validation as a whole rejects a privileged Pod; it does
+# NOT isolate the newly added privileged clause. The decisive clause here is the
+# pre-existing allowPrivilegeEscalation == false. The new privileged clause is
+# deliberately redundant defense-in-depth: no Pod can satisfy
+# allowPrivilegeEscalation == false together with privileged: true without first
+# failing API schema validation, so the privileged clause is unreachable as the
+# decisive deny.
 sed 's/^        allowPrivilegeEscalation: false$/        privileged: true/' "$pod_base" > "$pod_negative"
-assert_pod_denied 'privileged: true' "$pod_container_message"
+assert_pod_denied 'privileged: true (combined container validation)' "$pod_container_message"
 
 sed 's/^          drop: \["ALL"\]$/          drop: ["ALL"]\n          add: ["NET_RAW"]/' "$pod_base" > "$pod_negative"
 assert_pod_denied 'capabilities add override' "$pod_container_message"
