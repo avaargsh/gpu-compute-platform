@@ -26,6 +26,7 @@ jobs:
         run: |
           bash -n scripts/e2e/verifiedops-observer-project-rbac.sh
           bash -n scripts/e2e/verifiedops-observer-rbac-acceptance.sh
+          bash -n scripts/e2e/verifiedops-observer-job-admission.sh
       - name: Install pinned kind
         run: |
           curl --fail --location --retry 3 --output /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
