@@ -138,7 +138,27 @@ fi
 # The only allowed UPDATE is the reviewed suspended Job's suspend=true -> false
 # transition. A template mutation in that same update must fail closed.
 sed 's/name: verifiedops-observer-once-example/name: verifiedops-observer-policy-update-test/' "$manifest" > "$update_manifest"
-kubectl apply -f "$update_manifest" >/dev/null
+# Deleting a VAP and its binding is eventually propagated to admission
+# evaluation. Do not let a stale cached canary reject the next legitimate Job
+# CREATE; retry only that exact transient denial and fail on every other error.
+update_job_created=false
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if kubectl apply -f "$update_manifest" >/dev/null 2>"$canary_err"; then
+    update_job_created=true
+    break
+  fi
+  if ! grep -Fq 'temporary VAP engine canary must deny' "$canary_err"; then
+    echo "Observer policy update fixture failed for a reason other than stale canary propagation" >&2
+    cat "$canary_err" >&2
+    exit 1
+  fi
+  sleep 1
+done
+if [[ "$update_job_created" != true ]]; then
+  echo "Temporary VAP canary remained active after deletion; refusing to continue policy acceptance" >&2
+  cat "$canary_err" >&2
+  exit 1
+fi
 kubectl -n verifiedops-observer patch job verifiedops-observer-policy-update-test --type=merge --patch '{"spec":{"suspend":false}}' --dry-run=server >/dev/null
 if kubectl -n verifiedops-observer patch job verifiedops-observer-policy-update-test --type=json --patch='[{"op":"replace","path":"/spec/suspend","value":false},{"op":"replace","path":"/spec/template/spec/containers/0/image","value":"attacker.invalid/observer@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]' --dry-run=server >/dev/null 2>&1; then
   echo 'Observer Job template mutation during unsuspend was admitted' >&2
