@@ -99,6 +99,28 @@ fi
 kubectl delete validatingadmissionpolicybinding verifiedops-observer-vap-canary --wait=true
 kubectl delete validatingadmissionpolicy verifiedops-observer-vap-canary --wait=true
 
+# Deleting the canary object is asynchronous with respect to API-server
+# admission caches. Wait until a valid reviewed Job is no longer rejected by
+# the removed canary before exercising the production policy's update path.
+canary_cleared=false
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if kubectl apply --dry-run=server -f "$manifest" >/dev/null 2>"$canary_err"; then
+    canary_cleared=true
+    break
+  fi
+  if ! grep -Fq 'temporary VAP engine canary must deny' "$canary_err"; then
+    echo "Reviewed Observer Job failed after canary cleanup for a reason other than stale canary admission state" >&2
+    cat "$canary_err" >&2
+    exit 1
+  fi
+  sleep 1
+done
+if [[ "$canary_cleared" != true ]]; then
+  echo "VAP canary removal did not propagate to API-server admission within 10 attempts" >&2
+  cat "$canary_err" >&2
+  exit 1
+fi
+
 # Prove the policy rejects a mutable process and an image that differs from
 # the operator-pinned digest. Neither negative fixture is persisted.
 unsafe="$(mktemp)"
