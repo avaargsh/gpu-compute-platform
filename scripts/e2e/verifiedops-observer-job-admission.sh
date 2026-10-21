@@ -37,7 +37,8 @@ if [[ -z "$policy_generation" || "$observed_generation" != "$policy_generation" 
 fi
 kubectl apply --dry-run=server -f "$manifest" >/dev/null
 canary_err="$(mktemp)"
-trap 'rm -f "$canary_err"' EXIT
+canary_manifest="$(mktemp)"
+trap 'rm -f "$canary_err" "$canary_manifest"' EXIT
 
 # Verify the API server actually evaluates VAP bindings in this cluster.
 # First use an intentionally unscoped canary to separate VAP engine behavior
@@ -68,23 +69,33 @@ spec:
   policyName: verifiedops-observer-vap-canary
   validationActions: ["Deny"]
 VAP_CANARY
-# Use a real CREATE rather than dry-run: this isolates whether the API
-# server invokes VAP on ordinary admission requests. The reviewed template is
-# suspended, and is deleted immediately if the canary unexpectedly admits it.
-if kubectl create -f "$manifest" >/dev/null 2>"$canary_err"; then
-  kubectl delete -f "$manifest" --wait=true >/dev/null 2>&1 || true
-  echo "VAP canary failed: API server admitted a suspended Job despite an unscoped deny-all policy" >&2
+# Use real CREATE requests rather than dry-run. API-server admission
+# configuration is propagated asynchronously after a policy/binding is created;
+# retry with distinct suspended Job names so an initial admitted request cannot
+# be mistaken for steady-state enforcement. Any admitted fixture is deleted
+# immediately and never unsuspended.
+canary_denied=false
+for attempt in 1 2 3 4 5; do
+  sed "s/name: verifiedops-observer-once-example/name: verifiedops-observer-vap-canary-$attempt/" "$manifest" > "$canary_manifest"
+  if kubectl create -f "$canary_manifest" >/dev/null 2>"$canary_err"; then
+    kubectl delete -f "$canary_manifest" --wait=true >/dev/null 2>&1 || true
+    sleep 1
+    continue
+  fi
+  if ! grep -Eiq 'denied|forbidden|validation|temporary VAP engine canary' "$canary_err"; then
+    echo "VAP canary request failed for a reason other than admission denial" >&2
+    cat "$canary_err" >&2
+    exit 1
+  fi
+  canary_denied=true
+  break
+done
+if [[ "$canary_denied" != true ]]; then
+  echo "VAP canary failed: API server repeatedly admitted suspended Jobs despite an unscoped deny-all policy" >&2
   kubectl get validatingadmissionpolicy verifiedops-observer-vap-canary -o yaml >&2 || true
   kubectl get validatingadmissionpolicybinding verifiedops-observer-vap-canary -o yaml >&2 || true
   exit 1
 fi
-if ! grep -Eiq 'denied|forbidden|validation|temporary VAP engine canary' "$canary_err"; then
-  echo "VAP canary request failed for a reason other than admission denial" >&2
-  cat "$canary_err" >&2
-  rm -f "$canary_err"
-  exit 1
-fi
-rm -f "$canary_err"
 kubectl delete validatingadmissionpolicybinding verifiedops-observer-vap-canary --wait=true
 kubectl delete validatingadmissionpolicy verifiedops-observer-vap-canary --wait=true
 
