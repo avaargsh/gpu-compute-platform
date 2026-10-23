@@ -20,7 +20,7 @@ before changing provider side-effect semantics.
 
 ## Validation
 
-Use Go 1.27+ and run:
+Use Go 1.27.3+ and run:
 
 ```bash
 make fmt-check
