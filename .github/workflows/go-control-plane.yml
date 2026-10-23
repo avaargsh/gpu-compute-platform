@@ -20,8 +20,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     services:
       postgres:
         image: postgres:17-alpine
@@ -106,39 +104,6 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 14
-      - name: Attest binary build provenance
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
-        uses: actions/attest@v4.2.2
-        with:
-          subject-path: |
-            dist/control-plane
-            dist/cluster-agent
-            dist/management-api
-            dist/verifiedops-observer
-      - name: Attest Control Plane SBOM
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
-        uses: actions/attest@v4.2.2
-        with:
-          subject-path: dist/control-plane
-          sbom-path: ${{ github.workspace }}/dist/control-plane.bom.json
-      - name: Attest Cluster Agent SBOM
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
-        uses: actions/attest@v4.2.2
-        with:
-          subject-path: dist/cluster-agent
-          sbom-path: ${{ github.workspace }}/dist/cluster-agent.bom.json
-      - name: Attest Management API SBOM
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
-        uses: actions/attest@v4.2.2
-        with:
-          subject-path: dist/management-api
-          sbom-path: ${{ github.workspace }}/dist/management-api.bom.json
-      - name: Attest Observer SBOM
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
-        uses: actions/attest@v4.2.2
-        with:
-          subject-path: dist/verifiedops-observer
-          sbom-path: ${{ github.workspace }}/dist/verifiedops-observer.bom.json
       - name: Build canonical container entrypoints
         if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
         run: |
@@ -156,6 +121,55 @@ jobs:
         run: |
           docker build -f Dockerfile.control-plane --target control-plane -t gpu-control-plane:compat-test .
           docker build -f Dockerfile.control-plane --target cluster-agent -t gpu-cluster-agent:compat-test .
+
+  release-attestation:
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+    name: Release artifact attestations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: test
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download exact workflow-run binaries and SBOMs
+        uses: actions/download-artifact@v4
+        with:
+          name: gpu-compute-platform-${{ github.sha }}
+          path: dist/
+      - name: Verify artifact checksums
+        run: cd dist && sha256sum --check SHA256SUMS
+      - name: Attest binary build provenance
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: |
+            dist/control-plane
+            dist/cluster-agent
+            dist/management-api
+            dist/verifiedops-observer
+      - name: Attest Control Plane SBOM
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/control-plane
+          sbom-path: ${{ github.workspace }}/dist/control-plane.bom.json
+      - name: Attest Cluster Agent SBOM
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/cluster-agent
+          sbom-path: ${{ github.workspace }}/dist/cluster-agent.bom.json
+      - name: Attest Management API SBOM
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/management-api
+          sbom-path: ${{ github.workspace }}/dist/management-api.bom.json
+      - name: Attest Observer SBOM
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/verifiedops-observer
+          sbom-path: ${{ github.workspace }}/dist/verifiedops-observer.bom.json
 
   portal:
     name: Go Portal / Vue contract build
