@@ -6,7 +6,7 @@
 
 本地开发与完整验收需要：
 
-- Go 1.24+
+- Go 1.27+
 - Docker
 - kind
 - kubectl
