@@ -17,7 +17,11 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     services:
       postgres:
         image: postgres:17-alpine
@@ -39,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
           cache: true
       - name: Dependencies
         run: go mod tidy
@@ -58,21 +62,83 @@ jobs:
             -c 'CREATE DATABASE gpu_store_test'
       - name: Format check
         run: make fmt-check
+      - name: Install pinned security and SBOM tools
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Reachable dependency vulnerability scan
+        run: govulncheck ./...
       - name: Vet
         run: go vet ./...
       - name: Test (parallel Go packages with independent PostgreSQL databases)
         run: make test-parallel-isolated
       - name: Release acceptance contracts
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
         run: make acceptance-contract
       - name: Production supply-chain policy
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
         run: make supply-chain-check
       - name: Build binaries
         run: |
-          go build ./cmd/control-plane
-          go build ./cmd/cluster-agent
-          go build ./cmd/management-api
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/control-plane ./cmd/control-plane
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/cluster-agent ./cmd/cluster-agent
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/management-api ./cmd/management-api
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/verifiedops-observer ./cmd/verifiedops-observer
+      - name: Generate CycloneDX SBOMs for shipped binaries
+        run: |
+          set -euo pipefail
+          for app in control-plane cluster-agent management-api verifiedops-observer; do
+            case "$app" in
+              control-plane) main="cmd/control-plane" ;;
+              cluster-agent) main="cmd/cluster-agent" ;;
+              management-api) main="cmd/management-api" ;;
+              verifiedops-observer) main="cmd/verifiedops-observer" ;;
+            esac
+            CGO_ENABLED=0 GOOS=linux GOARCH=amd64 cyclonedx-gomod app \
+              -json -licenses -std -output "dist/$app.bom.json" \
+              -main "$main" .
+          done
+          (cd dist && sha256sum control-plane cluster-agent management-api verifiedops-observer *.bom.json > SHA256SUMS)
+      - name: Upload binaries, SBOMs and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-compute-platform-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Attest binary build provenance
+        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: |
+            dist/control-plane
+            dist/cluster-agent
+            dist/management-api
+            dist/verifiedops-observer
+      - name: Attest Control Plane SBOM
+        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/control-plane
+          sbom-path: ${{ github.workspace }}/dist/control-plane.bom.json
+      - name: Attest Cluster Agent SBOM
+        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/cluster-agent
+          sbom-path: ${{ github.workspace }}/dist/cluster-agent.bom.json
+      - name: Attest Management API SBOM
+        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/management-api
+          sbom-path: ${{ github.workspace }}/dist/management-api.bom.json
+      - name: Attest Observer SBOM
+        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/verifiedops-observer
+          sbom-path: ${{ github.workspace }}/dist/verifiedops-observer.bom.json
       - name: Build canonical container entrypoints
         if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
         run: |
@@ -131,7 +197,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
           cache: true
       - uses: actions/setup-node@v4
         with:
@@ -164,7 +230,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24.x"
+          go-version: "1.27.x"
           cache: true
       - uses: azure/setup-helm@v4
       - name: Install kind
