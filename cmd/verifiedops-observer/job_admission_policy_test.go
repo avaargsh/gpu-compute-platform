@@ -53,14 +53,25 @@ func readAdmissionPolicies(t *testing.T, path string) []admissionregistrationv1.
 		if len(strings.TrimSpace(string(doc))) == 0 {
 			continue
 		}
-		var policy admissionregistrationv1.ValidatingAdmissionPolicy
-		if err := yaml.Unmarshal(doc, &policy); err != nil {
-			// Documents that are not a ValidatingAdmissionPolicy (bindings,
-			// other resource kinds) are not part of this contract.
+		// Decode the resource kind first. Non-policy documents (for example,
+		// ValidatingAdmissionPolicyBinding) are outside this assertion, but a
+		// malformed policy document must fail the test rather than being
+		// silently treated as an unrelated resource.
+		var header struct {
+			Kind string `yaml:"kind"`
+		}
+		if err := yaml.Unmarshal(doc, &header); err != nil {
+			t.Fatalf("read resource kind from %s: %v", path, err)
+		}
+		if header.Kind != "ValidatingAdmissionPolicy" {
 			continue
 		}
-		if policy.Kind != "ValidatingAdmissionPolicy" || policy.Name == "" {
-			continue
+		var policy admissionregistrationv1.ValidatingAdmissionPolicy
+		if err := yaml.Unmarshal(doc, &policy); err != nil {
+			t.Fatalf("decode ValidatingAdmissionPolicy from %s: %v", path, err)
+		}
+		if policy.Name == "" {
+			t.Fatalf("ValidatingAdmissionPolicy in %s has no metadata.name", path)
 		}
 		policies = append(policies, policy)
 	}
