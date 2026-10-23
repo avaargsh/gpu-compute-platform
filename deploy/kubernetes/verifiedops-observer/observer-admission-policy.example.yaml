@@ -16,6 +16,13 @@ spec:
         operations: ["CREATE", "UPDATE"]
         resources: ["jobs"]
   validations:
+    - message: "VerifiedOps Job must be single-execution: completions=1, parallelism=1, NonIndexed completion mode, no manual selector, and a Never restart policy"
+      expression: >-
+        (!has(object.spec.completions) || object.spec.completions == 1) &&
+        (!has(object.spec.parallelism) || object.spec.parallelism == 1) &&
+        (!has(object.spec.completionMode) || object.spec.completionMode == "NonIndexed") &&
+        (!has(object.spec.manualSelector) || object.spec.manualSelector == false) &&
+        object.spec.template.spec.restartPolicy == "Never"
     - message: "VerifiedOps Jobs must use the dedicated Observer identity and disable implicit token mounting"
       expression: >-
         object.spec.template.spec.serviceAccountName == "verifiedops-observer" &&
