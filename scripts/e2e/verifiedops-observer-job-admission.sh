@@ -75,32 +75,60 @@ policy=deploy/kubernetes/verifiedops-observer/observer-admission-policy.example.
 kubectl apply -f "$policy" >/dev/null
 kubectl delete validatingadmissionpolicybinding verifiedops-observer-job-envelope --ignore-not-found --wait=true >/dev/null
 kubectl delete validatingadmissionpolicy verifiedops-observer-job-envelope --ignore-not-found --wait=true >/dev/null
-sed 's/^  completions: 1$/  completions: 3/' "$manifest" > "$one_shot"
-guard_denied=false
-for attempt in 1 2 3 4 5 6 7 8 9 10; do
-  if kubectl create --dry-run=server -f "$one_shot" >/dev/null 2>"$one_shot_err"; then
-    # Not denied yet: the shipped template may not have propagated.
-    sleep 1
-    continue
-  fi
-  if grep -Fq "$envelope_denial" "$one_shot_err"; then
-    # The removed operator policy is still cached by the API server.
-    sleep 1
-    continue
-  fi
-  if ! grep -Fq "$guard_denial" "$one_shot_err"; then
-    echo 'Observer Job completions=3 was rejected, but not by the shipped example template policy message' >&2
+# While only the shipped example policy is installed, exercise every
+# one-shot conjunct against the real API server. A stale operator-policy cache
+# is retried only when it returns that policy's exact denial message; all other
+# rejections must be attributable to the shipped guard policy.
+assert_guard_only_denied() {
+  local label="$1" file="$2"
+  local attempt denied=false
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if kubectl create --dry-run=server -f "$file" >/dev/null 2>"$one_shot_err"; then
+      sleep 1
+      continue
+    fi
+    if grep -Fq "$envelope_denial" "$one_shot_err"; then
+      sleep 1
+      continue
+    fi
+    if ! grep -Fq "$guard_denial" "$one_shot_err"; then
+      echo "Observer Job $label was rejected, but not by the shipped example template policy message" >&2
+      cat "$one_shot_err" >&2
+      exit 1
+    fi
+    denied=true
+    break
+  done
+  if [[ "$denied" != true ]]; then
+    echo "The shipped example template did not deny Observer Job $label" >&2
     cat "$one_shot_err" >&2
     exit 1
   fi
-  guard_denied=true
-  break
-done
-if [[ "$guard_denied" != true ]]; then
-  echo 'The shipped example template did not deny a multi-completion Observer Job' >&2
-  cat "$one_shot_err" >&2
-  exit 1
-fi
+}
+
+sed 's/^  completions: 1$/  completions: 3/' "$manifest" > "$one_shot"
+assert_guard_only_denied 'completions=3' "$one_shot"
+
+sed 's/^  parallelism: 1$/  parallelism: 3/' "$manifest" > "$one_shot"
+assert_guard_only_denied 'parallelism=3' "$one_shot"
+
+sed 's/^  completionMode: NonIndexed$/  completionMode: Indexed/' "$manifest" > "$one_shot"
+assert_guard_only_denied 'completionMode=Indexed' "$one_shot"
+
+sed 's/^      restartPolicy: Never$/      restartPolicy: OnFailure/' "$manifest" > "$one_shot"
+assert_guard_only_denied 'restartPolicy=OnFailure' "$one_shot"
+
+awk '
+  /^  completions: 1$/ && !inserted {
+    print "  manualSelector: true"
+    print "  selector:"
+    print "    matchLabels:"
+    print "      app.kubernetes.io/component: verifiedops-observer"
+    inserted=1
+  }
+  { print }
+' "$manifest" > "$one_shot"
+assert_guard_only_denied 'manualSelector=true with a required matching selector' "$one_shot"
 
 # Install the API-server policy that pins the operator-reviewed parameters.
 kubectl apply -f deploy/kubernetes/verifiedops-observer/observer-job-policy.yaml >/dev/null
