@@ -36,6 +36,7 @@ import {
 import type { EvidenceCheck } from '@/management/evidence-check'
 import { classifyOperationVerdict } from '@/management/operation-verdict'
 import { receiptResourceScope } from '@/management/readback'
+import { boundDeleteGeneration } from '@/management/delete-scope'
 
 const cardStyle: React.CSSProperties = {
   border: '1px solid',
@@ -121,6 +122,7 @@ export function ManagementApp() {
   const operationVerdict = activeEvidence ? classifyOperationVerdict(activeEvidence) : null
 
   const scope: Scope = { cluster, project, kind, resource }
+  const deleteGeneration = boundDeleteGeneration(desired, scope)
   // Updated on each render so a response for a superseded session/scope
   // cannot repopulate a cleared receipt after a form or identity change.
   const receiptContext = useRef({ session, authenticated, cluster, project, operationId })
@@ -234,15 +236,21 @@ export function ManagementApp() {
   }, [scope, token, writeResourceFn, requestJSON, remember, project, kind, resource])
 
   const handleRemove = useCallback(async () => {
-    if (!desired) return
+    // Form edits or a late GET must not reuse an unrelated Desired's
+    // Generation. Check BEFORE confirm, operation ID persistence and network.
+    const generation = boundDeleteGeneration(desired, scope)
+    if (generation === null) {
+      setFeedback({ kind: 'alert', text: '资源范围或 Generation 已变化；请重新读取当前授权资源后再删除。' })
+      return
+    }
     if (
       !window.confirm(
         '确认发起删除 ' +
-          desired.kind +
+          desired!.kind +
           '/' +
-          desired.id +
+          desired!.id +
           '（Generation ' +
-          desired.generation +
+          generation +
           '）？此操作不会立即删除真实 GPU 资源。'
       )
     )
@@ -251,7 +259,7 @@ export function ManagementApp() {
       const opId = createOperationId()
       remember(scope, 'DELETE', opId)
       setOperationId(opId)
-      const msg = await deleteResourceFn(scope, token(), desired.generation, opId)
+      const msg = await deleteResourceFn(scope, token(), generation, opId)
       setFeedback({ kind: 'status', text: msg })
     } catch (e) {
       setFeedback({ kind: 'alert', text: errMsg(e, '删除失败') })
@@ -876,7 +884,7 @@ export function ManagementApp() {
             </Button>
             <Button
               onClick={handleRemove}
-              disabled={!authenticated || busy || !desired || desired.deleting}
+              disabled={!authenticated || busy || deleteGeneration === null}
               variant="destructive"
               className="bg-[#b84f56] text-white px-4 py-2 rounded-md"
             >
