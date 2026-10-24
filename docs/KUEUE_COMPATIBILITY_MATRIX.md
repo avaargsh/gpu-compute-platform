@@ -131,6 +131,22 @@ the product's complete Go Golden Path against the upgraded kind cluster.
 All phases must succeed to report `UPGRADE REHEARSAL PASS`. Unexpected resource
 versions, identity changes, or admission failures stop the experiment.
 
+**Verified isolated upgrade:** [run #40064990412](https://github.com/avaargsh/gpu-compute-platform/actions/runs/40064990412),
+source `71a46fe4fcce2875e026e0ed3dfe2d9488dbd132`, K8s 1.34.0 and
+Kueue 0.19.6 → 0.20.3. The run preserved pre-existing resource and Workload
+UIDs, passed the upgraded storage preflight, admitted a new Job, and passed
+the Go Golden Path in the same cluster. [Evidence artifact #12548602663](https://github.com/avaargsh/gpu-compute-platform/actions/runs/40064990412/artifacts/12548602663).
+
+**Important gap:** Kueue 0.19.6 already writes objects using v1beta2 by default.
+Sending old-version `v1beta1` API requests does *not* seed legacy v1beta1
+etcd records. The new `kueue_upgrade_lineage.py` evidence step explicitly
+records whether the pre-upgrade CRD `status.storedVersions` included an old
+version, and records persisted-object rewrite and rollback as `not_assessed`.
+Its `--require-legacy` option fails closed when such old version metadata is
+absent. Even when an old CRD status marker exists, that marker alone does not
+prove the historical bytes in etcd were rewritten. A separate legacy-storage
+scenario and downtime/rollback study must precede a production-upgrade claim.
+
 Example invocation from a disposable development environment with kind,
 Docker, kubectl, Go, Helm, Python and jq installed:
 

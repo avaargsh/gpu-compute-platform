@@ -142,6 +142,9 @@ image="$(kubectl get deployment kueue-controller-manager -n kueue-system -o json
 [[ "$image" == "registry.k8s.io/kueue/kueue:v0.20.3" ]] || { echo "Wrong Kueue image: $image" >&2; exit 1; }
 kubectl get crds -o json > "$EVIDENCE_DIR/crds-after.json"
 python3 scripts/e2e/kueue_storage_preflight.py --snapshot "$EVIDENCE_DIR/crds-after.json" --report-file "$EVIDENCE_DIR/storage-preflight.json"
+# Report whether this rehearsal actually saw any v1beta1 storedVersions markers.
+# v1beta1 API input alone is not evidence that etcd stored v1beta1 objects.
+python3 scripts/e2e/kueue_upgrade_lineage.py --evidence-dir "$EVIDENCE_DIR"
 
 for key in resourceflavor clusterqueue localqueue; do
   case "$key" in
