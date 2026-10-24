@@ -277,64 +277,64 @@ func (a *AgentAPI) PrepareJobCreateAttempt(w http.ResponseWriter, r *http.Reques
 // route. It exposes a stored ACK candidate to its own cluster Agent; it does
 // not turn the candidate into an authorization or execution verdict.
 func (a *AgentAPI) ResolveJobCreateAttempt(w http.ResponseWriter, r *http.Request) {
-    cluster, authenticated := r.Context().Value(verifiedAgentScopeKey{}).(string)
-    if !authenticated || cluster == "" {
-        http.Error(w, "authenticated cluster agent required", http.StatusUnauthorized)
-        return
-    }
-    query := r.URL.Query()
-    allowed := map[string]bool{"clusterId": true, "operationId": true, "workloadId": true, "generation": true}
-    for key, values := range query {
-        if !allowed[key] || len(values) != 1 {
-            http.Error(w, "invalid CREATE attempt query", http.StatusBadRequest)
-            return
-        }
-    }
-    clusterValues := query["clusterId"]
-    operationValues := query["operationId"]
-    workloadValues := query["workloadId"]
-    generationValues := query["generation"]
-    if len(clusterValues) != 1 || len(operationValues) != 1 || len(workloadValues) != 1 || len(generationValues) != 1 ||
-        clusterValues[0] != cluster || operationValues[0] == "" || workloadValues[0] == "" {
-        http.Error(w, "invalid CREATE attempt query", http.StatusBadRequest)
-        return
-    }
-    generation, err := strconv.ParseInt(generationValues[0], 10, 64)
-    if err != nil || generation < 1 {
-        http.Error(w, "invalid CREATE attempt generation", http.StatusBadRequest)
-        return
-    }
-    resolver, ok := a.store.(interface {
-        ResolveJobCreateAttempt(context.Context, string, domain.ID, domain.ID, int64) (verifiedops.JobCreateAttemptResolution, error)
-    })
-    if !ok {
-        http.Error(w, "CREATE attempt resolution unavailable", http.StatusServiceUnavailable)
-        return
-    }
-    resolution, err := resolver.ResolveJobCreateAttempt(r.Context(), operationValues[0], domain.ID(cluster), domain.ID(workloadValues[0]), generation)
-    if err != nil {
-        // Do not expose database errors or raw provider identity details.
-        http.Error(w, "CREATE attempt resolution unavailable", http.StatusServiceUnavailable)
-        return
-    }
-    switch resolution.State {
-    case verifiedops.JobCreateAttemptNotFound, verifiedops.JobCreateAttemptUnknown, verifiedops.JobCreateAttemptStale:
-        if resolution.Binding != nil {
-            http.Error(w, "invalid CREATE attempt state", http.StatusServiceUnavailable)
-            return
-        }
-    case verifiedops.JobCreateAttemptACKBound:
-        binding := resolution.Binding
-        if binding == nil || binding.OperationID != operationValues[0] || binding.ClusterID != domain.ID(cluster) ||
-            binding.WorkloadID != domain.ID(workloadValues[0]) || binding.Generation != generation ||
-            binding.JobUID == "" || binding.JobResourceVersion == "" {
-            http.Error(w, "invalid CREATE attempt binding", http.StatusServiceUnavailable)
-            return
-        }
-    default:
-        http.Error(w, "invalid CREATE attempt state", http.StatusServiceUnavailable)
-        return
-    }
-    w.Header().Set("Cache-Control", "no-store")
-    writeJSON(w, http.StatusOK, resolution)
+	cluster, authenticated := r.Context().Value(verifiedAgentScopeKey{}).(string)
+	if !authenticated || cluster == "" {
+		http.Error(w, "authenticated cluster agent required", http.StatusUnauthorized)
+		return
+	}
+	query := r.URL.Query()
+	allowed := map[string]bool{"clusterId": true, "operationId": true, "workloadId": true, "generation": true}
+	for key, values := range query {
+		if !allowed[key] || len(values) != 1 {
+			http.Error(w, "invalid CREATE attempt query", http.StatusBadRequest)
+			return
+		}
+	}
+	clusterValues := query["clusterId"]
+	operationValues := query["operationId"]
+	workloadValues := query["workloadId"]
+	generationValues := query["generation"]
+	if len(clusterValues) != 1 || len(operationValues) != 1 || len(workloadValues) != 1 || len(generationValues) != 1 ||
+		clusterValues[0] != cluster || operationValues[0] == "" || workloadValues[0] == "" {
+		http.Error(w, "invalid CREATE attempt query", http.StatusBadRequest)
+		return
+	}
+	generation, err := strconv.ParseInt(generationValues[0], 10, 64)
+	if err != nil || generation < 1 {
+		http.Error(w, "invalid CREATE attempt generation", http.StatusBadRequest)
+		return
+	}
+	resolver, ok := a.store.(interface {
+		ResolveJobCreateAttempt(context.Context, string, domain.ID, domain.ID, int64) (verifiedops.JobCreateAttemptResolution, error)
+	})
+	if !ok {
+		http.Error(w, "CREATE attempt resolution unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	resolution, err := resolver.ResolveJobCreateAttempt(r.Context(), operationValues[0], domain.ID(cluster), domain.ID(workloadValues[0]), generation)
+	if err != nil {
+		// Do not expose database errors or raw provider identity details.
+		http.Error(w, "CREATE attempt resolution unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	switch resolution.State {
+	case verifiedops.JobCreateAttemptNotFound, verifiedops.JobCreateAttemptUnknown, verifiedops.JobCreateAttemptStale:
+		if resolution.Binding != nil {
+			http.Error(w, "invalid CREATE attempt state", http.StatusServiceUnavailable)
+			return
+		}
+	case verifiedops.JobCreateAttemptACKBound:
+		binding := resolution.Binding
+		if binding == nil || binding.OperationID != operationValues[0] || binding.ClusterID != domain.ID(cluster) ||
+			binding.WorkloadID != domain.ID(workloadValues[0]) || binding.Generation != generation ||
+			binding.JobUID == "" || binding.JobResourceVersion == "" {
+			http.Error(w, "invalid CREATE attempt binding", http.StatusServiceUnavailable)
+			return
+		}
+	default:
+		http.Error(w, "invalid CREATE attempt state", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, resolution)
 }
