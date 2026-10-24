@@ -16,7 +16,7 @@ jobs:
       - name: Checkout exact PR source under test
         uses: actions/checkout@v4
         with:
-          ref: 803a4e964d63ca4c1d13729cc8d177684cbef960
+          ref: 4640d2019f46efb148fd1d4ff55f9096537d12b6
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
