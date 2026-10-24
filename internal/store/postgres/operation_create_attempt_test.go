@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
@@ -158,6 +159,24 @@ func TestResolveJobCreateAttemptDistinguishesNotFoundUnknownBoundAndStale(t *tes
 		bound.Binding.JobUID != binding.JobUID || bound.Binding.JobResourceVersion != binding.JobResourceVersion ||
 		bound.Binding.OperationID != binding.OperationID || bound.Binding.Generation != binding.Generation {
 		t.Fatalf("ACK-bound resolution lost exact provider identity: %#v err=%v", bound, err)
+	}
+
+	// A reused operation ID with a different scope or generation is stale,
+	// not NOT_FOUND; NOT_FOUND is the only state that permits first CREATE.
+	for _, tc := range []struct {
+		name       string
+		clusterID  domain.ID
+		workloadID domain.ID
+		generation int64
+	}{
+		{name: "wrong-cluster", clusterID: "cluster-foreign", workloadID: binding.WorkloadID, generation: binding.Generation},
+		{name: "wrong-workload", clusterID: binding.ClusterID, workloadID: "workload-foreign", generation: binding.Generation},
+		{name: "wrong-generation", clusterID: binding.ClusterID, workloadID: binding.WorkloadID, generation: binding.Generation + 1},
+	} {
+		got, err := restarted.ResolveJobCreateAttempt(ctx, binding.OperationID, tc.clusterID, tc.workloadID, tc.generation)
+		if err != nil || got.State != verifiedops.JobCreateAttemptStale || got.Binding != nil {
+			t.Fatalf("%s must resolve STALE without exposing a binding: %#v err=%v", tc.name, got, err)
+		}
 	}
 	if err := restarted.MarkDesiredDeleting(ctx, binding.ClusterID, "Workload", binding.WorkloadID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
