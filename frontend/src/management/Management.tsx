@@ -13,7 +13,7 @@ import {
 import { useAuth } from '@/management/hooks/useAuth'
 import { useProjects } from '@/management/hooks/useProjects'
 import { useInventory } from '@/management/hooks/useInventory'
-import { useResource } from '@/management/hooks/useResource'
+import { StaleResourceReadError, useResource } from '@/management/hooks/useResource'
 import { StaleReceiptReadError, useReceipt } from '@/management/hooks/useReceipt'
 import { useOperation } from '@/management/hooks/useOperation'
 import { StaleEvidenceReadError, useEvidence } from '@/management/hooks/useEvidence'
@@ -143,6 +143,13 @@ export function ManagementApp() {
     clearResult()
   }, [session, authenticated, cluster, project, operationId, clearResult])
 
+  // A typed scope change, logout or re-login invalidates the old Desired,
+  // including any GET still in flight. Clearing receipt evidence alone is
+  // insufficient because DELETE uses the Desired's cached Generation.
+  useEffect(() => {
+    clearDesired()
+  }, [session, authenticated, cluster, project, kind, resource, clearDesired])
+
   // Load any one-tab recovery pointer from sessionStorage on mount so the
   // "恢复操作范围与 ID" button can appear after a reload + re-login.
   useEffect(() => {
@@ -205,6 +212,7 @@ export function ManagementApp() {
       const { message: msg } = await readResourceFn(scope, token())
       setFeedback({ kind: 'status', text: msg })
     } catch (e) {
+      if (e instanceof StaleResourceReadError) return
       setFeedback({ kind: 'alert', text: errMsg(e, '读取资源失败') })
     }
   }, [scope, token, readResourceFn, clearResult])
