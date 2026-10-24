@@ -236,6 +236,8 @@ func TestACKBoundInspectionRequiresExactLiveUIDAndGeneration(t *testing.T) {
 func TestGuardedKubernetesCREATEPreparesBeforeDRAClaim(t *testing.T) {
 	ctx := context.Background()
 	job := responseJob()
+	// DRA and extended-resource requests are mutually exclusive.
+	job.Resources = nil
 	job.DRA = &DRARequest{
 		ClaimName:       "accelerator-train",
 		DeviceClassName: "gpu.nvidia.com",
