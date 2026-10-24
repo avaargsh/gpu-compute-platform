@@ -239,16 +239,16 @@ export function ManagementApp() {
     // Form edits or a late GET must not reuse an unrelated Desired's
     // Generation. Check BEFORE confirm, operation ID persistence and network.
     const generation = boundDeleteGeneration(desired, scope)
-    if (generation === null) {
+    if (!desired || generation === null) {
       setFeedback({ kind: 'alert', text: '资源范围或 Generation 已变化；请重新读取当前授权资源后再删除。' })
       return
     }
     if (
       !window.confirm(
         '确认发起删除 ' +
-          desired!.kind +
+          desired.kind +
           '/' +
-          desired!.id +
+          desired.id +
           '（Generation ' +
           generation +
           '）？此操作不会立即删除真实 GPU 资源。'
