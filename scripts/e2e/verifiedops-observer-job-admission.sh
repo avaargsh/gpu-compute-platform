@@ -260,15 +260,18 @@ if [[ "$namespace_name" != "verifiedops-observer" ]]; then
   echo "Observer namespace has no Kubernetes-managed name label: $namespace_name" >&2
   exit 1
 fi
-# The refusal must come from the named policy; arbitrary schema errors are
-# insufficient proof that the Observer envelope still applies.
+# The refusal must come from one of the two reviewed, namespace-scoped
+# Observer Job policies; arbitrary schema errors are insufficient proof that
+# the envelope still applies. The API server may report either matching policy
+# first, so accept either exact policy identity and no unrelated rejection.
 scope_denied=false
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
   if kubectl create --dry-run=server -f "$unsafe" >/dev/null 2>"$unsafe.err"; then
     echo 'Observer Job command override admitted after removing mutable namespace app label' >&2
     exit 1
   fi
-  if grep -Fq "ValidatingAdmissionPolicy 'verifiedops-observer-job-envelope' with binding 'verifiedops-observer-job-envelope'" "$unsafe.err"; then
+  if grep -Fq "ValidatingAdmissionPolicy 'verifiedops-observer-job-envelope' with binding 'verifiedops-observer-job-envelope'" "$unsafe.err" ||
+     grep -Fq "ValidatingAdmissionPolicy 'verifiedops-observer-job-guard' with binding 'verifiedops-observer-job-guard'" "$unsafe.err"; then
     scope_denied=true
     break
   fi
