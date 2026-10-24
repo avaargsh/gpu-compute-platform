@@ -62,7 +62,6 @@ func TestGuardedDeleteJobUsesActualKubernetesUIDAndResourceVersion(t *testing.T)
 	}
 }
 
-
 func TestGuardedDeleteJobDoesNotReportGoneWhileForegroundDeletionIsPending(t *testing.T) {
 	job := ownedDeletionJob()
 	client := kubefake.NewSimpleClientset(job)
