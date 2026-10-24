@@ -89,6 +89,7 @@ jobs:
       attestations: write
       artifact-metadata: write
     steps:
+      - uses: actions/checkout@v4
       - name: Enforce trusted ref before attestation
         env:
           ATTEST_EVENT_NAME: ${{ github.event_name }}
