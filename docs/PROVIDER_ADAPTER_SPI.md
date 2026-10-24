@@ -71,6 +71,8 @@ kueue -> internal/provider/kueue
 
 is registered by the production Cluster Agent.
 
+The release contract pins this boundary with `TestProductionRuntimeRegistersOnlyAcceptedKueueProvider` in `make acceptance-contract`. It also checks that missing and unknown provider identities fail closed across pool/workload reconcile and delete operations. Registering another provider requires an intentional update to this contract alongside that provider's independent acceptance evidence.
+
 ## Adding a second provider
 
 A second provider is not admitted merely because a scheduler/API is discovered.

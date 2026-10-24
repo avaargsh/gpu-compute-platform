@@ -15,6 +15,7 @@ This document defines the release gate for the v0.1 Go control plane. A change i
 | Control-plane restart | desired/observation/lease state lost with process memory | PostgreSQL store reconstruction contract |
 | Evidence | successful state without provider proof | Job + Kueue evidence refs in Golden Path |
 | Capability registration | control plane assumes scheduler/accelerator support that the real cluster did not report | real Agent discovery -> registration -> PostgreSQL/API status in Golden Path |
+| Provider registry | production Cluster Agent advertises only independently accepted provider adapters | `TestProductionRuntimeRegistersOnlyAcceptedKueueProvider` in `make acceptance-contract` |
 | Deletion replay | crash between provider cleanup, evidence report and finalize | final-observation/finalize replay contracts |
 | Tombstone | deleted generation resurrected by stale write | tombstone fence/recreate contract |
 | Workload replacement | immutable Job serving changed desired intent | public delete/finalize/recreate contract |
@@ -45,6 +46,7 @@ release claim auditable when unrelated tests are added or removed.
 | Invariant | Contract proof |
 | --- | --- |
 | Agent restart replays the same desired identity | `TestRunnerRestartReplaysDesiredSafely` |
+| Production Cluster Agent registers only the accepted Kueue provider | `TestProductionRuntimeRegistersOnlyAcceptedKueueProvider` |
 | Lost provider create ACK replays without a duplicate logical Job | `TestApplyJobReplaysAfterLostCreateAckWithoutDuplicate` |
 | GET→CREATE takeover race adopts only the same generation | `TestApplyJobAdoptsSameGenerationAfterCreateRace`, `TestApplyJobCreateRaceRejectsDifferentGeneration` |
 | Lease contention prevents duplicate provider writers | `TestRunnerSkipsProviderWhenLeaseIsContended` |
