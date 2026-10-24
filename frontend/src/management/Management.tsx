@@ -1140,7 +1140,7 @@ export function ManagementApp() {
             </Button>
           </div>
           {(watchStatus || evidenceWatch) && (
-            <p className="text-xs text-[#66707a]" role="note" aria-live="polite" data-testid="evidence-watch-status">
+            <p className="text-xs text-[#66707a]" aria-live="polite" data-testid="evidence-watch-status">
               {watchStatus} 已读取 {watchReadCount} / {EVIDENCE_WATCH_MAX_READS} 次；间隔 15 秒。
               仅自动读取授权回执、Desired 与历史 Agent 观察，不提供实时 GPU 或删除完成证明。
             </p>
