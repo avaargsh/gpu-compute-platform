@@ -3,7 +3,7 @@
 # Accelerator runtimes stay on Kubernetes nodes/providers; they are not baked
 # into the management-plane image.
 
-FROM golang:1.24 AS build
+FROM golang:1.27.3 AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./

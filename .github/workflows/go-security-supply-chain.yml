@@ -1,0 +1,124 @@
+name: Go Security and Supply Chain
+
+on:
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-security-supply-chain-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Vulnerability scan / binary SBOM / artifact integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: true
+      - name: Verify the checked-in module graph
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain -- go.mod go.sum)" ]; then
+            echo "go.mod/go.sum are not tidy:"
+            git status --short -- go.mod go.sum
+            git diff -- go.mod go.sum
+            exit 1
+          fi
+      - name: Install pinned security and SBOM tools
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Reachable dependency vulnerability scan
+        run: govulncheck ./...
+      - name: Enforce configured production image policy
+        run: make supply-chain-check
+      - name: Build shipped Linux amd64 binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/control-plane ./cmd/control-plane
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/cluster-agent ./cmd/cluster-agent
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/management-api ./cmd/management-api
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/verifiedops-observer ./cmd/verifiedops-observer
+      - name: Generate one CycloneDX SBOM per shipped binary
+        run: |
+          set -euo pipefail
+          for app in control-plane cluster-agent management-api verifiedops-observer; do
+            case "$app" in
+              control-plane) main="cmd/control-plane" ;;
+              cluster-agent) main="cmd/cluster-agent" ;;
+              management-api) main="cmd/management-api" ;;
+              verifiedops-observer) main="cmd/verifiedops-observer" ;;
+            esac
+            cyclonedx-gomod app -json -licenses -std \
+              -output "dist/$app.bom.json" -main "$main" .
+          done
+          cd dist
+          sha256sum control-plane cluster-agent management-api verifiedops-observer *.bom.json > SHA256SUMS
+      - name: Upload binaries, SBOMs and SHA-256 manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-compute-platform-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  release-attestation:
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+    name: Release artifact attestations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: verify
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download the exact verified workflow-run artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gpu-compute-platform-${{ github.sha }}
+          path: dist/
+      - name: Verify artifact checksums before attestation
+        run: cd dist && sha256sum --check SHA256SUMS
+      - name: Attest binary build provenance
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: |
+            dist/control-plane
+            dist/cluster-agent
+            dist/management-api
+            dist/verifiedops-observer
+      - name: Attest Control Plane SBOM
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/control-plane
+          sbom-path: ${{ github.workspace }}/dist/control-plane.bom.json
+      - name: Attest Cluster Agent SBOM
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/cluster-agent
+          sbom-path: ${{ github.workspace }}/dist/cluster-agent.bom.json
+      - name: Attest Management API SBOM
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/management-api
+          sbom-path: ${{ github.workspace }}/dist/management-api.bom.json
+      - name: Attest Observer SBOM
+        uses: actions/attest@v4.2.2
+        with:
+          subject-path: dist/verifiedops-observer
+          sbom-path: ${{ github.workspace }}/dist/verifiedops-observer.bom.json
