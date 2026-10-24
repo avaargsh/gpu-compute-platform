@@ -205,5 +205,10 @@ SQL
     exit 1
   fi
   echo "Starting kind/Kueue stack with a shared disposable PostgreSQL database; workload image pinned by digest"
+  # project_bindings + cluster_bindings were authoritatively seeded above for
+  # Management OIDC and are shared by the Control Plane. The Golden Path script
+  # must verify them, not attempt a second generation-1 CAS write.
+  export PRESEEDED_BINDINGS=1
+  export GPU_MANAGEMENT_E2E_PG_CONTAINER="$PG"
   bash scripts/e2e/go-kind-kueue-golden.sh
 fi
