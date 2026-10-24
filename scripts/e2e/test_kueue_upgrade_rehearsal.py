@@ -57,11 +57,12 @@ class KueueUpgradeRehearsalTests(unittest.TestCase):
             self.assertIn("LEGACY_ETCD_FIXTURE must be YES or NO", p.stderr)
             self.assertFalse(evidence.exists())
 
-    def test_upgrade_and_install_use_same_explicit_ssa_manager_as_patch(self):
+    def test_storage_flips_are_apply_operations_not_update_ownership(self):
         data = SCRIPT.read_text()
-        self.assertEqual(data.count("kubectl apply --server-side --field-manager=kubectl -f"), 2)
-        self.assertIn("kubectl patch crd resourceflavors.kueue.x-k8s.io --type=json", data)
-        self.assertIn("--field-manager=kubectl", data)
+        # 1 old manifest + 1 new manifest + 1 reusable storage SSA helper.
+        self.assertEqual(data.count("kubectl apply --server-side --field-manager=kubectl -f"), 3)
+        self.assertIn('"$tmp/storage-apply.json"', data)
+        self.assertNotIn("kubectl patch crd resourceflavors.kueue.x-k8s.io --type=json", data)
         self.assertNotIn("--force-conflicts", data)
 
     def test_storage_flip_preserves_original_kubectl_field_manager(self):

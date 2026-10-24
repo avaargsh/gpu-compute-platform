@@ -68,7 +68,7 @@ kubectl create namespace kueue-upgrade-fixture
 switch_resourceflavor_storage() {
   local target="$1"
   kubectl get crd resourceflavors.kueue.x-k8s.io -o json > "$tmp/resourceflavor-crd.json"
-  python3 - "$tmp/resourceflavor-crd.json" "$target" > "$tmp/storage-patch.json" <<'PY'
+  python3 - "$tmp/resourceflavor-crd.json" "$target" > "$tmp/storage-apply.json" <<'PY'
 import json, sys
 crd=json.load(open(sys.argv[1]))
 target=sys.argv[2]
@@ -76,17 +76,20 @@ versions=crd["spec"]["versions"]
 names=[x["name"] for x in versions]
 assert "v1beta1" in names and "v1beta2" in names, names
 assert all(x.get("served") is True for x in versions if x["name"] in ("v1beta1","v1beta2"))
-ops=[{"op":"replace","path":f"/spec/versions/{i}/storage",
-      "value":v["name"]==target} for i,v in enumerate(versions)]
-assert sum(x["value"] is True for x in ops)==1
-print(json.dumps(ops))
+for v in versions:
+    v["storage"] = (v["name"] == target)
+assert sum(v.get("storage") is True for v in versions) == 1
+# Apply full current CRD spec, not a JSON Patch. A PATCH with the same
+# manager *name* still creates an Update managedFields entry, distinct from
+# the original Apply managedFields owner; the next SSA upgrade would conflict.
+print(json.dumps({
+    "apiVersion":"apiextensions.k8s.io/v1",
+    "kind":"CustomResourceDefinition",
+    "metadata":{"name":crd["metadata"]["name"]},
+    "spec":crd["spec"],
+}))
 PY
-  # Preserve the same SSA field manager as the pinned Kueue manifest install.
-  # A separate kubectl-patch owner on spec.versions would block the target
-  # manifests with a legitimate Server-Side Apply conflict.
-  kubectl patch crd resourceflavors.kueue.x-k8s.io --type=json \
-    --field-manager=kubectl \
-    -p "$(cat "$tmp/storage-patch.json")"
+  kubectl apply --server-side --field-manager=kubectl -f "$tmp/storage-apply.json"
   kubectl wait --for=condition=Established crd/resourceflavors.kueue.x-k8s.io --timeout=60s
   kubectl get crd resourceflavors.kueue.x-k8s.io -o json |
     python3 -c 'import json,sys; target=sys.argv[1]; data=json.load(sys.stdin); assert [v["name"] for v in data["spec"]["versions"] if v["storage"]]==[target]' "$target"
