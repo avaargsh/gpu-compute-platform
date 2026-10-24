@@ -1,0 +1,140 @@
+name: Kueue v0.19.6 C0 Regression
+
+on:
+  push:
+    branches: [compat/kueue-v0196-c0]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kueue-v0196-c0-regression
+  cancel-in-progress: false
+
+jobs:
+  compatibility:
+    name: C0 / frozen Kubernetes 1.34 + Kueue v0.19.6
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gpu
+          POSTGRES_PASSWORD: gpu
+          POSTGRES_DB: gpu_platform_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gpu -d gpu_platform_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_DSN: postgres://gpu:gpu@localhost:5432/gpu_platform_test?sslmode=disable
+      TEST_POSTGRES_STORE_DSN: postgres://gpu:gpu@localhost:5432/gpu_store_test?sslmode=disable
+      SOURCE_SHA: 65bf8236c99d25e6f2d6e2c0a22f434250a875d1
+      CLUSTER_ID: kueue-regression-c0
+      KIND_NODE_IMAGE: kindest/node:v1.34.0
+      KUEUE_VERSION: v0.19.6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 65bf8236c99d25e6f2d6e2c0a22f434250a875d1
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - name: Initialize evidence
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/kueue-compatibility-evidence
+        run: |
+          mkdir -p "$EVIDENCE_DIR"
+          {
+            echo "source_sha=$SOURCE_SHA"
+            echo "checked_out_sha=$(git rev-parse HEAD)"
+            echo "target_row=C0"
+            echo "kind_node_image=$KIND_NODE_IMAGE"
+            echo "kueue_version=$KUEUE_VERSION"
+            echo "cluster_id=$CLUSTER_ID"
+          } > "$EVIDENCE_DIR/manifest.txt"
+      - name: Check module tidiness
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: Provision independent Store package test database
+        run: |
+          docker exec "${{ job.services.postgres.id }}" \
+            psql -U gpu -d gpu_platform_test -v ON_ERROR_STOP=1 \
+            -c 'CREATE DATABASE gpu_store_test'
+      - name: Format check
+        run: make fmt-check
+      - name: Vet
+        run: go vet ./...
+      - name: Kueue API and provider registry tests
+        run: go test ./internal/provider/kueue ./internal/cluster
+      - name: Lifecycle and PostgreSQL acceptance contracts
+        run: make acceptance-contract
+      - uses: azure/setup-helm@v4
+      - name: Install kind
+        run: |
+          rm -f /tmp/kind /tmp/kind.download
+          downloaded=false
+          for url in \
+            "https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-amd64" \
+            "https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64"; do
+            if curl --fail --show-error --location --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o /tmp/kind.download; then
+              mv /tmp/kind.download /tmp/kind
+              downloaded=true
+              break
+            fi
+            rm -f /tmp/kind.download
+          done
+          [[ "$downloaded" == true && -s /tmp/kind ]] || { echo "Unable to download pinned kind v0.30.0 binary from official release endpoints" >&2; exit 1; }
+          chmod +x /tmp/kind
+          sudo install /tmp/kind /usr/local/bin/kind
+      - name: Verify exact published kind image
+        run: docker manifest inspect "$KIND_NODE_IMAGE" >/dev/null
+      - name: Run real Golden Path and capture evidence
+        shell: bash
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/kueue-compatibility-evidence
+        run: |
+          set -euo pipefail
+          set +e
+          make e2e-golden 2>&1 | tee "$EVIDENCE_DIR/golden-path.log"
+          golden_status=${PIPESTATUS[0]}
+          set -e
+
+          server_version=""
+          if kubectl version -o json > "$EVIDENCE_DIR/kubernetes-version.json" 2> "$EVIDENCE_DIR/kubernetes-version.err"; then
+            server_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["serverVersion"]["gitVersion"])' "$EVIDENCE_DIR/kubernetes-version.json")"
+          else
+            echo "Kubernetes server version unavailable after Golden Path" >&2
+            [[ "$golden_status" -ne 0 ]] || golden_status=1
+          fi
+
+          kueue_image="$(kubectl get deployment kueue-controller-manager -n kueue-system -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+          printf 'server_version=%s\nkueue_image=%s\n' "$server_version" "$kueue_image" >> "$EVIDENCE_DIR/manifest.txt"
+          kubectl get deployment kueue-controller-manager -n kueue-system -o yaml > "$EVIDENCE_DIR/kueue-controller-manager.yaml" 2>/dev/null || true
+          kubectl get nodes -o wide > "$EVIDENCE_DIR/nodes.txt" 2>/dev/null || true
+          kind get clusters > "$EVIDENCE_DIR/kind-clusters.txt" 2>/dev/null || true
+
+          if [[ -n "$server_version" && "$server_version" != "v1.34."* ]]; then
+            echo "FAIL: C0 expected Kubernetes 1.34.x but server reports $server_version" >&2
+            golden_status=1
+          fi
+          if [[ "$kueue_image" != *":${KUEUE_VERSION}" ]]; then
+            echo "FAIL: expected Kueue image tag $KUEUE_VERSION, observed $kueue_image" >&2
+            golden_status=1
+          fi
+          echo "golden_path_exit_code=$golden_status" >> "$EVIDENCE_DIR/manifest.txt"
+          exit "$golden_status"
+      - name: Upload compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kueue-v0196-c0-${{ github.run_id }}
+          path: ${{ runner.temp }}/kueue-compatibility-evidence/
+          if-no-files-found: warn
+          retention-days: 14
