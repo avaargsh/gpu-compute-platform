@@ -262,6 +262,29 @@ func (o *JobObserver) Observe(ctx context.Context, w ExpectedJob) (Observation, 
 		latestNode.ResourceVersion != observed.NodeResourceVersion || !readyNode(latestNode) {
 		return Observation{Code: OwnershipUnproven}, nil
 	}
+	// A second owned Pod can appear after the initial LIST while the original
+	// Job/Pod/Node keep the same resourceVersions. Recheck the selected Pod
+	// set immediately before reporting a single-Pod Ready observation.
+	// This narrows the observation race; it is not an atomic K8s snapshot.
+	latestPods, err := o.client.CoreV1().Pods(w.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		return unavailable, err
+	}
+	ownedCount := 0
+	for i := range latestPods.Items {
+		candidate := &latestPods.Items[i]
+		if !controllerOwnedBy(candidate, w.Name, w.JobUID) {
+			continue
+		}
+		ownedCount++
+		if candidate.Name != pod.Name || candidate.Namespace != w.Namespace ||
+			candidate.UID != observed.PodUID || candidate.ResourceVersion != observed.PodResourceVersion {
+			return Observation{Code: OwnershipUnproven}, nil
+		}
+	}
+	if ownedCount != 1 {
+		return Observation{Code: OwnershipUnproven}, nil
+	}
 	observed.Code = PODReadyObserved
 	return observed, nil
 }
