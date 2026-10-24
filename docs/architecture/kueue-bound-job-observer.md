@@ -14,10 +14,13 @@ Kubernetes write methods are called. Runtime RBAC and the identity boundary
 still require cluster integration tests; an in-process fake does not prove them.
 
 Readback checks: Job UID/RV, expected generation, batch/v1 controller
-OwnerReference UID, fresh Pod GET and Pod UID/RV, Pod Ready and bound Node,
+OwnerReference identity, fresh Pod GET and Pod UID/RV, Pod Ready and bound Node,
 Node Ready/UID/RV, pinned container image and resolved ImageID digest, followed
-by second Job/Pod GET identity confirmation. Multiple owned Pods and mismatched
-or absent evidence fail closed.
+by second Job/Pod GET identity confirmation. A Pod must have exactly one
+controller OwnerReference matching `apiVersion=batch/v1`, `kind=Job`, the exact
+Job name and UID. Labels, a matching UID with a different name, or duplicate
+controller references are insufficient. Multiple owned Pods and mismatched or
+absent evidence fail closed.
 
 `POD_READY_OBSERVED` is **not** `AUTHORIZED_AND_VERIFIED`, a proof that
 Kueue admitted the workload, the Job completed, or that a user was authorized.

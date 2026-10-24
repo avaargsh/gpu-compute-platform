@@ -3,6 +3,9 @@ package verifiedops
 import (
 	"context"
 	"errors"
+	"strings"
+	"testing"
+
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -11,8 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	fake "k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
-	"strings"
-	"testing"
 )
 
 const sha = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -57,6 +58,12 @@ func TestBoundUIDGenerationAndOwnerFailures(t *testing.T) {
 		}, OwnershipUnproven},
 		{"wrong-controller-ref", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
 			p.OwnerReferences[0].UID = "foreign"
+		}, OutcomePending},
+		{"wrong-controller-name", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
+			p.OwnerReferences[0].Name = "different-job"
+		}, OutcomePending},
+		{"multiple-controller-owners", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
+			p.OwnerReferences = append(p.OwnerReferences, p.OwnerReferences[0])
 		}, OutcomePending},
 		{"spoofed-ready-label", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) { p.OwnerReferences = nil }, OutcomePending},
 		{"not-ready", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
