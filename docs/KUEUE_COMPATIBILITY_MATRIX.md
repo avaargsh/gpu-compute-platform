@@ -113,6 +113,42 @@ migration evidence, feature-policy audit and staged controller compatibility che
 Do not modify `status.storedVersions` simply to make the preflight green, or interpret
 client-side/server-side dry run as proof that live objects have been rewritten.
 
+## Isolated in-place upgrade rehearsal (experimental, opt-in)
+
+The repository contains `scripts/e2e/kueue_inplace_upgrade_kind.sh`, a disposable
+kind-only 0.19.6 → 0.20.3 controller/CRD upgrade **experiment**. It refuses a
+pre-existing cluster, restricts cluster names to `kueue-upgrade-*`, requires
+`ALLOW_EPHEMERAL_KUEUE_UPGRADE=YES`, installs an isolated kubeconfig, verifies
+the old API exists by creating v1beta1 fixtures, and retrieves the official
+migration script from Kueue commit `f0e95cea51b5591e0177fbe0fa06a299f36db548`.
+It verifies that exact upstream Git blob `ede30226c5521585aa9aefc261ffb69af88afd38`
+before executing it.
+
+It records original CRD and Kueue object identities, migrates with the old API
+still served, installs v0.20.3 into **the same** cluster, runs the storage
+preflight, compares UIDs and migration annotations, admits a new Job, and runs
+the product's complete Go Golden Path against the upgraded kind cluster.
+All phases must succeed to report `UPGRADE REHEARSAL PASS`. Unexpected resource
+versions, identity changes, or admission failures stop the experiment.
+
+Example invocation from a disposable development environment with kind,
+Docker, kubectl, Go, Helm, Python and jq installed:
+
+```bash
+ALLOW_EPHEMERAL_KUEUE_UPGRADE=YES \
+  CLUSTER_ID=kueue-upgrade-sample01 \
+  KIND_NODE_IMAGE=kindest/node:v1.34.0 \
+  EVIDENCE_DIR=/tmp/kueue-upgrade-sample01-evidence \
+  bash scripts/e2e/kueue_inplace_upgrade_kind.sh
+```
+
+**Never invoke this on a production cluster.** The script deletes only the
+new disposable kind cluster it created, and never attempts to change the
+operator's current kubeconfig. Evidence paths must be new. Its outcome is
+bounded to the tested cohort, API-server and controller generation; it does
+not validate production etcd backup/restore, partial migration crashes,
+a mixed-version rolling upgrade, or a rollback after irreversible writes.
+
 ## Live-cluster upgrade boundary
 
 The matrix above creates fresh kind clusters. It does **not** validate an in-place upgrade. Before upgrading a cluster with existing Kueue objects to a version that no longer serves `v1beta1`:

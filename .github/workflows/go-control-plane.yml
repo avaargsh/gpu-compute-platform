@@ -83,6 +83,8 @@ jobs:
         run: python3 -m py_compile scripts/e2e/management-compute-lost-ack.py
       - name: Read-only Kueue storage upgrade preflight tests
         run: python3 -m unittest discover -s scripts/e2e -p 'test_kueue_storage_preflight.py' -v
+      - name: Ephemeral Kueue in-place upgrade rehearsal guard tests
+        run: python3 -m unittest discover -s scripts/e2e -p 'test_kueue_upgrade_rehearsal.py' -v
       - name: Format check
         run: make fmt-check
       - name: Vet

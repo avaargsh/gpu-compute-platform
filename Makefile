@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: fmt fmt-check test test-parallel-isolated vet build supply-chain-check acceptance-contract stage-b-volcano-contract kind-up install-kueue install-fake-gpu e2e-golden management-compute-lost-ack-acceptance kueue-storage-preflight
+.PHONY: fmt fmt-check test test-parallel-isolated vet build supply-chain-check acceptance-contract stage-b-volcano-contract kind-up install-kueue install-fake-gpu e2e-golden management-compute-lost-ack-acceptance kueue-storage-preflight kueue-upgrade-rehearsal
 
 fmt:
 	bash scripts/go-format.sh
@@ -61,3 +61,7 @@ management-compute-lost-ack-acceptance:
 kueue-storage-preflight:
 	@test -n "$(KUBECTL_CONTEXT)" || { echo "Set KUBECTL_CONTEXT to the intended Kubernetes context" >&2; exit 2; }
 	python3 scripts/e2e/kueue_storage_preflight.py --context "$(KUBECTL_CONTEXT)"
+
+# Destructive ONLY to a fresh, isolated kind cluster. The script refuses adoption.
+kueue-upgrade-rehearsal:
+	bash scripts/e2e/kueue_inplace_upgrade_kind.sh
