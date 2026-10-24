@@ -63,7 +63,7 @@ The current CPU-only acceptance environment uses Run:ai Fake GPU Operator with a
 
 ## Development
 
-Requires Go 1.24+, Docker, kind, kubectl, and Helm for the full Golden Path.
+Requires Go 1.27.3+, Docker, kind, kubectl, and Helm for the full Golden Path.
 
 ```bash
 make fmt-check

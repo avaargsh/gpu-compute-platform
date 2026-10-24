@@ -22,8 +22,14 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Shell syntax and minimal RBAC checks
-        run: |
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.3"
+          cache: true
+      - name: Enforce immutable Observer namespace scope contract
+        run: >-
+          go test ./cmd/verifiedops-observer
+          -run '^(TestObserverJobEnvelopeNamespaceScopeCannotBeDisabledByAppLabel|TestObserverGuardBindingsUseServerControlledNamespaceName)        run: |
           bash -n scripts/e2e/verifiedops-observer-project-rbac.sh
           bash -n scripts/e2e/verifiedops-observer-rbac-acceptance.sh
           bash -n scripts/e2e/verifiedops-observer-job-admission.sh
@@ -36,6 +42,8 @@ jobs:
         run: kind create cluster --name verifiedops-rbac-ci --image kindest/node:v1.34.0 --wait 120s
       - name: Validate Observer namespace, limited grants and cross-project denials
         run: bash scripts/e2e/verifiedops-observer-rbac-acceptance.sh
+      - name: API-server validate suspended Observer Job and immutable security envelope
+        run: bash scripts/e2e/verifiedops-observer-job-admission.sh
       - name: Prepare reviewed project for actual Observer token
         run: |
           kubectl create namespace verifiedops-token-a
@@ -52,18 +60,68 @@ jobs:
         run: |
           docker build --target verifiedops-observer-e2e --tag verifiedops-observer:e2e .
           kind load docker-image --name verifiedops-rbac-ci verifiedops-observer:e2e
+      - name: Prepare isolated test-only Pod fixture outside admission scope
+        # Admission-policy acceptance and its negative probes have already run.
+        # The test-only Pod uses ephemeral keys/Secret and a synthetic workload;
+        # temporarily remove the namespace selector label so the deliberately
+        # non-production fixture cannot be mistaken for an admitted workload.
+        run: kubectl label namespace verifiedops-observer app.kubernetes.io/component-
       - name: Execute independent Observer Pod and verify actual DSSE evidence
         env:
           VERIFIEDOPS_OBSERVER_POD_E2E: "1"
         run: go test ./cmd/verifiedops-observer -run '^TestRealKindObserverPodSignsPendingEvidence$' -count=1 -timeout=180s -v
-      # A synthetic test Pod uses temporary signing keys and an init-file
-      # staging step incompatible with the production admission envelope.
-      # Execute this fixture before the policy is installed, without removing
-      # namespace labels or weakening/deleting an installed binding.
-      # The final step installs and verifies all admission bindings and MUST
-      # pass for this workflow to become green.
+      - name: Failure diagnostics
+        if: failure()
+        run: |
+          kubectl get roles,rolebindings -n verifiedops-rbac-a -o wide || true
+          kubectl get clusterrolebinding verifiedops-observer-node-get || true
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name verifiedops-rbac-ci || true
+
+          -count=1
+      - name: Shell syntax and minimal RBAC checks
+        run: |
+          bash -n scripts/e2e/verifiedops-observer-project-rbac.sh
+          bash -n scripts/e2e/verifiedops-observer-rbac-acceptance.sh
+          bash -n scripts/e2e/verifiedops-observer-job-admission.sh
+      - name: Install pinned kind
+        run: |
+          curl --fail --location --retry 3 --output /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo mv /tmp/kind /usr/local/bin/kind
+      - name: Provision real API server
+        run: kind create cluster --name verifiedops-rbac-ci --image kindest/node:v1.34.0 --wait 120s
+      - name: Validate Observer namespace, limited grants and cross-project denials
+        run: bash scripts/e2e/verifiedops-observer-rbac-acceptance.sh
       - name: API-server validate suspended Observer Job and immutable security envelope
         run: bash scripts/e2e/verifiedops-observer-job-admission.sh
+      - name: Prepare reviewed project for actual Observer token
+        run: |
+          kubectl create namespace verifiedops-token-a
+          kubectl create namespace verifiedops-token-b
+          # The Observer identity is deliberately pinned to the production
+          # namespace. Reuse the SA/Node GET grant installed by the RBAC suite.
+          kubectl get serviceaccount verifiedops-observer -n verifiedops-observer
+          bash scripts/e2e/verifiedops-observer-project-rbac.sh verifiedops-token-a
+      - name: Test actual short-lived ServiceAccount bearer identity and Job observer
+        env:
+          VERIFIEDOPS_OBSERVER_TOKEN_E2E: "1"
+        run: go test ./internal/verifiedops -run '^TestRealKindObserver(ShortLivedSATokenAndBoundJob|JobDeletionOnSecondGET)$' -count=1 -timeout=180s -v
+      - name: Build independent one-shot Observer Pod image for kind (test-only fixture)
+        run: |
+          docker build --target verifiedops-observer-e2e --tag verifiedops-observer:e2e .
+          kind load docker-image --name verifiedops-rbac-ci verifiedops-observer:e2e
+      - name: Prepare isolated test-only Pod fixture outside admission scope
+        # Admission-policy acceptance and its negative probes have already run.
+        # The test-only Pod uses ephemeral keys/Secret and a synthetic workload;
+        # temporarily remove the namespace selector label so the deliberately
+        # non-production fixture cannot be mistaken for an admitted workload.
+        run: kubectl label namespace verifiedops-observer app.kubernetes.io/component-
+      - name: Execute independent Observer Pod and verify actual DSSE evidence
+        env:
+          VERIFIEDOPS_OBSERVER_POD_E2E: "1"
+        run: go test ./cmd/verifiedops-observer -run '^TestRealKindObserverPodSignsPendingEvidence$' -count=1 -timeout=180s -v
       - name: Failure diagnostics
         if: failure()
         run: |
