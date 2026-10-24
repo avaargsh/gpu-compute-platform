@@ -162,3 +162,44 @@ if [[ "$ready" != 1 ]]; then echo "FAIL local Management Vite not ready" >&2; ex
 export GPU_MANAGEMENT_E2E_PG_CONTAINER="$PG"
 (cd frontend && npx playwright test --config playwright.management.fullstack.config.ts)
 echo "PASS real Keycloak S256 browser login + scoped PG TLS RBAC/CAS/audit/revocation"
+
+# Opt-in cross-stack test: the Management API keeps its constrained TLS-verified
+# login and live Keycloak introspection while Control Plane/Agent share the same
+# disposable PostgreSQL desired-state tables and real kind/Kueue execution path.
+if [[ "${RUN_MANAGEMENT_LOST_ACK_ACCEPTANCE:-0}" == "1" ]]; then
+  token_response="$(curl --silent --show-error --fail --max-time 20 \
+    --cacert "$TMP/keycloak.crt" \
+    -X POST "$ISSUER/protocol/openid-connect/token" \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode 'grant_type=password' \
+    --data-urlencode 'client_id=gpu-e2e-direct' \
+    --data-urlencode 'client_secret=e2e-direct-secret-not-for-production' \
+    --data-urlencode 'username=ci-operator' \
+    --data-urlencode 'password=ci-disposable-password-not-for-production')"
+  export OIDC_ACCESS_TOKEN="$(TOKEN_RESPONSE="$token_response" python3 -c 'import json,os,sys; token=json.loads(os.environ["TOKEN_RESPONSE"]).get("access_token",""); sys.stdout.write(token) if token else sys.exit("token response omitted access_token")')"
+  unset token_response
+
+  export DATABASE_URL="postgres://gpu:ci-disposable-dba@localhost:55433/gpu_management_fullstack_ci?sslmode=verify-full&sslrootcert=$TMP/db-ca.pem"
+  export CLUSTER_ID=browser-ci
+  export PROJECT_ID=research
+  export POOL_ID=pool-browser-ci
+  export NAMESPACE=research
+  export ACCELERATOR_CLASS=h100-80g
+  export ACCELERATOR_RESOURCE=nvidia.com/gpu
+  export ACCELERATOR_FLAVOR=h100-80g
+  export MANAGEMENT_BASE_URL=http://127.0.0.1:8081
+  export CONTROL_PLANE_BASE_URL=http://127.0.0.1:8080
+  export ACCEPTANCE_TIMEOUT_SECONDS=240
+
+  if ! docker pull busybox:1.36 >"$TMP/busybox-pull.log" 2>&1; then
+    cat "$TMP/busybox-pull.log" >&2
+    exit 1
+  fi
+  export IMAGE="$(docker image inspect --format='{{index .RepoDigests 0}}' busybox:1.36)"
+  if [[ ! "$IMAGE" =~ @sha256:[0-9a-f]{64}$ ]]; then
+    echo "FAIL: could not resolve busybox:1.36 to an immutable image digest" >&2
+    exit 1
+  fi
+  echo "Starting kind/Kueue stack with a shared disposable PostgreSQL database; workload image pinned by digest"
+  bash scripts/e2e/go-kind-kueue-golden.sh
+fi

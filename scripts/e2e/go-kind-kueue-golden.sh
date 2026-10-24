@@ -400,6 +400,15 @@ wait_api_gone() {
   return 1
 }
 
+# Optional combined Management API ACK-drop experiment, executed while the real
+# Control Plane, Cluster Agent, Kueue and live Workload pool are still available.
+if [[ "${RUN_MANAGEMENT_LOST_ACK_ACCEPTANCE:-0}" == "1" ]]; then
+  : "${OIDC_ACCESS_TOKEN:?real disposable OIDC access token required for lost-ACK acceptance}"
+  : "${IMAGE:?digest-pinned workload image required for lost-ACK acceptance}"
+  echo "Running real Management ACK-drop recovery on shared PostgreSQL + kind/Kueue stack"
+  ( unset WORKLOAD_ID; make management-compute-lost-ack-acceptance )
+fi
+
 # A realized workload must be cleaned at the provider before desired state is
 # finalized. The finalization transaction also removes observation and lease.
 delete_desired "Workload" "$WORKLOAD_ID"

@@ -1,0 +1,66 @@
+name: Management Lost-ACK Full-Stack Acceptance
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - '.github/workflows/management-lost-ack.yml'
+      - 'scripts/e2e/management-compute-lost-ack.py'
+      - 'scripts/e2e/test_management_compute_lost_ack.py'
+      - 'scripts/e2e/management-fullstack-real-oidc-pg.sh'
+      - 'scripts/e2e/go-kind-kueue-golden.sh'
+      - 'internal/platform/management/**'
+      - 'internal/store/postgres/**'
+      - 'internal/platform/httpapi/**'
+      - 'cmd/management-api/**'
+      - 'cmd/control-plane/**'
+      - 'cmd/cluster-agent/**'
+      - 'Makefile'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: management-lost-ack-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-stack-ack-drop:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: azure/setup-helm@v4
+      - name: Install kind
+        run: |
+          curl -fsSLo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo install /tmp/kind /usr/local/bin/kind
+      - name: Install pinned frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install ephemeral Playwright runner without lockfile mutation
+        working-directory: frontend
+        run: npm install --no-save --package-lock=false @playwright/test@1.56.1
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Verify integration harness syntax
+        run: |
+          bash -n scripts/e2e/management-fullstack-real-oidc-pg.sh
+          bash -n scripts/e2e/go-kind-kueue-golden.sh
+          python3 -m py_compile scripts/e2e/management-compute-lost-ack.py
+      - name: Run real OIDC + TLS PostgreSQL + kind/Kueue ACK-drop experiment
+        run: RUN_MANAGEMENT_LOST_ACK_ACCEPTANCE=1 bash scripts/e2e/management-fullstack-real-oidc-pg.sh
