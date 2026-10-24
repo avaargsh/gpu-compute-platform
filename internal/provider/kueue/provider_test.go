@@ -2,10 +2,13 @@ package kueue
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 )
 
 type fakeClient struct {
@@ -197,6 +200,45 @@ func TestDeleteDRAWorkloadReleasesClaimAndPreservesAuditEvidence(t *testing.T) {
 	for i := range wantEvidence {
 		if got.EvidenceRefs[i] != wantEvidence[i] {
 			t.Fatalf("evidence[%d]=%q, want %q", i, got.EvidenceRefs[i], wantEvidence[i])
+		}
+	}
+}
+
+func TestRejectedDurableDRAAttemptHasNoKubernetesWrites(t *testing.T) {
+	core := kubefake.NewSimpleClientset()
+	provider := NewProvider(NewKubeClient(core, nil))
+	beforeCalls, ackCalls := 0, 0
+	projection := baseprovider.WorkloadProjection{
+		WorkloadID: "train-guard", ProjectID: "project-1", PoolID: "pool-1",
+		ClusterID: "cluster-a", Namespace: "project-1", Generation: 7,
+		OperationID: "operation-guard",
+		Image:       "example/train",
+		Accelerator: domain.AcceleratorRequest{Class: "a100-mig-1g", Quota: 1},
+		AcceleratorBinding: domain.AcceleratorBinding{
+			Class: "a100-mig-1g", AllocationMode: domain.AcceleratorAllocationDRA,
+			ResourceName: "nvidia.com/gpu", Flavor: "a100-mig-1g",
+			DRA: &domain.DRAAllocation{DeviceClassName: "gpu.nvidia.com"},
+		},
+		OnBeforeCreate: func(context.Context, baseprovider.JobCreateIntent) error {
+			beforeCalls++
+			return verifiedops.ErrCreateAttemptUnresolved
+		},
+		OnCreateACK: func(context.Context, baseprovider.JobCreateACK) error {
+			ackCalls++
+			return nil
+		},
+	}
+	_, err := provider.ReconcileWorkload(context.Background(), projection)
+	if !errors.Is(err, verifiedops.ErrCreateAttemptUnresolved) {
+		t.Fatalf("unresolved durable attempt should fail closed, got %v", err)
+	}
+	if beforeCalls != 1 || ackCalls != 0 {
+		t.Fatalf("unexpected callback count: before=%d ack=%d", beforeCalls, ackCalls)
+	}
+	for _, action := range core.Actions() {
+		if action.GetVerb() == "create" &&
+			(action.GetResource().Resource == "jobs" || action.GetResource().Resource == "resourceclaims") {
+			t.Fatalf("rejected operation changed Kubernetes state: %#v", core.Actions())
 		}
 	}
 }

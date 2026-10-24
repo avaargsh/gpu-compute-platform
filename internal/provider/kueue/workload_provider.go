@@ -18,7 +18,10 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 	if err != nil {
 		return baseprovider.WorkloadObservation{}, err
 	}
-	if job.DRA != nil {
+	// Legacy/unclaimed reconciliation keeps its existing DRA path. For a
+	// claimed operation, ApplyJobWithGuardedCreate creates the ResourceClaim
+	// only after the durable PRE-CREATE callback has accepted the operation.
+	if projection.OperationID == "" && job.DRA != nil {
 		if err := p.client.ApplyResourceClaim(ctx, job); err != nil {
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply resource claim: %w", classifyProviderError(err))
 		}
