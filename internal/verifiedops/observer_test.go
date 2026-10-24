@@ -151,3 +151,47 @@ func TestJobDeletionBetweenObserverReadsIsNotReady(t *testing.T) {
 		t.Fatalf("deleting Job incorrectly attested Ready: %#v %v (reads=%d)", got, err, calls)
 	}
 }
+
+
+func TestObserverRejectsSecondOwnedPodAppearingAfterInitialList(t *testing.T) {
+	w, j, p, n := fixture()
+	client := fake.NewSimpleClientset(j, p, n)
+	second := p.DeepCopy()
+	second.Name = "job-a-pod-2"
+	second.UID = "pod-uid-b"
+	second.ResourceVersion = "44"
+
+	listCalls := 0
+	client.PrependReactor("list", "pods", func(a ktesting.Action) (bool, runtime.Object, error) {
+		listCalls++
+		if listCalls == 2 {
+			// The Job, selected Pod and Node can stay unchanged even while
+			// another Pod with the same exact controller appears.
+			return true, &corev1.PodList{Items: []corev1.Pod{*p.DeepCopy(), *second}}, nil
+		}
+		return false, nil, nil
+	})
+
+	got, err := NewJobObserver(client).Observe(context.Background(), w)
+	if err != nil || got.Code != OwnershipUnproven || listCalls != 2 {
+		t.Fatalf("changed owned Pod set was treated as one-Pod Ready evidence: %#v, err=%v, lists=%d", got, err, listCalls)
+	}
+}
+
+func TestObserverFinalPodSetReadFailureDoesNotProveReady(t *testing.T) {
+	w, j, p, n := fixture()
+	client := fake.NewSimpleClientset(j, p, n)
+	listCalls := 0
+	client.PrependReactor("list", "pods", func(a ktesting.Action) (bool, runtime.Object, error) {
+		listCalls++
+		if listCalls == 2 {
+			return true, nil, errors.New("final Pod LIST unavailable")
+		}
+		return false, nil, nil
+	})
+
+	got, err := NewJobObserver(client).Observe(context.Background(), w)
+	if err == nil || got.Code != VerificationUnavailable || listCalls != 2 {
+		t.Fatalf("failed final Pod LIST was treated as Ready evidence: %#v, err=%v, lists=%d", got, err, listCalls)
+	}
+}
