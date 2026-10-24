@@ -33,14 +33,14 @@ jobs:
     env:
       TEST_POSTGRES_DSN: postgres://gpu:gpu@localhost:5432/gpu_platform_test?sslmode=disable
       TEST_POSTGRES_STORE_DSN: postgres://gpu:gpu@localhost:5432/gpu_store_test?sslmode=disable
-      SOURCE_SHA: 2fcec1cb0ead251b9a0e0fe64ec9a65f2bc86057
+      SOURCE_SHA: d1d283d81bb98eb85ddb4c2fcf00d369e40d0a1d
       CLUSTER_ID: kueue-compat-c1
       KIND_NODE_IMAGE: kindest/node:v1.34.0
       KUEUE_VERSION: v0.20.3
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 2fcec1cb0ead251b9a0e0fe64ec9a65f2bc86057
+          ref: d1d283d81bb98eb85ddb4c2fcf00d369e40d0a1d
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
@@ -78,7 +78,19 @@ jobs:
       - uses: azure/setup-helm@v4
       - name: Install kind
         run: |
-          curl -fsSLo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          rm -f /tmp/kind /tmp/kind.download
+          downloaded=false
+          for url in \
+            "https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-amd64" \
+            "https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64"; do
+            if curl --fail --show-error --location --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o /tmp/kind.download; then
+              mv /tmp/kind.download /tmp/kind
+              downloaded=true
+              break
+            fi
+            rm -f /tmp/kind.download
+          done
+          [[ "$downloaded" == true && -s /tmp/kind ]] || { echo "Unable to download pinned kind v0.30.0 binary from official release endpoints" >&2; exit 1; }
           chmod +x /tmp/kind
           sudo install /tmp/kind /usr/local/bin/kind
       - name: Verify exact published kind image
