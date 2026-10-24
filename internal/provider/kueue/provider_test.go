@@ -2,10 +2,14 @@ package kueue
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
+	kubefake "k8s.io/client-go/kubernetes/fake"
 )
 
 type fakeClient struct {
@@ -201,21 +205,23 @@ func TestDeleteDRAWorkloadReleasesClaimAndPreservesAuditEvidence(t *testing.T) {
 	}
 }
 
-
 func TestRejectedDurableDRAAttemptHasNoKubernetesWrites(t *testing.T) {
 	core := kubefake.NewSimpleClientset()
 	provider := NewProvider(NewKubeClient(core, nil))
 	beforeCalls, ackCalls := 0, 0
 	projection := baseprovider.WorkloadProjection{
 		WorkloadID: "train-guard", ProjectID: "project-1", PoolID: "pool-1",
-		ClusterID: "cluster-a", Namespace: "project-1", Generation: 7,
+		ClusterID:   "cluster-a",
+		Namespace:   "project-1",
+		Generation:  7,
 		OperationID: "operation-guard",
-		Image: "example/train@sha256:" + strings.Repeat("a", 64),
+		Image:       "example/train@sha256:" + strings.Repeat("a", 64),
 		Accelerator: domain.AcceleratorRequest{Class: "a100-mig-1g", Quota: 1},
 		AcceleratorBinding: domain.AcceleratorBinding{
-			Class: "a100-mig-1g",
+			Class:          "a100-mig-1g",
 			AllocationMode: domain.AcceleratorAllocationDRA,
-			ResourceName: "nvidia.com/gpu", Flavor: "a100-mig-1g",
+			ResourceName:   "nvidia.com/gpu",
+			Flavor:         "a100-mig-1g",
 			DRA: &domain.DRAAllocation{DeviceClassName: "gpu.nvidia.com"},
 		},
 		OnBeforeCreate: func(context.Context, baseprovider.JobCreateIntent) error {
