@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Inject a real lost HTTP ACK into the authenticated Management API path.
+"""Inject create and delete lost-ACK faults into the authenticated Management API.
 
-This is an opt-in acceptance test, not a mock/unit fixture. The loopback proxy
-waits until the upstream Management API has fully returned HTTP 204 (the
-PostgreSQL Desired + operation-receipt transaction has committed), holds that
-response, lets the parent SIGKILL the caller process, and then closes the
-socket without forwarding the ACK. The parent recovers using the original
-Idempotency-Key, verifies Desired/receipt state, checks Kueue observations,
-and releases the Workload.
+The loopback proxy waits until the upstream Management API has committed the
+mutation and returned HTTP 204 (create) or 202/204 (delete), withholds the
+response, lets the parent SIGKILL the actual caller process, and closes the
+socket without forwarding the ACK. Recovery reuses the original
+Idempotency-Key, validates the immutable operation receipt and Desired state,
+and independently checks Kueue/provider observations and final Job/Pod absence.
 
-Only Python's standard library is required. All endpoints must be loopback.
+This remains opt-in acceptance, not a mock/unit fixture. The Management API,
+PostgreSQL and Kubernetes/Kueue path must be real and disposable. Only Python's
+standard library is required by the harness itself; all HTTP endpoints must be
+loopback.
 """
 
 from __future__ import annotations
