@@ -201,7 +201,7 @@ func TestRuntimeFailsClosedAcrossAllLifecycleMethods(t *testing.T) {
 	}
 
 	for _, providerCase := range []struct {
-		name string
+		name  string
 		value string
 	}{
 		{name: "missing", value: ""},
