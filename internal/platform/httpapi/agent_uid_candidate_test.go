@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
+	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
