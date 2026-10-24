@@ -222,7 +222,7 @@ func TestRejectedDurableDRAAttemptHasNoKubernetesWrites(t *testing.T) {
 			AllocationMode: domain.AcceleratorAllocationDRA,
 			ResourceName:   "nvidia.com/gpu",
 			Flavor:         "a100-mig-1g",
-			DRA: &domain.DRAAllocation{DeviceClassName: "gpu.nvidia.com"},
+			DRA:            &domain.DRAAllocation{DeviceClassName: "gpu.nvidia.com"},
 		},
 		OnBeforeCreate: func(context.Context, baseprovider.JobCreateIntent) error {
 			beforeCalls++
