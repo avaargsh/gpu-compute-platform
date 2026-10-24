@@ -16,7 +16,7 @@ jobs:
       - name: Checkout exact PR source under test
         uses: actions/checkout@v4
         with:
-          ref: 71a46fe4fcce2875e026e0ed3dfe2d9488dbd132
+          ref: 4d64220ecd9ce3678955c9edf58f7f5d55b4c7e8
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
@@ -43,6 +43,7 @@ jobs:
         run: |
           bash -n scripts/e2e/kueue_inplace_upgrade_kind.sh
           python3 -m unittest discover -s scripts/e2e -p 'test_kueue_upgrade_rehearsal.py' -v
+          python3 -m unittest discover -s scripts/e2e -p 'test_kueue_upgrade_lineage.py' -v
       - name: Run isolated in-place upgrade and product Golden Path
         shell: bash
         env:
