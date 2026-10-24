@@ -163,6 +163,30 @@ test('real browser creates Pool and Workload, reads receipts, enforces child gua
   await expect(page.getByTestId('observation-provenance')).toContainText('Agent 最后上报时间：未上报')
   await expect(page.getByTestId('observation-provenance')).toContainText('不能证明此刻仍在运行')
 
+  // The bounded watcher is an explicit read-only operator action. It must not
+  // create mutations, and a typed scope change must stop it immediately.
+  const putsBeforeWatch = requests.filter(x => x.method === 'PUT').length
+  const deletesBeforeWatch = requests.filter(x => x.method === 'DELETE').length
+  await page.getByRole('button', { name: '开始限时跟踪' }).click()
+  const watchStatus = page.getByTestId('evidence-watch-status')
+  await expect(watchStatus).toBeVisible()
+  await expect(watchStatus).toContainText('1 / 12 次', { timeout: 15000 })
+  await expect(watchStatus).toContainText('不提供实时 GPU 或删除完成证明')
+  await page.getByRole('button', { name: '停止跟踪' }).click()
+  await expect(watchStatus).toContainText('已手动停止自动核对')
+  await expect(page.getByRole('button', { name: '停止跟踪' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '开始限时跟踪' })).toBeEnabled()
+  expect(requests.filter(x => x.method === 'PUT').length).toBe(putsBeforeWatch)
+  expect(requests.filter(x => x.method === 'DELETE').length).toBe(deletesBeforeWatch)
+
+  await page.getByRole('button', { name: '开始限时跟踪' }).click()
+  await expect(page.getByTestId('evidence-watch-status')).toContainText('1 / 12 次', { timeout: 15000 })
+  await page.getByPlaceholder('cluster-a').fill('scope-changed')
+  await expect(page.getByRole('button', { name: '停止跟踪' })).toBeDisabled()
+  await expect(page.getByTestId('evidence-watch-status')).toContainText('会话或操作范围已变更')
+  await expect(page.getByTestId('evidence-check-time')).toHaveCount(0)
+  await page.getByPlaceholder('cluster-a').fill('browser-ci')
+
   // Actual user entry: discover the previously created Workload through the
   // same OIDC identity and live PostgreSQL Project grant, NOT a mock list.
   await page.getByRole('button', { name: '查询项目 Workload 列表（每页 25 条）' }).click()
