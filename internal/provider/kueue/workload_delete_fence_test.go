@@ -131,6 +131,31 @@ func TestGuardedDeleteJobDoesNotFinalizeWhileOwnedPodRemains(t *testing.T) {
 	}
 }
 
+func TestGuardedDeleteMissingJobDoesNotFinalizeWhileMatchingPodRemains(t *testing.T) {
+	job := ownedDeletionJob()
+	controller := true
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "job-train-1-orphan-check", Namespace: "project-1",
+		UID: types.UID("pod-uid-7"), ResourceVersion: "91",
+		Labels: map[string]string{"ai.compute/workload": "job-train-1"},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID,
+			Controller: &controller,
+		}},
+	}}
+	client := kubefake.NewSimpleClientset(pod)
+
+	gone, err := NewKubeClient(client, nil).DeleteJob(
+		context.Background(), "project-1", "job-train-1", 7,
+	)
+	if err != nil {
+		t.Fatalf("absence of Job with a remaining workload Pod should be retryable: %v", err)
+	}
+	if gone {
+		t.Fatal("missing Job must not prove provider release while a workload-labeled Pod remains")
+	}
+}
+
 func TestGuardedDeleteJobFailsClosedOnGenerationOwnerOrIdentityDrift(t *testing.T) {
 	cases := []struct {
 		name   string
