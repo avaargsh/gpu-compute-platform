@@ -90,3 +90,14 @@ The matrix above creates fresh kind clusters. It does **not** validate an in-pla
 ## Non-goals
 
 This compatibility work does not register Volcano/KAI, enable MultiKueue, add a second admission path, enable DRA execution, or promote an alpha scheduling feature. The Stage B provider SPI remains an execution boundary; scheduler discovery is inventory, not permission to dispatch.
+
+
+## Running the compatibility acceptance
+
+The compatibility run is intentionally opt-in so ordinary pushes do not consume kind-cluster CI minutes.
+
+- **C1:** use the existing `kindest/node:v1.34.0` image with Kueue `v0.20.3`.
+- **C2:** after this workflow revision is present on the default branch, manually dispatch the Go Control Plane workflow with target row `C2` and an exact published `kindest/node:v1.35.x` tag.
+- To run C1 directly from this PR without dispatching the full Go/Portal suite, add the `run-kueue-compatibility` label. This label selects only the compatibility job; it does not trigger Portal browser acceptance or the Management ACK-drop experiment.
+- The compatibility job checks the v1beta2 API contract and lifecycle/PostgreSQL acceptance, runs the real Golden Path, verifies the actual Kubernetes server minor and Kueue image tag, and uploads a compatibility evidence artifact. Record the artifact together with the checked-out 40-character SHA before changing a row's status.
+- Do not merge this PR or mark C1/C2 supported solely because the ordinary Go CI passes. A failed, unavailable, or skipped real-cluster check leaves the candidate row unaccepted.
