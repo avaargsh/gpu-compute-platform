@@ -152,7 +152,6 @@ func TestJobDeletionBetweenObserverReadsIsNotReady(t *testing.T) {
 	}
 }
 
-
 func TestObserverRejectsSecondOwnedPodAppearingAfterInitialList(t *testing.T) {
 	w, j, p, n := fixture()
 	client := fake.NewSimpleClientset(j, p, n)
