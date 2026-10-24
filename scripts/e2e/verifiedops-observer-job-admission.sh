@@ -260,10 +260,22 @@ if [[ "$namespace_name" != "verifiedops-observer" ]]; then
   echo "Observer namespace has no Kubernetes-managed name label: $namespace_name" >&2
   exit 1
 fi
-# The refusal must come from the named policy; arbitrary schema errors are
-# insufficient proof that the Observer envelope still applies.
+# Verify the mutable selector label really is absent before probing the
+# admission cache. Namespace writes are synchronous, but API-server admission
+# matching can briefly retain the old binding selector after a label change.
+namespace_component="$(kubectl get namespace verifiedops-observer -o jsonpath='{.metadata.labels.app\\.kubernetes\\.io/component}')"
+if [[ -n "$namespace_component" ]]; then
+  echo "Observer namespace app label was not removed: $namespace_component" >&2
+  exit 1
+fi
+
+# The refusal must come from the operator policy scoped by Kubernetes' immutable
+# namespace-name label. While admission caches converge, the example policy's
+# mutable-label binding may still reject this same malicious Job; retry only
+# that exact expected stale denial. Successful admission and every unrelated
+# rejection remain hard failures rather than being mistaken for scope evidence.
 scope_denied=false
-for attempt in 1 2 3 4 5 6 7 8 9 10; do
+for attempt in $(seq 1 60); do
   if kubectl create --dry-run=server -f "$unsafe" >/dev/null 2>"$unsafe.err"; then
     echo 'Observer Job command override admitted after removing mutable namespace app label' >&2
     exit 1
@@ -272,10 +284,16 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
     scope_denied=true
     break
   fi
-  sleep 1
+  if grep -Fq "ValidatingAdmissionPolicy 'verifiedops-observer-job-guard' with binding 'verifiedops-observer-job-guard' denied request: VerifiedOps Job must have exactly one pinned, non-overridable Observer process" "$unsafe.err"; then
+    sleep 1
+    continue
+  fi
+  echo 'Observer scope probe was rejected for an unexpected reason' >&2
+  cat "$unsafe.err" >&2
+  exit 1
 done
 if [[ "$scope_denied" != true ]]; then
-  echo 'Observer admission scope was not proven after mutable namespace label removal' >&2
+  echo 'Observer admission scope was not proven after 60s of policy-cache convergence' >&2
   cat "$unsafe.err" >&2
   exit 1
 fi
