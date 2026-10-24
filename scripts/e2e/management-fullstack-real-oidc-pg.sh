@@ -167,17 +167,8 @@ echo "PASS real Keycloak S256 browser login + scoped PG TLS RBAC/CAS/audit/revoc
 # login and live Keycloak introspection while Control Plane/Agent share the same
 # disposable PostgreSQL desired-state tables and real kind/Kueue execution path.
 if [[ "${RUN_MANAGEMENT_LOST_ACK_ACCEPTANCE:-0}" == "1" ]]; then
-  token_response="$(curl --silent --show-error --fail --max-time 20 \
-    --cacert "$TMP/keycloak.crt" \
-    -X POST "$ISSUER/protocol/openid-connect/token" \
-    -H 'Content-Type: application/x-www-form-urlencoded' \
-    --data-urlencode 'grant_type=password' \
-    --data-urlencode 'client_id=gpu-e2e-direct' \
-    --data-urlencode 'client_secret=e2e-direct-secret-not-for-production' \
-    --data-urlencode 'username=ci-operator' \
-    --data-urlencode 'password=ci-disposable-password-not-for-production')"
-  export OIDC_ACCESS_TOKEN="$(TOKEN_RESPONSE="$token_response" python3 -c 'import json,os,sys; token=json.loads(os.environ["TOKEN_RESPONSE"]).get("access_token",""); sys.stdout.write(token) if token else sys.exit("token response omitted access_token")')"
-  unset token_response
+  export ACK_OIDC_ISSUER="$ISSUER"
+  export ACK_OIDC_CA_CERT="$TMP/keycloak.crt"
 
   export DATABASE_URL="postgres://gpu:ci-disposable-dba@localhost:55433/gpu_management_fullstack_ci?sslmode=verify-full&sslrootcert=$TMP/db-ca.pem"
   export CLUSTER_ID=browser-ci

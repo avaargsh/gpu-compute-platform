@@ -403,10 +403,29 @@ wait_api_gone() {
 # Optional combined Management API ACK-drop experiment, executed while the real
 # Control Plane, Cluster Agent, Kueue and live Workload pool are still available.
 if [[ "${RUN_MANAGEMENT_LOST_ACK_ACCEPTANCE:-0}" == "1" ]]; then
-  : "${OIDC_ACCESS_TOKEN:?real disposable OIDC access token required for lost-ACK acceptance}"
+  : "${ACK_OIDC_ISSUER:?disposable OIDC issuer is required for lost-ACK acceptance}"
+  : "${ACK_OIDC_CA_CERT:?disposable OIDC CA certificate is required for lost-ACK acceptance}"
   : "${IMAGE:?digest-pinned workload image required for lost-ACK acceptance}"
+  # Mint a fresh short-lived access token only after kind, Kueue and the
+  # authenticated Management API are ready; cluster startup can take minutes.
+  token_response="$(curl --silent --show-error --fail --max-time 20 \
+    --cacert "$ACK_OIDC_CA_CERT" \
+    -X POST "$ACK_OIDC_ISSUER/protocol/openid-connect/token" \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode 'grant_type=password' \
+    --data-urlencode 'client_id=gpu-e2e-direct' \
+    --data-urlencode 'client_secret=e2e-direct-secret-not-for-production' \
+    --data-urlencode 'username=ci-operator' \
+    --data-urlencode 'password=ci-disposable-password-not-for-production')"
+  export OIDC_ACCESS_TOKEN="$(TOKEN_RESPONSE="$token_response" python3 -c 'import json,os,sys; token=json.loads(os.environ["TOKEN_RESPONSE"]).get("access_token",""); sys.stdout.write(token) if token else sys.exit("token response omitted access_token")')"
+  unset token_response
+  if [[ -z "$OIDC_ACCESS_TOKEN" ]]; then
+    echo "FAIL: disposable OIDC provider did not issue an access token" >&2
+    exit 1
+  fi
   echo "Running real Management ACK-drop recovery on shared PostgreSQL + kind/Kueue stack"
   ( unset WORKLOAD_ID; make management-compute-lost-ack-acceptance )
+  unset OIDC_ACCESS_TOKEN
 fi
 
 # A realized workload must be cleaned at the provider before desired state is
