@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	"github.com/avaargsh/gpu-compute-platform/internal/store/agentstore"
 	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
@@ -85,12 +87,22 @@ type recordingCreateAttemptStore struct {
 	attemptCalls int
 	lastAttempt  verifiedops.JobCreateAttempt
 	attemptErr   error
+	resolveCalls int
+	resolution   verifiedops.JobCreateAttemptResolution
+	resolveErr   error
 }
 
 func (s *recordingCreateAttemptStore) PrepareJobCreateAttempt(_ context.Context, in verifiedops.JobCreateAttempt) error {
 	s.attemptCalls++
 	s.lastAttempt = in
 	return s.attemptErr
+}
+
+func (s *recordingCreateAttemptStore) ResolveJobCreateAttempt(
+	_ context.Context, _ string, _ domain.ID, _ domain.ID, _ int64,
+) (verifiedops.JobCreateAttemptResolution, error) {
+	s.resolveCalls++
+	return s.resolution, s.resolveErr
 }
 func TestPreparedJobCreateRequiresVerifiedClusterCertificate(t *testing.T) {
 	store := &recordingCreateAttemptStore{recordingCreateUIDStore: &recordingCreateUIDStore{Store: agentstore.NewMemory()}}
@@ -134,5 +146,59 @@ func TestPreparedJobCreateRequiresVerifiedClusterCertificate(t *testing.T) {
 	protected.ServeHTTP(again, agentRequest(t, http.MethodPost, path, body, clusterAIdentity))
 	if again.Code != http.StatusConflict {
 		t.Fatalf("ambiguous retry allowed: %d", again.Code)
+	}
+}
+
+func TestResolveJobCreateAttemptRequiresVerifiedClusterMTLS(t *testing.T) {
+	store := &recordingCreateAttemptStore{
+		recordingCreateUIDStore: &recordingCreateUIDStore{Store: agentstore.NewMemory()},
+		resolution: verifiedops.JobCreateAttemptResolution{
+			State: verifiedops.JobCreateAttemptACKBound,
+			Binding: &verifiedops.JobCreateUIDBinding{
+				OperationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ClusterID: "cluster-a",
+				ProjectID: "project-a", WorkloadID: "train-a", Generation: 3,
+				Namespace: "project-a", JobName: "job-train-a", JobUID: "apiserver-uid",
+				JobResourceVersion: "42", LeaseOwner: "old-agent",
+			},
+		},
+	}
+	handler := NewRouterWithAgentStore(store)
+	const path = "/api/v1/agent/workload-create-attempt?clusterId=cluster-a&operationId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&workloadId=train-a&generation=3"
+	plain := httptest.NewRecorder()
+	handler.ServeHTTP(plain, agentRequest(t, http.MethodGet, path, "", clusterAIdentity))
+	if plain.Code != http.StatusUnauthorized || store.resolveCalls != 0 {
+		t.Fatalf("unwrapped CREATE resolution accepted: status=%d calls=%d", plain.Code, store.resolveCalls)
+	}
+	protected, err := AgentMTLSRouter(handler, "platform.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, identity, path string
+		want                 int
+	}{
+		{"missing-cert", "", path, http.StatusUnauthorized},
+		{"wrong-cert-scope", "spiffe://platform.example/cluster/cluster-b/agent", path, http.StatusForbidden},
+		{"duplicate-operation", clusterAIdentity, path + "&operationId=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			protected.ServeHTTP(rec, agentRequest(t, http.MethodGet, tc.path, "", tc.identity))
+			if rec.Code != tc.want || store.resolveCalls != 0 {
+				t.Fatalf("scope escaped: status=%d want=%d calls=%d", rec.Code, tc.want, store.resolveCalls)
+			}
+		})
+	}
+	valid := httptest.NewRecorder()
+	protected.ServeHTTP(valid, agentRequest(t, http.MethodGet, path, "", clusterAIdentity))
+	if valid.Code != http.StatusOK || valid.Header().Get("Cache-Control") != "no-store" || store.resolveCalls != 1 {
+		t.Fatalf("valid mTLS resolution failed: status=%d cache=%q calls=%d body=%q", valid.Code, valid.Header().Get("Cache-Control"), store.resolveCalls, valid.Body.String())
+	}
+	var got verifiedops.JobCreateAttemptResolution
+	if err := json.NewDecoder(valid.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.State != verifiedops.JobCreateAttemptACKBound || got.Binding == nil || got.Binding.JobUID != "apiserver-uid" {
+		t.Fatalf("incomplete bound resolution: %#v", got)
 	}
 }

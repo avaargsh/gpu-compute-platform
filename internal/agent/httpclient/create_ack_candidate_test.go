@@ -74,3 +74,45 @@ func TestCreateAttemptClientUsesNonRedirectingAgentTransport(t *testing.T) {
 		t.Fatalf("failed attempt publication: %v count=%d", err, count)
 	}
 }
+
+func TestResolveJobCreateAttemptUsesScopedReadAndValidatesBinding(t *testing.T) {
+	count := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/agent/workload-create-attempt" {
+			t.Errorf("unexpected resolution request %s %s", r.Method, r.URL.Path)
+		}
+		q := r.URL.Query()
+		if q.Get("clusterId") != "cluster-a" || q.Get("operationId") != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ||
+			q.Get("workloadId") != "train-a" || q.Get("generation") != "3" {
+			t.Errorf("wrong resolution scope: %v", q)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(verifiedops.JobCreateAttemptResolution{
+			State: verifiedops.JobCreateAttemptACKBound,
+			Binding: &verifiedops.JobCreateUIDBinding{
+				OperationID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ClusterID: "cluster-a",
+				ProjectID: "project-a", WorkloadID: "train-a", Generation: 3,
+				Namespace: "project-a", JobName: "job-train-a", JobUID: "bound-uid",
+				JobResourceVersion: "42", LeaseOwner: "old-agent",
+			},
+		})
+	}))
+	defer server.Close()
+	client := New(server.URL, server.Client())
+	got, err := client.ResolveJobCreateAttempt(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cluster-a", "train-a", 3)
+	if err != nil || count != 1 || got.State != verifiedops.JobCreateAttemptACKBound || got.Binding == nil || got.Binding.JobUID != "bound-uid" {
+		t.Fatalf("failed to resolve bound CREATE state: result=%#v err=%v count=%d", got, err, count)
+	}
+}
+
+func TestResolveJobCreateAttemptRejectsMalformedBoundReply(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptACKBound})
+	}))
+	defer server.Close()
+	client := New(server.URL, server.Client())
+	if _, err := client.ResolveJobCreateAttempt(context.Background(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cluster-a", "train-a", 3); err == nil {
+		t.Fatal("ACK_BOUND without immutable binding was accepted")
+	}
+}

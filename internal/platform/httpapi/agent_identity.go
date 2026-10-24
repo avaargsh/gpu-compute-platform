@@ -63,6 +63,7 @@ func validTrustDomain(v string) bool {
 func agentProtocolRoute(r *http.Request) bool {
 	switch r.Method + " " + r.URL.Path {
 	case "GET /api/v1/agent/desired",
+		"GET /api/v1/agent/workload-create-attempt",
 		"POST /api/v1/agent/register",
 		"POST /api/v1/agent/heartbeat",
 		"POST /api/v1/agent/report",

@@ -7,6 +7,7 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovider.WorkloadProjection) (baseprovider.WorkloadObservation, error) {
@@ -18,22 +19,46 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 	if err != nil {
 		return baseprovider.WorkloadObservation{}, err
 	}
-	if job.DRA != nil {
+	if projection.ExpectedCreateUID != "" && projection.OperationID == "" {
+		return baseprovider.WorkloadObservation{}, fmt.Errorf("expected CREATE UID requires an audited operation")
+	}
+	// A bound operation is a read-only recovery path. Validate its mode before
+	// any provider mutation, including DRA ResourceClaim creation.
+	if projection.OperationID != "" {
+		if projection.ExpectedCreateUID == "" {
+			if projection.OnBeforeCreate == nil || projection.OnCreateACK == nil {
+				return baseprovider.WorkloadObservation{}, fmt.Errorf("claimed CREATE requires durable attempt resolution, PREPARED and ACK publisher")
+			}
+		} else if projection.OnBeforeCreate != nil || projection.OnCreateACK != nil {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf("ACK-bound recovery must not carry CREATE callbacks")
+		}
+	}
+
+	// Legacy/unclaimed reconciliation retains its existing DRA flow. For an
+	// audited create, the guarded KubeClient performs this write only after the
+	// durable PRE-CREATE callback succeeds.
+	if projection.OperationID == "" && projection.ExpectedCreateUID == "" && job.DRA != nil {
 		if err := p.client.ApplyResourceClaim(ctx, job); err != nil {
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply resource claim: %w", classifyProviderError(err))
 		}
 	}
-	// A claimed Management operation must never bypass durable PREPARED.
-	// If the Agent transport lacks either endpoint, fail before CREATE.
-	if projection.OperationID != "" && (projection.OnBeforeCreate == nil || projection.OnCreateACK == nil) {
-		return baseprovider.WorkloadObservation{}, fmt.Errorf("claimed CREATE requires authenticated durable attempt and ACK publisher")
-	}
-	if projection.OnCreateACK != nil && projection.OperationID != "" {
-		if projection.OnBeforeCreate == nil {
-			return baseprovider.WorkloadObservation{}, fmt.Errorf("durable pre-CREATE guard missing")
+
+	if projection.OperationID != "" && projection.ExpectedCreateUID != "" {
+		// Never CREATE or repair side effects for an ACK-bound operation. The
+		// original Job must still be present under the same API-server UID.
+		inspector, ok := p.client.(interface {
+			InspectBoundJob(context.Context, Job, string) error
+		})
+		if !ok {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf("read-only bound Job inspection unavailable")
 		}
-		// A CREATE response may only come from the actual API-server write.
-		// Older test adapters and adoption-only clients cannot forge one.
+		if err := inspector.InspectBoundJob(ctx, job, projection.ExpectedCreateUID); err != nil {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf("inspect ACK-bound Job: %w", classifyProviderError(err))
+		}
+	} else if projection.OperationID != "" {
+		// A provider GET or AlreadyExists race is convergence, not proof that
+		// this audited operation received the CREATE ACK. Only the exact
+		// API-server CREATE response may publish an ACK-bound candidate.
 		capture, ok := p.client.(interface {
 			ApplyJobWithGuardedCreate(context.Context, Job, func(context.Context) error) (JobCreateResponse, error)
 		})
@@ -46,25 +71,29 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 		if err != nil {
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply Job with CREATE capture: %w", classifyProviderError(err))
 		}
-		if result.Disposition == JobCreateAcknowledged {
-			// Publish synchronously before observing or reporting Ready. A
-			// failed publication must not masquerade as verified success.
-			if err := projection.OnCreateACK(ctx, baseprovider.JobCreateACK{
-				Namespace: job.Namespace, Name: job.Name,
-				UID: string(result.UID), ResourceVersion: result.ResourceVersion,
-			}); err != nil {
-				return baseprovider.WorkloadObservation{}, fmt.Errorf("publish Job CREATE candidate: %w", baseprovider.MarkRetryable(err))
-			}
+		if result.Disposition != JobCreateAcknowledged {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf("%w: provider returned %s without a durable CREATE ACK", verifiedops.ErrCreateUIDUnproven, result.Disposition)
+		}
+		if result.UID == "" || result.ResourceVersion == "" {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf("%w: CREATE response omitted API-server UID/resourceVersion", verifiedops.ErrCreateUIDUnproven)
+		}
+		if err := projection.OnCreateACK(ctx, baseprovider.JobCreateACK{
+			Namespace: job.Namespace, Name: job.Name,
+			UID: string(result.UID), ResourceVersion: result.ResourceVersion,
+		}); err != nil {
+			return baseprovider.WorkloadObservation{}, fmt.Errorf("publish Job CREATE candidate: %w", baseprovider.MarkRetryable(err))
 		}
 	} else {
 		if err := p.client.ApplyJob(ctx, job); err != nil {
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply job: %w", classifyProviderError(err))
 		}
 	}
-
 	state, err := p.client.ObserveJob(ctx, job.Namespace, job.Name)
 	if err != nil {
 		return baseprovider.WorkloadObservation{}, fmt.Errorf("observe job: %w", classifyProviderError(err))
+	}
+	if projection.ExpectedCreateUID != "" && state.JobUID != projection.ExpectedCreateUID {
+		return baseprovider.WorkloadObservation{}, fmt.Errorf("%w: observed Job UID differs from persisted CREATE ACK", verifiedops.ErrCreateUIDUnproven)
 	}
 
 	now := time.Now().UTC()

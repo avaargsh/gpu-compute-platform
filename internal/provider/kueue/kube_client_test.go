@@ -659,3 +659,64 @@ func TestApplyResourceClaimAdoptsSameGenerationAfterCreateRace(t *testing.T) {
 		t.Fatalf("same-generation ResourceClaim create race must converge by adoption: %v", err)
 	}
 }
+
+func TestApplyExistingResourceClaimRejectsSameGenerationIdentityOrSpecDrift(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name      string
+		mutate    string
+		wantError string
+	}{
+		{name: "foreign-workload", mutate: "owner", wantError: "owner identity mismatch"},
+		{name: "different-device-class", mutate: "device-class", wantError: "desired spec drift"},
+		{name: "different-device-count", mutate: "count", wantError: "desired spec drift"},
+		{name: "different-project-binding", mutate: "project", wantError: "identity annotation"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			coreClient := kubefake.NewSimpleClientset()
+			client := NewKubeClient(coreClient, nil)
+			job := Job{
+				Generation: 5,
+				Name:       "job-dra-identity",
+				Namespace:  "project-1",
+				Image:      "busybox:1.36",
+				Annotations: map[string]string{
+					"ai.compute/project-id":  "project-1",
+					"ai.compute/workload-id": "train-1",
+				},
+				DRA: &DRARequest{
+					ClaimName:       "accelerator-dra-identity",
+					DeviceClassName: "gpu.nvidia.com",
+					Count:           1,
+				},
+			}
+			if err := client.ApplyResourceClaim(ctx, job); err != nil {
+				t.Fatal(err)
+			}
+			claims := coreClient.ResourceV1().ResourceClaims(job.Namespace)
+			claim, err := claims.Get(ctx, job.DRA.ClaimName, metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch tc.mutate {
+			case "owner":
+				claim.Labels["ai.compute/workload"] = "job-another-workload"
+			case "device-class":
+				claim.Spec.Devices.Requests[0].Exactly.DeviceClassName = "another.gpu.example"
+			case "count":
+				claim.Spec.Devices.Requests[0].Exactly.Count = 2
+			case "project":
+				claim.Annotations["ai.compute/project-id"] = "project-other"
+			default:
+				t.Fatalf("unknown mutation %q", tc.mutate)
+			}
+			if _, err := claims.Update(ctx, claim, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := client.ApplyResourceClaim(ctx, job); err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("same-generation conflicting ResourceClaim should be rejected with %q, got %v", tc.wantError, err)
+			}
+		})
+	}
+}

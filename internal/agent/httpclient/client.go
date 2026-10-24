@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/agent"
@@ -74,6 +75,43 @@ func (c *Client) FinalizeDesired(ctx context.Context, in agent.FinalizeDesiredRe
 // PrepareJobCreateAttempt is mandatory before any API-server Job CREATE.
 func (c *Client) PrepareJobCreateAttempt(ctx context.Context, in verifiedops.JobCreateAttempt) error {
 	return c.post(ctx, "/api/v1/agent/workload-create-attempt", in)
+}
+
+// ResolveJobCreateAttempt reads the persisted outcome before the Agent touches
+// the provider again. UNKNOWN is not permission to repeat the external CREATE.
+func (c *Client) ResolveJobCreateAttempt(
+	ctx context.Context,
+	operationID string,
+	clusterID domain.ID,
+	workloadID domain.ID,
+	generation int64,
+) (verifiedops.JobCreateAttemptResolution, error) {
+	values := url.Values{}
+	values.Set("clusterId", string(clusterID))
+	values.Set("operationId", operationID)
+	values.Set("workloadId", string(workloadID))
+	values.Set("generation", strconv.FormatInt(generation, 10))
+	var out verifiedops.JobCreateAttemptResolution
+	if err := c.get(ctx, "/api/v1/agent/workload-create-attempt?"+values.Encode(), &out); err != nil {
+		return verifiedops.JobCreateAttemptResolution{}, err
+	}
+	switch out.State {
+	case verifiedops.JobCreateAttemptNotFound, verifiedops.JobCreateAttemptUnknown, verifiedops.JobCreateAttemptStale:
+		if out.Binding != nil {
+			return verifiedops.JobCreateAttemptResolution{}, fmt.Errorf("control plane returned binding for non-bound CREATE state")
+		}
+	case verifiedops.JobCreateAttemptACKBound:
+		binding := out.Binding
+		if binding == nil || binding.OperationID != operationID || binding.ClusterID != clusterID ||
+			binding.WorkloadID != workloadID || binding.Generation != generation ||
+			binding.JobUID == "" || binding.JobResourceVersion == "" ||
+			binding.Namespace == "" || binding.JobName == "" {
+			return verifiedops.JobCreateAttemptResolution{}, fmt.Errorf("control plane returned incomplete CREATE ACK binding")
+		}
+	default:
+		return verifiedops.JobCreateAttemptResolution{}, fmt.Errorf("control plane returned unsupported CREATE attempt state")
+	}
+	return out, nil
 }
 
 // PublishJobCreateUID sends a candidate CREATE ACK via the same no-redirect

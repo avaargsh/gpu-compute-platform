@@ -7,6 +7,8 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -14,6 +16,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 var (
@@ -58,7 +62,7 @@ func (c *KubeClient) ApplyResourceClaim(ctx context.Context, in Job) error {
 	claims := c.core.ResourceV1().ResourceClaims(in.Namespace)
 	current, err := claims.Get(ctx, claim.Name, metav1.GetOptions{})
 	if err == nil {
-		return validateProviderGeneration("resource claim", claim.Name, current.Annotations, in.Generation)
+		return validateExistingResourceClaim(current, claim, in.Generation)
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
@@ -80,7 +84,36 @@ func (c *KubeClient) ApplyResourceClaim(ctx context.Context, in Job) error {
 	if err != nil {
 		return fmt.Errorf("adopt resource claim %s after create race: %w", claim.Name, err)
 	}
-	return validateProviderGeneration("resource claim", claim.Name, current.Annotations, in.Generation)
+	return validateExistingResourceClaim(current, claim, in.Generation)
+}
+
+// validateExistingResourceClaim permits convergence only when a same-name
+// claim has the original generation, workload owner, identity annotations, and
+// requested device class/count. Generation equality alone is not ownership or
+// desired-state equivalence.
+func validateExistingResourceClaim(current, desired *resourcev1.ResourceClaim, generation int64) error {
+	if current == nil || desired == nil {
+		return fmt.Errorf("resource claim identity is missing")
+	}
+	if current.Name != desired.Name || current.Namespace != desired.Namespace {
+		return fmt.Errorf("resource claim %s identity mismatch", desired.Name)
+	}
+	if err := validateProviderGeneration("resource claim", desired.Name, current.Annotations, generation); err != nil {
+		return err
+	}
+	owner := desired.Labels["ai.compute/workload"]
+	if owner == "" || current.Labels["ai.compute/workload"] != owner {
+		return fmt.Errorf("resource claim %s owner identity mismatch", desired.Name)
+	}
+	for key, want := range desired.Annotations {
+		if current.Annotations[key] != want {
+			return fmt.Errorf("resource claim %s identity annotation %q mismatch", desired.Name, key)
+		}
+	}
+	if !apiequality.Semantic.DeepEqual(current.Spec, desired.Spec) {
+		return fmt.Errorf("resource claim %s desired spec drift", desired.Name)
+	}
+	return nil
 }
 
 // JobApplyDisposition distinguishes a response to our actual API-server
@@ -124,13 +157,42 @@ func (c *KubeClient) ApplyJobWithCreateResponse(ctx context.Context, in Job) (Jo
 	return result, nil
 }
 
-// Guarded CREATE prepares an immutable durable operation before touching
-// the external API. Missing, conflicted or ambiguous preparation stops CREATE.
+// Guarded CREATE owns the operation-scoped provider mutation sequence: read the
+// Job, commit the durable PRE-CREATE guard, create any prerequisite DRA claim,
+// then issue the Job CREATE. No provider writes may occur before the guard.
 func (c *KubeClient) ApplyJobWithGuardedCreate(ctx context.Context, in Job, before func(context.Context) error) (JobCreateResponse, error) {
 	if before == nil {
 		return JobCreateResponse{}, fmt.Errorf("durable pre-CREATE guard required")
 	}
 	return c.applyJobWithResponse(ctx, in, before)
+}
+
+// InspectBoundJob is strictly read-only. It permits a previously ACK-bound
+// operation to resume observation only while the same API-server UID still
+// occupies the deterministic resource name. It never adopts by name or
+// launches a replacement when the old Job is absent.
+func (c *KubeClient) InspectBoundJob(ctx context.Context, in Job, expectedUID string) error {
+	if c.core == nil {
+		return fmt.Errorf("kubernetes client is required")
+	}
+	if expectedUID == "" || in.Namespace == "" || in.Name == "" || in.Generation < 1 {
+		return verifiedops.ErrCreateUIDUnproven
+	}
+	current, err := c.core.BatchV1().Jobs(in.Namespace).Get(ctx, in.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return fmt.Errorf("%w: ACK-bound Job is absent", verifiedops.ErrCreateUIDUnproven)
+	}
+	if err != nil {
+		return err
+	}
+	if current.Namespace != in.Namespace || current.Name != in.Name ||
+		string(current.UID) != expectedUID || current.ResourceVersion == "" {
+		return fmt.Errorf("%w: live Job identity differs from durable CREATE ACK", verifiedops.ErrCreateUIDUnproven)
+	}
+	if err := validateProviderGeneration("job", in.Name, current.Annotations, in.Generation); err != nil {
+		return fmt.Errorf("%w: %v", verifiedops.ErrCreateUIDUnproven, err)
+	}
+	return nil
 }
 
 func (c *KubeClient) applyJobWithResponse(ctx context.Context, in Job, before func(context.Context) error) (JobCreateResponse, error) {
@@ -159,6 +221,14 @@ func (c *KubeClient) applyJobWithResponse(ctx context.Context, in Job, before fu
 	if before != nil {
 		if err := before(ctx); err != nil {
 			return JobCreateResponse{}, fmt.Errorf("durable CREATE attempt denied: %w", err)
+		}
+		// A ResourceClaim is itself a Kubernetes side effect. Keep it behind the
+		// durable guard so UNKNOWN/STALE/refused attempts cannot mutate the
+		// cluster even when the Job CREATE is correctly blocked.
+		if in.DRA != nil {
+			if err := c.ApplyResourceClaim(ctx, in); err != nil {
+				return JobCreateResponse{}, fmt.Errorf("apply DRA ResourceClaim after durable CREATE preparation: %w", err)
+			}
 		}
 	}
 	created, err := jobs.Create(ctx, job, metav1.CreateOptions{})
@@ -207,7 +277,7 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 		return JobObservation{}, err
 	}
 
-	out := JobObservation{Phase: "Pending"}
+	out := JobObservation{Phase: "Pending", JobUID: string(job.UID)}
 	if job.Status.Failed > 0 {
 		out.Phase = "Failed"
 		out.Failed = true

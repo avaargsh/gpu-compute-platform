@@ -39,6 +39,9 @@ type WorkloadProjection struct {
 	Generation int64
 	// OperationID is a non-authorizing original Management audit correlation.
 	OperationID string
+	// ExpectedCreateUID is an ACK-bound candidate from the original API-server
+	// CREATE. It authorizes read-only identity matching, never a new CREATE.
+	ExpectedCreateUID string `json:"-"`
 	// OnCreateACK is invoked only for a genuine Job CREATE return. This
 	// ephemeral callback is never serialized, replayed, or inferred from GET.
 	OnCreateACK func(context.Context, JobCreateACK) error `json:"-"`

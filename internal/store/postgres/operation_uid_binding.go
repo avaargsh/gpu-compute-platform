@@ -157,31 +157,127 @@ ON CONFLICT DO NOTHING RETURNING operation_id
 // GetJobCreateAttemptState never infers UID ownership from Kubernetes GET.
 // PREPARED is returned as UNKNOWN until an actual CREATE ACK is durably
 // matched; a second Agent must not turn UNKNOWN into an ACK-bound claim.
-func (s *Store) GetJobCreateAttemptState(ctx context.Context,
-	operationID string, clusterID domain.ID, workloadID domain.ID, generation int64,
-) (string, bool, error) {
+// ResolveJobCreateAttempt returns the authoritative persisted attempt state and,
+// only for an exact ACK-bound tuple, its immutable candidate binding. A prepared
+// attempt without a durable binding remains UNKNOWN after any process restart.
+func (s *Store) ResolveJobCreateAttempt(ctx context.Context, operationID string,
+	clusterID domain.ID, workloadID domain.ID, generation int64,
+) (verifiedops.JobCreateAttemptResolution, error) {
+	invalid := verifiedops.JobCreateAttemptResolution{}
 	if s == nil || s.db == nil {
-		return "", false, fmt.Errorf("postgres database is required")
+		return invalid, fmt.Errorf("postgres database is required")
 	}
-	if !bindingOperationID.MatchString(operationID) || clusterID == "" ||
-		workloadID == "" || generation < 1 {
-		return "", false, ErrCreateUIDUnproven
+	if !bindingOperationID.MatchString(operationID) || clusterID == "" || workloadID == "" || generation < 1 {
+		return invalid, ErrCreateUIDUnproven
 	}
-	var state string
+
+	var (
+		attemptOperation       string
+		attemptCluster         domain.ID
+		attemptProject         string
+		attemptWorkload        domain.ID
+		attemptGeneration      int64
+		attemptNamespace       string
+		attemptName            string
+		attemptOwner           string
+		desiredGeneration      sql.NullInt64
+		desiredProject         sql.NullString
+		deleting               sql.NullTime
+		currentNamespace       sql.NullString
+		currentProvider        sql.NullString
+		bindingOperation       sql.NullString
+		bindingCluster         sql.NullString
+		bindingProject         sql.NullString
+		bindingWorkload        sql.NullString
+		bindingGeneration      sql.NullInt64
+		bindingNamespace       sql.NullString
+		bindingName            sql.NullString
+		bindingUID             sql.NullString
+		bindingResourceVersion sql.NullString
+		bindingOwner           sql.NullString
+	)
 	err := s.db.QueryRowContext(ctx, `
-SELECT CASE WHEN b.operation_id IS NULL THEN 'UNKNOWN' ELSE 'ACK_BOUND' END
+SELECT a.operation_id, a.cluster_id, a.project_id, a.workload_id,
+	a.generation, a.namespace, a.job_name, a.lease_owner,
+	d.generation, d.spec->>'projectID', d.deletion_timestamp,
+	p.namespace, cb.provider,
+	b.operation_id, b.cluster_id, b.project_id, b.workload_id,
+	b.generation, b.namespace, b.job_name, b.job_uid,
+	b.job_resource_version, b.lease_owner
 FROM provider_job_create_attempts a
-LEFT JOIN provider_job_create_uid_bindings b ON b.operation_id=a.operation_id
- AND b.cluster_id=a.cluster_id AND b.workload_id=a.workload_id
- AND b.generation=a.generation AND b.lease_owner=a.lease_owner
-WHERE a.operation_id=$1 AND a.cluster_id=$2 AND a.workload_id=$3 AND a.generation=$4
-`, operationID, clusterID, workloadID, generation).Scan(&state)
+LEFT JOIN desired_resources d
+  ON d.cluster_id=a.cluster_id AND d.kind='Workload' AND d.resource_id=a.workload_id
+	LEFT JOIN project_bindings p ON p.project_id=a.project_id AND p.cluster_id=a.cluster_id
+	LEFT JOIN cluster_bindings cb ON cb.pool_id=d.spec->>'poolID' AND cb.cluster_id=a.cluster_id
+	LEFT JOIN provider_job_create_uid_bindings b ON b.operation_id=a.operation_id
+WHERE a.operation_id=$1
+`, operationID).Scan(
+		&attemptOperation, &attemptCluster, &attemptProject, &attemptWorkload,
+		&attemptGeneration, &attemptNamespace, &attemptName, &attemptOwner,
+		&desiredGeneration, &desiredProject, &deleting, &currentNamespace, &currentProvider,
+		&bindingOperation, &bindingCluster, &bindingProject, &bindingWorkload,
+		&bindingGeneration, &bindingNamespace, &bindingName, &bindingUID,
+		&bindingResourceVersion, &bindingOwner,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+		return verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptNotFound}, nil
 	}
-	return state, err == nil, err
+	if err != nil {
+		return invalid, err
+	}
+	if attemptOperation != operationID || attemptCluster != clusterID || attemptWorkload != workloadID || attemptGeneration != generation {
+		return verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptStale}, nil
+	}
+	if !desiredGeneration.Valid || desiredGeneration.Int64 != attemptGeneration ||
+		!desiredProject.Valid || desiredProject.String != attemptProject || deleting.Valid ||
+		!currentNamespace.Valid || currentNamespace.String != attemptNamespace ||
+		!currentProvider.Valid || currentProvider.String != "kueue" {
+		return verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptStale}, nil
+	}
+	if !bindingOperation.Valid {
+		return verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptUnknown}, nil
+	}
+
+	// A row that exists but does not bind the entire original tuple is not a
+	// usable acknowledgement. Fail closed rather than returning a partial UID.
+	if !bindingCluster.Valid || bindingCluster.String != string(attemptCluster) ||
+		!bindingProject.Valid || bindingProject.String != attemptProject ||
+		!bindingWorkload.Valid || bindingWorkload.String != string(attemptWorkload) ||
+		!bindingGeneration.Valid || bindingGeneration.Int64 != attemptGeneration ||
+		!bindingNamespace.Valid || bindingNamespace.String != attemptNamespace ||
+		!bindingName.Valid || bindingName.String != attemptName ||
+		!bindingOwner.Valid || bindingOwner.String != attemptOwner ||
+		!bindingUID.Valid || strings.TrimSpace(bindingUID.String) == "" ||
+		!bindingResourceVersion.Valid || strings.TrimSpace(bindingResourceVersion.String) == "" {
+		return verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptUnknown}, nil
+	}
+	binding := &verifiedops.JobCreateUIDBinding{
+		OperationID: attemptOperation, ClusterID: attemptCluster,
+		ProjectID: attemptProject, WorkloadID: attemptWorkload,
+		Generation: attemptGeneration, Namespace: attemptNamespace,
+		JobName: attemptName, JobUID: bindingUID.String,
+		JobResourceVersion: bindingResourceVersion.String, LeaseOwner: attemptOwner,
+	}
+	return verifiedops.JobCreateAttemptResolution{
+		State: verifiedops.JobCreateAttemptACKBound, Binding: binding,
+	}, nil
 }
 
+// GetJobCreateAttemptState remains for existing internal callers. New recovery
+// paths should use ResolveJobCreateAttempt so ACK_BOUND includes the same
+// authoritative binding tuple used to make the state decision.
+func (s *Store) GetJobCreateAttemptState(ctx context.Context, operationID string,
+	clusterID domain.ID, workloadID domain.ID, generation int64,
+) (string, bool, error) {
+	resolution, err := s.ResolveJobCreateAttempt(ctx, operationID, clusterID, workloadID, generation)
+	if err != nil {
+		return "", false, err
+	}
+	if resolution.State == verifiedops.JobCreateAttemptNotFound {
+		return "", false, nil
+	}
+	return string(resolution.State), true, nil
+}
 func validJobBinding(in JobCreateUIDBinding) bool {
 	return bindingOperationID.MatchString(in.OperationID) &&
 		in.ClusterID != "" && in.ProjectID != "" && in.WorkloadID != "" &&
