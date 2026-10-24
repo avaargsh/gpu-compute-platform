@@ -34,7 +34,10 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 		}
 	}
 
-	if projection.ExpectedCreateUID == "" && job.DRA != nil {
+	// Legacy/unclaimed reconciliation retains its existing DRA flow. For an
+	// audited create, the guarded KubeClient performs this write only after the
+	// durable PRE-CREATE callback succeeds.
+	if projection.OperationID == "" && projection.ExpectedCreateUID == "" && job.DRA != nil {
 		if err := p.client.ApplyResourceClaim(ctx, job); err != nil {
 			return baseprovider.WorkloadObservation{}, fmt.Errorf("apply resource claim: %w", classifyProviderError(err))
 		}
