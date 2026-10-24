@@ -16,7 +16,7 @@ jobs:
       - name: Checkout exact PR source under test
         uses: actions/checkout@v4
         with:
-          ref: 4d64220ecd9ce3678955c9edf58f7f5d55b4c7e8
+          ref: d409840c8b01a28046473a55250f5af1dd24ab0b
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
@@ -44,10 +44,12 @@ jobs:
           bash -n scripts/e2e/kueue_inplace_upgrade_kind.sh
           python3 -m unittest discover -s scripts/e2e -p 'test_kueue_upgrade_rehearsal.py' -v
           python3 -m unittest discover -s scripts/e2e -p 'test_kueue_upgrade_lineage.py' -v
+          python3 -m unittest discover -s scripts/e2e -p 'test_kueue_etcd_fixture_probe.py' -v
       - name: Run isolated in-place upgrade and product Golden Path
         shell: bash
         env:
           ALLOW_EPHEMERAL_KUEUE_UPGRADE: YES
+          LEGACY_ETCD_FIXTURE: YES
           CLUSTER_ID: kueue-upgrade-rehearsal
           KIND_NODE_IMAGE: kindest/node:v1.34.0
           EVIDENCE_DIR: ${{ runner.temp }}/kueue-upgrade-rehearsal-${{ github.run_id }}
