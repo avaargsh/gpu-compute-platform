@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useResource } from '@/management/hooks/useResource'
+import { StaleResourceReadError, useResource } from '@/management/hooks/useResource'
 import {
   readResource,
   writeResource,
   deleteResource,
+  type DesiredView,
+  type Scope,
 } from '@/management/api'
 
 vi.mock('@/management/api', () => ({
@@ -53,10 +55,10 @@ describe('useResource', () => {
 
     const { result } = renderHook(() => useResource())
     await act(async () => {
-      await result.current.readResource(
+      await expect(result.current.readResource(
         { cluster: 'cluster-a', project: 'proj-a', kind: 'ComputePool', resource: 'pool-1' },
         'token-123'
-      )
+      )).rejects.toThrow('404 Not Found')
     })
 
     expect(result.current.desired).toBeNull()
@@ -89,5 +91,110 @@ describe('useResource', () => {
     })
     expect(result.current.desired).toBeNull()
     expect(result.current.error).toBe('')
+  })
+})
+
+
+type ReadReply = Awaited<ReturnType<typeof readResource>>
+function deferredRead() {
+  let resolve!: (value: ReadReply) => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<ReadReply>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
+const targetA: Scope = { cluster: 'cluster-a', project: 'proj-a', kind: 'Workload', resource: 'train-a' }
+const targetB: Scope = { ...targetA, resource: 'train-b' }
+const readA: DesiredView = {
+  clusterId: targetA.cluster, projectId: targetA.project, kind: targetA.kind,
+  id: targetA.resource, generation: 1, deleting: false, spec: {},
+}
+const readB: DesiredView = { ...readA, id: targetB.resource }
+
+describe('useResource stale read safety', () => {
+  it('does not let late GET A overwrite newer GET B', async () => {
+    const first = deferredRead()
+    const second = deferredRead()
+    vi.mocked(readResource).mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise)
+    const { result } = renderHook(() => useResource())
+    let oldRead!: Promise<unknown>
+    let newRead!: Promise<unknown>
+    act(() => {
+      oldRead = result.current.readResource(targetA, 'token-a')
+      newRead = result.current.readResource(targetB, 'token-a')
+    })
+    const stale = expect(oldRead).rejects.toBeInstanceOf(StaleResourceReadError)
+    await act(async () => {
+      second.resolve({ status: 200, value: readB })
+      await newRead
+    })
+    await act(async () => {
+      first.resolve({ status: 200, value: readA })
+      await stale
+    })
+    expect(result.current.desired).toEqual(readB)
+    expect(result.current.loading).toBe(false)
+    expect(result.current.error).toBe('')
+  })
+
+  it('clearDesired invalidates an in-flight GET and prevents repopulating a previous session', async () => {
+    const pending = deferredRead()
+    vi.mocked(readResource).mockImplementationOnce(() => pending.promise)
+    const { result } = renderHook(() => useResource())
+    let oldRead!: Promise<unknown>
+    act(() => { oldRead = result.current.readResource(targetA, 'old-session-token') })
+    const stale = expect(oldRead).rejects.toBeInstanceOf(StaleResourceReadError)
+    act(() => { result.current.clearDesired() })
+    await act(async () => {
+      pending.resolve({ status: 200, value: readA })
+      await stale
+    })
+    expect(result.current.desired).toBeNull()
+    expect(result.current.loading).toBe(false)
+    expect(result.current.error).toBe('')
+  })
+
+  it('late failing GET cannot replace the newer successful resource or show stale errors', async () => {
+    const oldPending = deferredRead()
+    const newPending = deferredRead()
+    vi.mocked(readResource).mockImplementationOnce(() => oldPending.promise).mockImplementationOnce(() => newPending.promise)
+    const { result } = renderHook(() => useResource())
+    let oldRead!: Promise<unknown>
+    let newRead!: Promise<unknown>
+    act(() => {
+      oldRead = result.current.readResource(targetA, 'token-a')
+      newRead = result.current.readResource(targetB, 'token-a')
+    })
+    const stale = expect(oldRead).rejects.toBeInstanceOf(StaleResourceReadError)
+    await act(async () => {
+      newPending.resolve({ status: 200, value: readB })
+      await newRead
+    })
+    await act(async () => {
+      oldPending.reject(new Error('old project read forbidden'))
+      await stale
+    })
+    expect(result.current.desired).toEqual(readB)
+    expect(result.current.error).toBe('')
+  })
+
+  it('a dispatched PUT invalidates a preexisting GET even when the GET settles after the write', async () => {
+    const oldPending = deferredRead()
+    vi.mocked(readResource).mockImplementationOnce(() => oldPending.promise)
+    vi.mocked(writeResource).mockResolvedValueOnce({ status: 204, value: null })
+    const { result } = renderHook(() => useResource())
+    let oldRead!: Promise<unknown>
+    act(() => { oldRead = result.current.readResource(targetA, 'token-a') })
+    const stale = expect(oldRead).rejects.toBeInstanceOf(StaleResourceReadError)
+    await act(async () => {
+      await result.current.writeResource(targetA, 'token-a',
+        '{"expectedGeneration":0,"spec":{}}', '0123456789abcdef0123456789abcdef')
+    })
+    await act(async () => {
+      oldPending.resolve({ status: 200, value: readA })
+      await stale
+    })
+    expect(result.current.desired).toBeNull()
+    expect(result.current.loading).toBe(false)
   })
 })

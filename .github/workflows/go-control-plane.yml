@@ -114,9 +114,9 @@ jobs:
       - name: Management PKCE, CAS and receipt browser-contract tests
         working-directory: frontend
         run: npm run management:test
-      - name: Management receipt and evidence OIDC-scope race regressions
+      - name: Management receipt, evidence and resource OIDC-scope race regressions
         working-directory: frontend
-        run: npm run test:unit -- tests/unit/useReceipt.test.ts tests/unit/useEvidence.test.ts
+        run: npm run test:unit -- tests/unit/useReceipt.test.ts tests/unit/useEvidence.test.ts tests/unit/useResource.test.ts
       - name: Build isolated OIDC Management workbench
         working-directory: frontend
         run: npm run management:build
