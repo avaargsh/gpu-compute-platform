@@ -229,3 +229,65 @@ func TestACKBoundInspectionRequiresExactLiveUIDAndGeneration(t *testing.T) {
 		}
 	}
 }
+
+
+// A DRA claim is a provider mutation too. The durable PRE-CREATE guard must win
+// before either claim creation or Job creation, while an admitted attempt still
+// creates the claim before the Job that references it.
+func TestGuardedKubernetesCREATEPreparesBeforeDRAClaim(t *testing.T) {
+	ctx := context.Background()
+	job := responseJob()
+	job.DRA = &DRARequest{
+		ClaimName:       "accelerator-train",
+		DeviceClassName: "gpu.nvidia.com",
+		Count:           1,
+	}
+	client := kubefake.NewSimpleClientset()
+	var events []string
+	client.PrependReactor("create", "resourceclaims", func(ktesting.Action) (bool, runtime.Object, error) {
+		events = append(events, "claim")
+		return false, nil, nil
+	})
+	client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		events = append(events, "job")
+		created := action.(ktesting.CreateAction).GetObject().(*batchv1.Job).DeepCopy()
+		created.UID = types.UID("apiserver-created-dra-job")
+		created.ResourceVersion = "501"
+		return true, created, nil
+	})
+
+	result, err := NewKubeClient(client, nil).ApplyJobWithGuardedCreate(ctx, job, func(context.Context) error {
+		events = append(events, "prepared")
+		return nil
+	})
+	if err != nil || result.Disposition != JobCreateAcknowledged ||
+		result.UID != types.UID("apiserver-created-dra-job") || result.ResourceVersion != "501" {
+		t.Fatalf("guarded DRA Job CREATE failed: %#v err=%v", result, err)
+	}
+	want := []string{"prepared", "claim", "job"}
+	if len(events) != len(want) {
+		t.Fatalf("unexpected side-effect sequence: got %#v want %#v", events, want)
+	}
+	for i := range want {
+		if events[i] != want[i] {
+			t.Fatalf("event[%d]=%q, want %q; sequence=%#v", i, events[i], want[i], events)
+		}
+	}
+
+	// A refused PRE-CREATE must leave both external resources untouched.
+	refusedClient := kubefake.NewSimpleClientset()
+	refused := 0
+	_, err = NewKubeClient(refusedClient, nil).ApplyJobWithGuardedCreate(ctx, job, func(context.Context) error {
+		refused++
+		return verifiedops.ErrCreateAttemptUnresolved
+	})
+	if !errors.Is(err, verifiedops.ErrCreateAttemptUnresolved) || refused != 1 {
+		t.Fatalf("unresolved durable attempt was not refused exactly once: err=%v calls=%d", err, refused)
+	}
+	for _, action := range refusedClient.Actions() {
+		if action.GetVerb() == "create" &&
+			(action.GetResource().Resource == "jobs" || action.GetResource().Resource == "resourceclaims") {
+			t.Fatalf("refused durable attempt mutated Kubernetes: %#v", refusedClient.Actions())
+		}
+	}
+}
