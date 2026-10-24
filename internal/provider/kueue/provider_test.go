@@ -200,3 +200,44 @@ func TestDeleteDRAWorkloadReleasesClaimAndPreservesAuditEvidence(t *testing.T) {
 		}
 	}
 }
+
+
+func TestRejectedDurableDRAAttemptHasNoKubernetesWrites(t *testing.T) {
+	core := kubefake.NewSimpleClientset()
+	provider := NewProvider(NewKubeClient(core, nil))
+	beforeCalls, ackCalls := 0, 0
+	projection := baseprovider.WorkloadProjection{
+		WorkloadID: "train-guard", ProjectID: "project-1", PoolID: "pool-1",
+		ClusterID: "cluster-a", Namespace: "project-1", Generation: 7,
+		OperationID: "operation-guard",
+		Image: "example/train@sha256:" + strings.Repeat("a", 64),
+		Accelerator: domain.AcceleratorRequest{Class: "a100-mig-1g", Quota: 1},
+		AcceleratorBinding: domain.AcceleratorBinding{
+			Class: "a100-mig-1g",
+			AllocationMode: domain.AcceleratorAllocationDRA,
+			ResourceName: "nvidia.com/gpu", Flavor: "a100-mig-1g",
+			DRA: &domain.DRAAllocation{DeviceClassName: "gpu.nvidia.com"},
+		},
+		OnBeforeCreate: func(context.Context, baseprovider.JobCreateIntent) error {
+			beforeCalls++
+			return verifiedops.ErrCreateAttemptUnresolved
+		},
+		OnCreateACK: func(context.Context, baseprovider.JobCreateACK) error {
+			ackCalls++
+			return nil
+		},
+	}
+	_, err := provider.ReconcileWorkload(context.Background(), projection)
+	if !errors.Is(err, verifiedops.ErrCreateAttemptUnresolved) {
+		t.Fatalf("unresolved durable attempt should fail closed, got %v", err)
+	}
+	if beforeCalls != 1 || ackCalls != 0 {
+		t.Fatalf("unexpected callback count: before=%d ack=%d", beforeCalls, ackCalls)
+	}
+	for _, action := range core.Actions() {
+		if action.GetVerb() == "create" &&
+			(action.GetResource().Resource == "jobs" || action.GetResource().Resource == "resourceclaims") {
+			t.Fatalf("rejected operation changed Kubernetes state: %#v", core.Actions())
+		}
+	}
+}
