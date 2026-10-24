@@ -126,8 +126,9 @@ func (c *KubeClient) ApplyJobWithCreateResponse(ctx context.Context, in Job) (Jo
 	return result, nil
 }
 
-// Guarded CREATE prepares an immutable durable operation before touching
-// the external API. Missing, conflicted or ambiguous preparation stops CREATE.
+// Guarded CREATE owns the operation-scoped provider mutation sequence: read the
+// Job, commit the durable PRE-CREATE guard, create any prerequisite DRA claim,
+// then issue the Job CREATE. No provider writes may occur before the guard.
 func (c *KubeClient) ApplyJobWithGuardedCreate(ctx context.Context, in Job, before func(context.Context) error) (JobCreateResponse, error) {
 	if before == nil {
 		return JobCreateResponse{}, fmt.Errorf("durable pre-CREATE guard required")
@@ -189,6 +190,14 @@ func (c *KubeClient) applyJobWithResponse(ctx context.Context, in Job, before fu
 	if before != nil {
 		if err := before(ctx); err != nil {
 			return JobCreateResponse{}, fmt.Errorf("durable CREATE attempt denied: %w", err)
+		}
+		// A ResourceClaim is itself a Kubernetes side effect. Keep it behind the
+		// durable guard so UNKNOWN/STALE/refused attempts cannot mutate the
+		// cluster even when the Job CREATE is correctly blocked.
+		if in.DRA != nil {
+			if err := c.ApplyResourceClaim(ctx, in); err != nil {
+				return JobCreateResponse{}, fmt.Errorf("apply DRA ResourceClaim after durable CREATE preparation: %w", err)
+			}
 		}
 	}
 	created, err := jobs.Create(ctx, job, metav1.CreateOptions{})
