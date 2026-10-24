@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,6 +47,9 @@ func TestGuardedDeleteJobUsesActualKubernetesUIDAndResourceVersion(t *testing.T)
 			opts.Preconditions.ResourceVersion == nil || *opts.Preconditions.ResourceVersion != "73" {
 			t.Fatalf("DELETE was not fenced against observed exact Job: %#v", opts.Preconditions)
 		}
+		if opts.PropagationPolicy == nil || *opts.PropagationPolicy != metav1.DeletePropagationForeground {
+			t.Fatalf("DELETE must foreground-delete dependents before reporting the Job gone: %#v", opts.PropagationPolicy)
+		}
 		return false, nil, nil
 	})
 	gone, err := NewKubeClient(client, nil).DeleteJob(ctx, "project-1", "job-train-1", 7)
@@ -55,6 +59,100 @@ func TestGuardedDeleteJobUsesActualKubernetesUIDAndResourceVersion(t *testing.T)
 	gone, err = NewKubeClient(client, nil).DeleteJob(ctx, "project-1", "job-train-1", 7)
 	if err != nil || !gone || called != 1 {
 		t.Fatalf("absent Job replay must not issue a second DELETE: gone=%v err=%v called=%d", gone, err, called)
+	}
+}
+
+func TestGuardedDeleteJobDoesNotReportGoneWhileForegroundDeletionIsPending(t *testing.T) {
+	job := ownedDeletionJob()
+	client := kubefake.NewSimpleClientset(job)
+	client.PrependReactor("delete", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		opts := action.(ktesting.DeleteAction).GetDeleteOptions()
+		if opts.PropagationPolicy == nil || *opts.PropagationPolicy != metav1.DeletePropagationForeground {
+			t.Fatalf("expected foreground propagation while Pods are still dependents: %#v", opts.PropagationPolicy)
+		}
+		// Model the API accepting DELETE but retaining the owner while foreground
+		// garbage collection waits for its dependent Pods to terminate.
+		return true, nil, nil
+	})
+	gone, err := NewKubeClient(client, nil).DeleteJob(context.Background(), "project-1", "job-train-1", 7)
+	if err != nil || gone {
+		t.Fatalf("pending foreground deletion must not be finalized: gone=%v err=%v", gone, err)
+	}
+	if _, err := client.BatchV1().Jobs("project-1").Get(context.Background(), "job-train-1", metav1.GetOptions{}); err != nil {
+		t.Fatalf("foreground owner must remain until dependents are gone: %v", err)
+	}
+}
+
+func TestGuardedDeleteJobDoesNotFinalizeWhileOwnedPodRemains(t *testing.T) {
+	ctx := context.Background()
+	job := ownedDeletionJob()
+	controller := true
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "job-train-1-orphan-check", Namespace: "project-1",
+		UID: types.UID("pod-uid-7"), ResourceVersion: "91",
+		Labels: map[string]string{"ai.compute/workload": "job-train-1"},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID,
+			Controller: &controller,
+		}},
+	}}
+	client := kubefake.NewSimpleClientset(job, pod)
+	client.PrependReactor("delete", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		opts := action.(ktesting.DeleteAction).GetDeleteOptions()
+		if opts.PropagationPolicy == nil || *opts.PropagationPolicy != metav1.DeletePropagationForeground {
+			t.Fatalf("foreground deletion is required while a Job-owned Pod remains: %#v", opts.PropagationPolicy)
+		}
+		// The fake client does not model Kubernetes garbage collection. Hold the
+		// Job in the API while its dependent Pod exists, as foreground deletion
+		// does, so the provider cannot confuse a DELETE ACK with completed cleanup.
+		return true, nil, nil
+	})
+
+	gone, err := NewKubeClient(client, nil).DeleteJob(
+		ctx, "project-1", "job-train-1", 7,
+	)
+	if err != nil {
+		t.Fatalf("delete should remain retryable while Kubernetes garbage collection is pending: %v", err)
+	}
+	if gone {
+		t.Fatal("Job absence alone must not finalize a workload while its Job-owned Pod remains")
+	}
+	stillPresent, err := client.CoreV1().Pods("project-1").Get(
+		ctx, pod.Name, metav1.GetOptions{},
+	)
+	if err != nil || stillPresent.UID != pod.UID {
+		t.Fatalf("delete path must not bypass Kubernetes owner deletion: pod=%#v err=%v", stillPresent, err)
+	}
+	stillPresentJob, err := client.BatchV1().Jobs("project-1").Get(
+		ctx, job.Name, metav1.GetOptions{},
+	)
+	if err != nil || stillPresentJob.UID != job.UID {
+		t.Fatalf("foreground Job must remain visible until owned Pod is gone: job=%#v err=%v", stillPresentJob, err)
+	}
+}
+
+func TestGuardedDeleteMissingJobDoesNotFinalizeWhileMatchingPodRemains(t *testing.T) {
+	job := ownedDeletionJob()
+	controller := true
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "job-train-1-orphan-check", Namespace: "project-1",
+		UID: types.UID("pod-uid-7"), ResourceVersion: "91",
+		Labels: map[string]string{"ai.compute/workload": "job-train-1"},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID,
+			Controller: &controller,
+		}},
+	}}
+	client := kubefake.NewSimpleClientset(pod)
+
+	gone, err := NewKubeClient(client, nil).DeleteJob(
+		context.Background(), "project-1", "job-train-1", 7,
+	)
+	if err != nil {
+		t.Fatalf("absence of Job with a remaining workload Pod should be retryable: %v", err)
+	}
+	if gone {
+		t.Fatal("missing Job must not prove provider release while a workload-labeled Pod remains")
 	}
 }
 

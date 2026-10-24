@@ -30,6 +30,14 @@ export CONTROL_PLANE_AGENT_TRUST_DOMAIN=platform.example
 
 The HTTPS server certificate needs a DNS/IP SAN matching what the Agent connects to; its private key is server-only. The Agent issuing CA must be separately managed from the PostgreSQL client CA. Do not put real keys into GitHub. Empty or incomplete TLS settings fail closed. This PoC still binds loopback only; port-forwarding it outside a controlled test environment defeats the trust boundary.
 
+### Separate loopback Agent listener
+
+When a local integration test needs the ordinary loopback Control Plane API and the Agent identity endpoints at the same time, use the explicit `CONTROL_PLANE_PROFILE=development` profile and set `CONTROL_PLANE_AGENT_LISTEN_ADDR=127.0.0.1:8082` alongside the four server/CA/trust-domain settings above. The main `CONTROL_PLANE_LISTEN_ADDR` remains loopback-only; the new HTTPS port is a separate handler wrapped by `AgentMTLSRouter` and exposes only the Agent protocol and `/healthz`. The dual-listener mode is rejected under the `poc` profile so an anonymous main API can never coexist accidentally with the Agent mTLS PoC listener.
+
+Set the Cluster Agent's `CONTROL_PLANE_URL=https://127.0.0.1:8082` and its `CLUSTER_AGENT_TLS_CA`, `CLUSTER_AGENT_TLS_CERT`, and `CLUSTER_AGENT_TLS_KEY` paths. Do not point the Agent at the ordinary HTTP port when it needs the durable pre-CREATE / CREATE-ACK operations: those operations require a verified cluster-scoped client certificate. Under `CONTROL_PLANE_PROFILE=poc`, omit `CONTROL_PLANE_AGENT_LISTEN_ADDR`; the configured Control Plane listener itself remains Agent-only mTLS.
+
+The separate listener is still a local development-test facility, not production ingress. Both addresses must be loopback and production profile remains blocked. The ordinary development HTTP endpoint is unauthenticated and must never be exposed outside a controlled local test.
+
 ## Client configuration
 
 Issue a separate short-lived client certificate per cluster with ClientAuth EKU and URI SAN

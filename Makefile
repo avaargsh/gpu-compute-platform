@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: fmt fmt-check test test-parallel-isolated vet build supply-chain-check acceptance-contract stage-b-volcano-contract kind-up install-kueue install-fake-gpu e2e-golden
+.PHONY: fmt fmt-check test test-parallel-isolated vet build supply-chain-check acceptance-contract stage-b-volcano-contract kind-up install-kueue install-fake-gpu e2e-golden management-compute-lost-ack-acceptance
 
 fmt:
 	bash scripts/go-format.sh
@@ -52,3 +52,7 @@ install-fake-gpu:
 
 e2e-golden:
 	bash scripts/e2e/go-kind-kueue-golden.sh
+
+# Real ACK-loss integration acceptance; requires an isolated authenticated Management API + Postgres + kind/Kueue environment.
+management-compute-lost-ack-acceptance:
+	python3 scripts/e2e/management-compute-lost-ack.py

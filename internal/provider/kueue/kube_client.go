@@ -294,7 +294,11 @@ func (c *KubeClient) DeleteJob(ctx context.Context, namespace, name string, gene
 	jobs := c.core.BatchV1().Jobs(namespace)
 	current, err := jobs.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return true, nil
+		// A Job can disappear before a Pod with its workload label has actually
+		// vanished (for example after an orphaned/dependent Pod survives GC).
+		// The Workload finalizer is released only after the independent Pod list
+		// is empty; a 404 for the Job alone is not a release proof.
+		return c.workloadPodsAbsent(ctx, namespace, name)
 	}
 	if err != nil {
 		return false, err
@@ -309,7 +313,11 @@ func (c *KubeClient) DeleteJob(ctx context.Context, namespace, name string, gene
 	if err != nil {
 		return false, fmt.Errorf("job %s: %w", name, err)
 	}
-	err = jobs.Delete(ctx, name, metav1.DeleteOptions{Preconditions: preconditions})
+	propagation := metav1.DeletePropagationForeground
+	err = jobs.Delete(ctx, name, metav1.DeleteOptions{
+		Preconditions:     preconditions,
+		PropagationPolicy: &propagation,
+	})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
@@ -317,12 +325,30 @@ func (c *KubeClient) DeleteJob(ctx context.Context, namespace, name string, gene
 	// same name must not be mistaken for this generation having completed.
 	_, err = jobs.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return true, nil
+		return c.workloadPodsAbsent(ctx, namespace, name)
 	}
 	if err != nil {
 		return false, err
 	}
 	return false, nil
+}
+
+// workloadPodsAbsent is a fail-closed release fence. Kubernetes foreground
+// deletion normally removes Job-owned dependents before the Job disappears,
+// but a 404 for the owner is insufficient evidence if a workload-labelled Pod
+// remains. Do not delete by label alone; reconciliation must wait or surface
+// the inconsistent Provider state for review.
+func (c *KubeClient) workloadPodsAbsent(ctx context.Context, namespace, jobName string) (bool, error) {
+	pods, err := c.core.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "ai.compute/workload=" + jobName,
+	})
+	if err != nil {
+		return false, err
+	}
+	if len(pods.Items) != 0 {
+		return false, nil
+	}
+	return true, nil
 }
 
 // Claim deletion requires the same exact Job identity written by the reviewed
