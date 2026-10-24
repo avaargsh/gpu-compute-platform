@@ -129,7 +129,6 @@ func readyKueuePod(name, version string) *corev1.Pod {
 	}
 }
 
-
 func TestDiscoveryUsesV1beta2KueueAPI(t *testing.T) {
 	if clusterQueueGVR.Group != "kueue.x-k8s.io" || clusterQueueGVR.Version != "v1beta2" {
 		t.Fatalf("Kueue discovery GVR = %s, want kueue.x-k8s.io/v1beta2", clusterQueueGVR.String())
