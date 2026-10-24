@@ -73,7 +73,7 @@ KUEUE_VERSION=v0.20.3 \
 make e2e-golden
 ```
 
-For C2, first confirm the selected `kindest/node` image is published, then use its exact tag and a distinct cluster name, for example `CLUSTER_ID=kueue-0203-k135`. Record `kubectl version` output rather than assuming the image's tag is the actual patch version. Keep the real Golden Path manual/opt-in; do not add a costly Kubernetes-version matrix to every ordinary code push.
+For C2, use a published digest-pinned `kindest/node:v1.35.x@sha256:<digest>` image with a distinct cluster name, for example `CLUSTER_ID=kueue-0203-k135`. The C2 acceptance uses kind v0.33.0, whereas C1 and the frozen baseline keep kind v0.30.0. Record `kubectl version` output rather than assuming the image's tag is the actual patch version. Keep the real Golden Path manual/opt-in; do not add a costly Kubernetes-version matrix to every ordinary code push.
 
 The real Golden Path must still prove capability registration reports exactly `["kueue"]`, a Workload reaches the expected Kueue admission state, the Job/Pod observation is independently read, invalid accelerator intent fails closed, provider objects are gone before Desired finalization, and the shared ResourceFlavor is not incorrectly deleted.
 

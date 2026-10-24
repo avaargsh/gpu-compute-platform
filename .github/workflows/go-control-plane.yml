@@ -19,7 +19,7 @@ on:
         default: C1
         required: true
       kind_node_image:
-        description: "Published kindest/node image; C1 requires v1.34.0 and C2 requires v1.35.x"
+        description: "Published node image; C1 v1.34.0; C2 exact v1.35.x@sha256 digest"
         type: string
         default: kindest/node:v1.34.0
         required: true
@@ -168,13 +168,17 @@ jobs:
           go test ./internal/provider/kueue ./internal/cluster
           make acceptance-contract
       - uses: azure/setup-helm@v4
-      - name: Install kind
+      - name: Install version-matched kind
+        shell: bash
         run: |
+          set -euo pipefail
+          kind_version=v0.30.0
+          [[ "$TARGET_ROW" != C2 ]] || kind_version=v0.33.0
           rm -f /tmp/kind /tmp/kind.download
           downloaded=false
           for url in \
-            "https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-amd64" \
-            "https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64"; do
+            "https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64" \
+            "https://kind.sigs.k8s.io/dl/${kind_version}/kind-linux-amd64"; do
             if curl --fail --show-error --location --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o /tmp/kind.download; then
               mv /tmp/kind.download /tmp/kind
               downloaded=true
@@ -182,9 +186,10 @@ jobs:
             fi
             rm -f /tmp/kind.download
           done
-          [[ "$downloaded" == true && -s /tmp/kind ]] || { echo "Unable to download pinned kind v0.30.0 binary from official release endpoints" >&2; exit 1; }
+          [[ "$downloaded" == true && -s /tmp/kind ]] || { echo "Unable to download pinned kind $kind_version from official release endpoints" >&2; exit 1; }
           chmod +x /tmp/kind
           sudo install /tmp/kind /usr/local/bin/kind
+          kind version
       - name: Validate compatibility row and image
         shell: bash
         run: |
@@ -201,8 +206,8 @@ jobs:
               }
               ;;
             C2)
-              [[ "$KIND_NODE_IMAGE" =~ ^kindest/node:v1\.35\.[0-9]+$ ]] || {
-                echo "C2 requires an exact published kindest/node:v1.35.x tag" >&2
+              [[ "$KIND_NODE_IMAGE" =~ ^kindest/node:v1\.35\.[0-9]+@sha256:[a-f0-9]{64}$ ]] || {
+                echo "C2 requires a published kindest/node:v1.35.x@sha256:<64 hex> image" >&2
                 exit 2
               }
               ;;
