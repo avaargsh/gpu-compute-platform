@@ -190,7 +190,9 @@ func TestGuardedKubernetesCREATEMarksLostACKAsUnbound(t *testing.T) {
 
 func TestACKBoundInspectionRequiresExactLiveUIDAndGeneration(t *testing.T) {
 	job, err := jobObject(responseJob())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	job.UID = types.UID("bound-job-uid")
 	job.ResourceVersion = "42"
 	core := kubefake.NewSimpleClientset(job)
@@ -214,11 +216,14 @@ func TestACKBoundInspectionRequiresExactLiveUIDAndGeneration(t *testing.T) {
 	if err := stale.InspectBoundJob(context.Background(), responseJob(), "old-generation-job"); !errors.Is(err, verifiedops.ErrCreateUIDUnproven) {
 		t.Fatalf("stale generation was accepted as ACK-bound: %v", err)
 	}
-	absent := NewKubeClient(kubefake.NewSimpleClientset(), nil)
+	absentCore := kubefake.NewSimpleClientset()
+	absent := NewKubeClient(absentCore, nil)
 	if err := absent.InspectBoundJob(context.Background(), responseJob(), "bound-job-uid"); !errors.Is(err, verifiedops.ErrCreateUIDUnproven) {
 		t.Fatalf("absent ACK-bound Job must not trigger replacement: %v", err)
 	}
-	for _, action := range absent.core.Actions() {
-		if action.GetVerb() == "create" { t.Fatalf("ACK-bound recovery issued CREATE: %#v", absent.core.Actions()) }
+	for _, action := range absentCore.Actions() {
+		if action.GetVerb() == "create" {
+			t.Fatalf("ACK-bound recovery issued CREATE: %#v", absentCore.Actions())
+		}
 	}
 }
