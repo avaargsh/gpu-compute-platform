@@ -37,7 +37,7 @@ class ReleaseAttestationRefPolicyTests(unittest.TestCase):
     def test_workflow_job_condition_enforces_trusted_refs(self) -> None:
         source = WORKFLOW.read_text(encoding="utf-8")
         match = re.search(
-            r"(?ms)^  release-attestation:\\n(?P<body>.*?)(?=^  [a-zA-Z0-9_-]+:|\\Z)",
+            r"(?ms)^  release-attestation:\n(?P<body>.*?)(?=^  [a-zA-Z0-9_-]+:|\Z)",
             source,
         )
         self.assertIsNotNone(match, "release-attestation job must exist")
