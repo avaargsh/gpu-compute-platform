@@ -89,7 +89,7 @@ type recordingCreateAttemptStore struct {
 	attemptErr   error
 	resolveCalls int
 	resolution   verifiedops.JobCreateAttemptResolution
-	resolveErr  error
+	resolveErr   error
 }
 
 func (s *recordingCreateAttemptStore) PrepareJobCreateAttempt(_ context.Context, in verifiedops.JobCreateAttempt) error {
@@ -149,7 +149,6 @@ func TestPreparedJobCreateRequiresVerifiedClusterCertificate(t *testing.T) {
 	}
 }
 
-
 func TestResolveJobCreateAttemptRequiresVerifiedClusterMTLS(t *testing.T) {
 	store := &recordingCreateAttemptStore{
 		recordingCreateUIDStore: &recordingCreateUIDStore{Store: agentstore.NewMemory()},
@@ -171,11 +170,16 @@ func TestResolveJobCreateAttemptRequiresVerifiedClusterMTLS(t *testing.T) {
 		t.Fatalf("unwrapped CREATE resolution accepted: status=%d calls=%d", plain.Code, store.resolveCalls)
 	}
 	protected, err := AgentMTLSRouter(handler, "platform.example")
-	if err != nil { t.Fatal(err) }
-	for _, tc := range []struct { name, identity, path string; want int }{
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, identity, path string
+		want                 int
+	}{
 		{"missing-cert", "", path, http.StatusUnauthorized},
 		{"wrong-cert-scope", "spiffe://platform.example/cluster/cluster-b/agent", path, http.StatusForbidden},
-		{"duplicate-operation", clusterAIdentity, path+"&operationId=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", http.StatusBadRequest},
+		{"duplicate-operation", clusterAIdentity, path + "&operationId=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
@@ -191,7 +195,9 @@ func TestResolveJobCreateAttemptRequiresVerifiedClusterMTLS(t *testing.T) {
 		t.Fatalf("valid mTLS resolution failed: status=%d cache=%q calls=%d body=%q", valid.Code, valid.Header().Get("Cache-Control"), store.resolveCalls, valid.Body.String())
 	}
 	var got verifiedops.JobCreateAttemptResolution
-	if err := json.NewDecoder(valid.Body).Decode(&got); err != nil { t.Fatal(err) }
+	if err := json.NewDecoder(valid.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
 	if got.State != verifiedops.JobCreateAttemptACKBound || got.Binding == nil || got.Binding.JobUID != "apiserver-uid" {
 		t.Fatalf("incomplete bound resolution: %#v", got)
 	}
