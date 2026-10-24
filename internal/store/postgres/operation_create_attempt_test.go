@@ -127,3 +127,38 @@ func TestCreateAttemptScopeValidationAndDeletingState(t *testing.T) {
 		t.Fatalf("deleting Desired allowed new CREATE intent: %v", err)
 	}
 }
+
+func TestResolveJobCreateAttemptDistinguishesNotFoundUnknownBoundAndStale(t *testing.T) {
+	store, binding := newCreateUIDFixture(t)
+	ctx := context.Background()
+	resolve := func() verifiedops.JobCreateAttemptResolution {
+		t.Helper()
+		got, err := store.ResolveJobCreateAttempt(ctx, binding.OperationID, binding.ClusterID, binding.WorkloadID, binding.Generation)
+		if err != nil { t.Fatal(err) }
+		return got
+	}
+	if got := resolve(); got.State != verifiedops.JobCreateAttemptNotFound || got.Binding != nil {
+		t.Fatalf("missing durable attempt must be NOT_FOUND: %#v", got)
+	}
+	if err := store.PrepareJobCreateAttempt(ctx, durableAttempt(binding)); err != nil { t.Fatal(err) }
+	restarted := New(store.db)
+	unknown, err := restarted.ResolveJobCreateAttempt(ctx, binding.OperationID, binding.ClusterID, binding.WorkloadID, binding.Generation)
+	if err != nil || unknown.State != verifiedops.JobCreateAttemptUnknown || unknown.Binding != nil {
+		t.Fatalf("PREPARED without ACK must remain UNKNOWN: %#v err=%v", unknown, err)
+	}
+	if err := restarted.RecordJobCreateUID(ctx, binding); err != nil { t.Fatal(err) }
+	bound, err := restarted.ResolveJobCreateAttempt(ctx, binding.OperationID, binding.ClusterID, binding.WorkloadID, binding.Generation)
+	if err != nil || bound.State != verifiedops.JobCreateAttemptACKBound || bound.Binding == nil ||
+		bound.Binding.JobUID != binding.JobUID || bound.Binding.JobResourceVersion != binding.JobResourceVersion ||
+		bound.Binding.OperationID != binding.OperationID || bound.Binding.Generation != binding.Generation {
+		t.Fatalf("ACK-bound resolution lost exact provider identity: %#v err=%v", bound, err)
+	}
+	if _, err := restarted.db.ExecContext(ctx, `
+	UPDATE desired_resources SET generation=generation+1
+	WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
+	`, binding.ClusterID, binding.WorkloadID); err != nil { t.Fatal(err) }
+	stale, err := restarted.ResolveJobCreateAttempt(ctx, binding.OperationID, binding.ClusterID, binding.WorkloadID, binding.Generation)
+	if err != nil || stale.State != verifiedops.JobCreateAttemptStale || stale.Binding != nil {
+		t.Fatalf("old generation must not expose stale binding: %#v err=%v", stale, err)
+	}
+}
