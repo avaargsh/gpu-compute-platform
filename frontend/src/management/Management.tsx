@@ -36,6 +36,11 @@ import {
 import type { EvidenceCheck } from '@/management/evidence-check'
 import { classifyOperationVerdict } from '@/management/operation-verdict'
 import { receiptResourceScope } from '@/management/readback'
+import {
+  EVIDENCE_WATCH_INTERVAL_MS,
+  EVIDENCE_WATCH_MAX_READS,
+  evidenceWatchDecision,
+} from '@/management/evidence-watch'
 
 const cardStyle: React.CSSProperties = {
   border: '1px solid',
@@ -118,6 +123,14 @@ export function ManagementApp() {
   const [verifiedSelection, setVerifiedSelection] = useState<VerifiedPoolSelection | null>(null)
   const [recentOps, setRecentOps] = useState<RecentOperation[]>([])
   const [feedback, setFeedback] = useState<Feedback>(null)
+  const [evidenceWatch, setEvidenceWatch] = useState<{
+    session: object
+    cluster: string
+    project: string
+    operationId: string
+  } | null>(null)
+  const [watchReadCount, setWatchReadCount] = useState(0)
+  const [watchStatus, setWatchStatus] = useState('')
   const operationVerdict = activeEvidence ? classifyOperationVerdict(activeEvidence) : null
 
   const scope: Scope = { cluster, project, kind, resource }
@@ -125,6 +138,8 @@ export function ManagementApp() {
   // cannot repopulate a cleared receipt after a form or identity change.
   const receiptContext = useRef({ session, authenticated, cluster, project, operationId })
   receiptContext.current = { session, authenticated, cluster, project, operationId }
+  const liveToken = useRef(token)
+  liveToken.current = token
 
   // Vue 的 clearResult() 等价物：任何新的授权读取/回执查询都必须先作废旧的
   // 回执与证据状态，避免旧 note 与新 desired 区在 DOM 中同时出现。
@@ -142,6 +157,78 @@ export function ManagementApp() {
   useEffect(() => {
     clearResult()
   }, [session, authenticated, cluster, project, operationId, clearResult])
+
+  // User-initiated bounded read-only polling. Never transfer an active
+  // watch to a different OIDC login or selected cluster/project/operation.
+  // The existing evidence hook independently fences stale promises by epoch.
+  useEffect(() => {
+    const current = evidenceWatch
+    if (!current) return
+    const matches = () => {
+      const now = receiptContext.current
+      return now.authenticated && now.session === current.session &&
+        now.cluster === current.cluster && now.project === current.project &&
+        now.operationId === current.operationId
+    }
+    if (!authenticated || !matches()) {
+      setEvidenceWatch(null)
+      setWatchStatus('会话或操作范围已变更，已停止自动核对。')
+      return
+    }
+    let active = true
+    let inFlight = false
+    let completedReads = 0
+    const stop = (notice: string) => {
+      if (!active || !matches()) return
+      setEvidenceWatch(null)
+      setWatchStatus(notice)
+    }
+    const poll = async () => {
+      if (!active || !matches() || inFlight) return
+      if (completedReads >= EVIDENCE_WATCH_MAX_READS) {
+        stop('已达到只读核对次数上限；如需继续，请重新手动启动。')
+        return
+      }
+      inFlight = true
+      try {
+        // Fetch a currently valid access token for EACH iteration. Do not
+        // persist tokens or grant a watcher authorization across re-login.
+        const accessToken = liveToken.current()
+        const { check } = await refreshEvidenceChainFn(
+          current.cluster, current.project, current.operationId, accessToken
+        )
+        if (!active || !matches()) return
+        completedReads += 1
+        setWatchReadCount(completedReads)
+        setActiveEvidence(check)
+        setEvidenceCheckedAt(new Date().toISOString())
+        const decision = evidenceWatchDecision(check, completedReads)
+        if (decision === 'stop-scope') {
+          stop('Desired 与原始操作不一致或已进入新一代，自动核对已停止。')
+        } else if (decision === 'stop-terminal') {
+          stop('发现终态 Agent 观察，已停止自动核对；此结果尚非独立签名证明。')
+        } else if (decision === 'stop-budget') {
+          stop('已完成最多 ' + EVIDENCE_WATCH_MAX_READS + ' 次只读核对。')
+        } else {
+          setWatchStatus('第 ' + completedReads + ' 次核对完成；等待下一次只读观察。')
+        }
+      } catch (e) {
+        if (active && matches()) {
+          // Network, OIDC revocation and 404 are NOT rollback or deletion
+          // evidence. Stop rather than automatically retrying indefinitely.
+          stop('只读核对中断：' + errMsg(e, '查询不可用') + '。请手动重新授权核对。')
+        }
+      } finally {
+        inFlight = false
+      }
+    }
+    void poll() // Immediate first read, then a bounded 15-second cadence.
+    const intervalId = window.setInterval(() => { void poll() }, EVIDENCE_WATCH_INTERVAL_MS)
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+    }
+  }, [evidenceWatch, authenticated, session, cluster, project, operationId, refreshEvidenceChainFn])
 
   // Load any one-tab recovery pointer from sessionStorage on mount so the
   // "恢复操作范围与 ID" button can appear after a reload + re-login.
@@ -995,13 +1082,46 @@ export function ManagementApp() {
             </Button>
             <Button
               onClick={handleEvidenceRefresh}
-              disabled={!authenticated || busy}
+              disabled={!authenticated || busy || !!evidenceWatch}
               variant="outline"
               className="px-4 py-2 rounded-md border"
             >
               一键重新核对回执、Desired 与执行观察
             </Button>
+            <Button
+              onClick={() => {
+                if (!session || !authenticated || !/^[0-9a-f]{32}$/.test(operationId)) return
+                clearResult()
+                setWatchReadCount(0)
+                setWatchStatus('已开始有限次数的只读核对；不会自动提交或重试写操作。')
+                setEvidenceWatch({ session, cluster, project, operationId })
+              }}
+              disabled={!authenticated || busy || !session ||
+                !/^[0-9a-f]{32}$/.test(operationId) || !!evidenceWatch}
+              variant="outline"
+              className="px-4 py-2 rounded-md border"
+            >
+              开始限时跟踪
+            </Button>
+            <Button
+              onClick={() => {
+                setEvidenceWatch(null)
+                invalidateEvidence()
+                setWatchStatus('已手动停止自动核对。')
+              }}
+              disabled={!evidenceWatch}
+              variant="outline"
+              className="px-4 py-2 rounded-md border"
+            >
+              停止跟踪
+            </Button>
           </div>
+          {(watchStatus || evidenceWatch) && (
+            <p className="text-xs text-[#66707a]" role="status" data-testid="evidence-watch-status">
+              {watchStatus} 已读取 {watchReadCount} / {EVIDENCE_WATCH_MAX_READS} 次；间隔 15 秒。
+              仅自动读取授权回执、Desired 与历史 Agent 观察，不提供实时 GPU 或删除完成证明。
+            </p>
+          )}
           {activeEvidence && (
             <div className="management-evidence mt-3 space-y-2">
               <p className="text-sm font-semibold text-[#47566b]">上次完整证据核对：</p>
