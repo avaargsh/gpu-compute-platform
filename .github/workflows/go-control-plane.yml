@@ -170,7 +170,19 @@ jobs:
       - uses: azure/setup-helm@v4
       - name: Install kind
         run: |
-          curl -fsSLo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          rm -f /tmp/kind /tmp/kind.download
+          downloaded=false
+          for url in \
+            "https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-amd64" \
+            "https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64"; do
+            if curl --fail --show-error --location --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o /tmp/kind.download; then
+              mv /tmp/kind.download /tmp/kind
+              downloaded=true
+              break
+            fi
+            rm -f /tmp/kind.download
+          done
+          [[ "$downloaded" == true && -s /tmp/kind ]] || { echo "Unable to download pinned kind v0.30.0 binary from official release endpoints" >&2; exit 1; }
           chmod +x /tmp/kind
           sudo install /tmp/kind /usr/local/bin/kind
       - name: Validate compatibility row and image
@@ -338,7 +350,19 @@ jobs:
       - uses: azure/setup-helm@v4
       - name: Install kind
         run: |
-          curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          rm -f /tmp/kind /tmp/kind.download
+          downloaded=false
+          for url in \
+            "https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-amd64" \
+            "https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64"; do
+            if curl --fail --show-error --location --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o /tmp/kind.download; then
+              mv /tmp/kind.download /tmp/kind
+              downloaded=true
+              break
+            fi
+            rm -f /tmp/kind.download
+          done
+          [[ "$downloaded" == true && -s /tmp/kind ]] || { echo "Unable to download pinned kind v0.30.0 binary from official release endpoints" >&2; exit 1; }
           chmod +x /tmp/kind
           sudo mv /tmp/kind /usr/local/bin/kind
       - name: Run Go Golden Path
@@ -371,7 +395,19 @@ jobs:
       - uses: azure/setup-helm@v4
       - name: Install kind
         run: |
-          curl -fsSLo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          rm -f /tmp/kind /tmp/kind.download
+          downloaded=false
+          for url in \
+            "https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-amd64" \
+            "https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64"; do
+            if curl --fail --show-error --location --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o /tmp/kind.download; then
+              mv /tmp/kind.download /tmp/kind
+              downloaded=true
+              break
+            fi
+            rm -f /tmp/kind.download
+          done
+          [[ "$downloaded" == true && -s /tmp/kind ]] || { echo "Unable to download pinned kind v0.30.0 binary from official release endpoints" >&2; exit 1; }
           chmod +x /tmp/kind
           sudo install /tmp/kind /usr/local/bin/kind
       - name: Install pinned frontend dependencies
