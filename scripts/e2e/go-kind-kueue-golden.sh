@@ -4,6 +4,8 @@ set -euo pipefail
 : "${CLUSTER_ID:=kind-golden}"
 : "${BASE_URL:=http://127.0.0.1:8080}"
 : "${KUEUE_VERSION:=v0.19.6}"
+KIND_NODE_IMAGE_WAS_SET="${KIND_NODE_IMAGE+x}"
+: "${KIND_NODE_IMAGE:=kindest/node:v1.34.0}"
 : "${TIMEOUT_SECONDS:=240}"
 : "${NAMESPACE:=golden-go}"
 : "${PROJECT_ID:=project-golden}"
@@ -173,7 +175,14 @@ PY
   return 1
 }
 
-kind get clusters | grep -qx "$CLUSTER_ID" || kind create cluster --name "$CLUSTER_ID" --image kindest/node:v1.34.0 --wait 120s
+if kind get clusters | grep -qx "$CLUSTER_ID"; then
+  if [[ "$KIND_NODE_IMAGE_WAS_SET" == "x" ]]; then
+    echo "kind cluster '$CLUSTER_ID' already exists; KIND_NODE_IMAGE=$KIND_NODE_IMAGE applies only at creation. Use a fresh CLUSTER_ID for compatibility-matrix runs." >&2
+    exit 2
+  fi
+else
+  kind create cluster --name "$CLUSTER_ID" --image "$KIND_NODE_IMAGE" --wait 120s
+fi
 kubectl apply --server-side -f "https://github.com/kubernetes-sigs/kueue/releases/download/${KUEUE_VERSION}/manifests.yaml"
 kubectl wait --for=condition=Available deployment/kueue-controller-manager -n kueue-system --timeout="${TIMEOUT_SECONDS}s"
 
