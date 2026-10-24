@@ -486,7 +486,7 @@ def wait_for_workload(
                 status.get("syncState") == "Synced"
                 and "QuotaReserved" in true_conditions
                 and "Admitted" in true_conditions
-                and ({"Ready", "Succeeded"} & true_conditions)
+                and ({"Ready", "PodsReady", "Succeeded"} & true_conditions)
             ):
                 return data
         time.sleep(POLL_SECONDS)
