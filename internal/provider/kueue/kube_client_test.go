@@ -660,12 +660,11 @@ func TestApplyResourceClaimAdoptsSameGenerationAfterCreateRace(t *testing.T) {
 	}
 }
 
-
 func TestApplyExistingResourceClaimRejectsSameGenerationIdentityOrSpecDrift(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {
-		name string
-		mutate string
+		name      string
+		mutate    string
 		wantError string
 	}{
 		{name: "foreign-workload", mutate: "owner", wantError: "owner identity mismatch"},
@@ -679,17 +678,17 @@ func TestApplyExistingResourceClaimRejectsSameGenerationIdentityOrSpecDrift(t *t
 			client := NewKubeClient(coreClient, nil)
 			job := Job{
 				Generation: 5,
-				Name: "job-dra-identity",
-				Namespace: "project-1",
-				Image: "busybox:1.36",
+ 				Name:       "job-dra-identity",
+				Namespace:  "project-1",
+				Image:      "busybox:1.36",
 				Annotations: map[string]string{
-					"ai.compute/project-id": "project-1",
+					"ai.compute/project-id":  "project-1",
 					"ai.compute/workload-id": "train-1",
 				},
 				DRA: &DRARequest{
-					ClaimName: "accelerator-dra-identity",
+					ClaimName:       "accelerator-dra-identity",
 					DeviceClassName: "gpu.nvidia.com",
-					Count: 1,
+					Count:           1,
 				},
 			}
 			if err := client.ApplyResourceClaim(ctx, job); err != nil {
