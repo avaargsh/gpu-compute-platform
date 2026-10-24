@@ -210,8 +210,8 @@ LEFT JOIN desired_resources d
 	LEFT JOIN project_bindings p ON p.project_id=a.project_id AND p.cluster_id=a.cluster_id
 	LEFT JOIN cluster_bindings cb ON cb.pool_id=d.spec->>'poolID' AND cb.cluster_id=a.cluster_id
 	LEFT JOIN provider_job_create_uid_bindings b ON b.operation_id=a.operation_id
-WHERE a.operation_id=$1 AND a.cluster_id=$2 AND a.workload_id=$3 AND a.generation=$4
-`, operationID, clusterID, workloadID, generation).Scan(
+WHERE a.operation_id=$1
+`, operationID).Scan(
 		&attemptOperation, &attemptCluster, &attemptProject, &attemptWorkload,
 		&attemptGeneration, &attemptNamespace, &attemptName, &attemptOwner,
 		&desiredGeneration, &desiredProject, &deleting, &currentNamespace, &currentProvider,
