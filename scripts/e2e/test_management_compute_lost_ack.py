@@ -245,7 +245,7 @@ class CleanupGenerationFenceTests(unittest.TestCase):
             if_match='"1"',
             accepted_statuses=(202, 204),
         )
-        self.assertEqual(replay.call_args.kwargs["method"], "DELETE")
+        self.assertEqual(replay.call_args.args[1], "DELETE")
         self.assertEqual(replay.call_args.kwargs["if_match"], '"1"')
         verify_absent.assert_called_once_with("golden-go", "ack-loss-test", None)
 
@@ -332,3 +332,35 @@ class DeleteAckDropProxyTests(unittest.TestCase):
             upstream.server_close()
             upstream_thread.join(timeout=5)
 
+
+
+class WorkloadObservationWaitTests(unittest.TestCase):
+    def test_pods_ready_is_a_valid_current_generation_running_observation(self) -> None:
+        snapshot = {
+            "metadata": {"generation": 1},
+            "status": {
+                "syncState": "Synced",
+                "observedGeneration": 1,
+                "conditions": [
+                    {"type": "QuotaReserved", "status": "True"},
+                    {"type": "Admitted", "status": "True"},
+                    {"type": "PodsReady", "status": "True"},
+                ],
+            },
+        }
+        with (
+            patch.object(MODULE, "json_call", return_value=(200, snapshot)),
+            patch.object(MODULE.time, "monotonic", side_effect=[0.0, 0.0, 2.0]),
+            patch.object(MODULE.time, "sleep"),
+        ):
+            self.assertEqual(
+                MODULE.wait_for_workload(
+                    "http://127.0.0.1:8080",
+                    "ack-loss-test",
+                    1,
+                    timeout=1,
+                    namespace="project-a",
+                    context=None,
+                ),
+                snapshot,
+            )
