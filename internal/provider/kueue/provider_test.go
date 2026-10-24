@@ -204,7 +204,6 @@ func TestDeleteDRAWorkloadReleasesClaimAndPreservesAuditEvidence(t *testing.T) {
 	}
 }
 
-
 func TestRejectedDurableDRAAttemptHasNoKubernetesWrites(t *testing.T) {
 	core := kubefake.NewSimpleClientset()
 	provider := NewProvider(NewKubeClient(core, nil))
@@ -213,7 +212,7 @@ func TestRejectedDurableDRAAttemptHasNoKubernetesWrites(t *testing.T) {
 		WorkloadID: "train-guard", ProjectID: "project-1", PoolID: "pool-1",
 		ClusterID: "cluster-a", Namespace: "project-1", Generation: 7,
 		OperationID: "operation-guard",
-		Image: "example/train",
+		Image:       "example/train",
 		Accelerator: domain.AcceleratorRequest{Class: "a100-mig-1g", Quota: 1},
 		AcceleratorBinding: domain.AcceleratorBinding{
 			Class: "a100-mig-1g", AllocationMode: domain.AcceleratorAllocationDRA,
