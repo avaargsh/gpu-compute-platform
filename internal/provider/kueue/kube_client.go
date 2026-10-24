@@ -227,7 +227,7 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 			}
 		} else {
 			for _, workload := range workloads.Items {
-				if !ownedByJob(workload.GetOwnerReferences(), job.UID) {
+				if !ownedByJob(workload.GetOwnerReferences(), job) {
 					continue
 				}
 				out.WorkloadName = workload.GetName()
@@ -452,13 +452,25 @@ func (c *KubeClient) apply(ctx context.Context, gvr schema.GroupVersionResource,
 	return err
 }
 
-func ownedByJob(refs []metav1.OwnerReference, uid types.UID) bool {
+// Matching a Job UID alone does not establish controller ownership of a
+// Kueue Workload. This is a scheduling-evidence attribution fence, NOT proof
+// that an authorized operation issued the original Kubernetes CREATE.
+func ownedByJob(refs []metav1.OwnerReference, job *batchv1.Job) bool {
+	if job == nil || job.UID == "" || job.Name == "" {
+		return false
+	}
+	controllers := 0
 	for _, ref := range refs {
-		if ref.Kind == "Job" && ref.UID == uid {
-			return true
+		if ref.Controller == nil || !*ref.Controller {
+			continue
+		}
+		controllers++
+		if ref.APIVersion != "batch/v1" || ref.Kind != "Job" ||
+			ref.Name != job.Name || ref.UID != job.UID {
+			return false
 		}
 	}
-	return false
+	return controllers == 1
 }
 
 func conditionTrue(conditions []any, conditionType string) bool {

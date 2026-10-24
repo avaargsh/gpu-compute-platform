@@ -87,7 +87,8 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 			},
 		},
 	}}
-	workload.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Job", UID: updatedJob.UID}})
+	workloadController := true
+	workload.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: updatedJob.Name, UID: updatedJob.UID, Controller: &workloadController}})
 	if _, err := dynamicClient.Resource(workloadGVR).Namespace("project-1").Create(ctx, workload, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -293,6 +294,8 @@ func TestObserveSucceededJobPreservesKueueEvidenceWithoutInferringPodsReady(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The fake client does not allocate Kubernetes UIDs; give this Job a realistic identity.
+	job.UID = "job-success-uid"
 	job.Status.Succeeded = 1
 	job, err = coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{})
 	if err != nil {
@@ -306,7 +309,8 @@ func TestObserveSucceededJobPreservesKueueEvidenceWithoutInferringPodsReady(t *t
 			map[string]any{"type": "Admitted", "status": "True"},
 		}},
 	}}
-	workload.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Job", UID: job.UID}})
+	workloadController := true
+	workload.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &workloadController}})
 	if _, err := dynamicClient.Resource(workloadGVR).Namespace("project-1").Create(ctx, workload, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -345,6 +349,8 @@ func TestObserveFailedJobPreservesKueueEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The fake client does not allocate Kubernetes UIDs; give this Job a realistic identity.
+	job.UID = "job-failed-uid"
 	job.Status.Failed = 1
 	job, err = coreClient.BatchV1().Jobs("project-1").UpdateStatus(ctx, job, metav1.UpdateOptions{})
 	if err != nil {
@@ -358,7 +364,8 @@ func TestObserveFailedJobPreservesKueueEvidence(t *testing.T) {
 			map[string]any{"type": "Admitted", "status": "True"},
 		}},
 	}}
-	workload.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Job", UID: job.UID}})
+	workloadController := true
+	workload.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &workloadController}})
 	if _, err := dynamicClient.Resource(workloadGVR).Namespace("project-1").Create(ctx, workload, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
