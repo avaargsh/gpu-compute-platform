@@ -81,7 +81,11 @@ ops=[{"op":"replace","path":f"/spec/versions/{i}/storage",
 assert sum(x["value"] is True for x in ops)==1
 print(json.dumps(ops))
 PY
+  # Preserve the same SSA field manager as the pinned Kueue manifest install.
+  # A separate kubectl-patch owner on spec.versions would block the target
+  # manifests with a legitimate Server-Side Apply conflict.
   kubectl patch crd resourceflavors.kueue.x-k8s.io --type=json \
+    --field-manager=kubectl \
     -p "$(cat "$tmp/storage-patch.json")"
   kubectl wait --for=condition=Established crd/resourceflavors.kueue.x-k8s.io --timeout=60s
   kubectl get crd resourceflavors.kueue.x-k8s.io -o json |

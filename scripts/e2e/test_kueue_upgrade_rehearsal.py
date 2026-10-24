@@ -57,6 +57,12 @@ class KueueUpgradeRehearsalTests(unittest.TestCase):
             self.assertIn("LEGACY_ETCD_FIXTURE must be YES or NO", p.stderr)
             self.assertFalse(evidence.exists())
 
+    def test_storage_flip_preserves_original_kubectl_field_manager(self):
+        data = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("--field-manager=kubectl", data)
+        self.assertNotIn("--force-conflicts", data)
+        self.assertLess(data.index("--field-manager=kubectl"), data.index("cat > \"$tmp/fixture.yaml\""))
+
     def test_real_legacy_fixture_proof_must_bracket_official_migration(self):
         data = SCRIPT.read_text()
         self.assertLess(data.index('probe_disposable_etcd v1beta1'),
