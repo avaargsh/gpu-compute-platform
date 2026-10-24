@@ -133,30 +133,53 @@ class FaultState:
         self.error: str | None = None
 
 
-def ack_drop_proxy(base_url: str, expected_path: str, state: FaultState) -> ThreadingHTTPServer:
+def ack_drop_proxy(
+    base_url: str,
+    expected_path: str,
+    state: FaultState,
+    *,
+    expected_method: str = "PUT",
+    accepted_statuses: tuple[int, ...] = (204,),
+) -> ThreadingHTTPServer:
+    """Forward one mutation, withhold its commit ACK, and drop the caller socket."""
+    if expected_method not in {"PUT", "DELETE"}:
+        fail("fault proxy only supports PUT and DELETE")
+    if not accepted_statuses or any(status < 200 or status >= 300 for status in accepted_statuses):
+        fail("accepted_statuses must contain one or more successful HTTP statuses")
     upstream = urllib.parse.urlsplit(base_url)
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         def log_message(self, _format: str, *_args: Any) -> None:
-            # Do not log the Authorization header, request body, or provider data.
+            # Never log Authorization, request body, or provider data.
             return
 
-        def do_PUT(self) -> None:  # noqa: N802
+        def _handle_mutation(self, method: str) -> None:
+            if method != expected_method:
+                state.error = f"fault proxy received unexpected method {method}"
+                state.upstream_finished.set()
+                self.send_error(405)
+                return
             if self.path != expected_path:
                 state.error = "fault proxy received an unexpected request path"
                 state.upstream_finished.set()
                 self.send_error(404)
                 return
             try:
-                length_header = self.headers.get("Content-Length", "")
+                length_header = self.headers.get("Content-Length", "0")
                 length = int(length_header)
                 if length < 0 or length > 256 * 1024:
                     raise ValueError("invalid or oversized request body")
                 body = self.rfile.read(length)
                 forward_headers: dict[str, str] = {}
-                for header in ("Authorization", "Idempotency-Key", "Content-Type", "Origin"):
+                for header in (
+                    "Authorization",
+                    "Idempotency-Key",
+                    "If-Match",
+                    "Content-Type",
+                    "Origin",
+                ):
                     value = self.headers.get(header)
                     if value is not None:
                         forward_headers[header] = value
@@ -167,13 +190,13 @@ def ack_drop_proxy(base_url: str, expected_path: str, state: FaultState) -> Thre
                     timeout=30,
                 )
                 try:
-                    connection.request("PUT", self.path, body=body, headers=forward_headers)
+                    connection.request(method, self.path, body=body, headers=forward_headers)
                     response = connection.getresponse()
-                    response_body = response.read()  # Fully drain upstream response first.
+                    response_body = response.read()  # Drain commit response before faulting.
                     state.backend_status = response.status
-                    if response.status == 204:
-                        # The backend has committed and returned its commit ACK.
-                        # Do not forward it until the parent has killed the caller.
+                    if response.status in accepted_statuses:
+                        # Management has committed the mutation. Hold its ACK until
+                        # the parent SIGKILLs the caller, then close without forwarding.
                         state.upstream_finished.set()
                         if not state.release_connection.wait(timeout=60):
                             state.error = "timed out waiting for parent to release ACK-drop barrier"
@@ -194,13 +217,19 @@ def ack_drop_proxy(base_url: str, expected_path: str, state: FaultState) -> Thre
                     state.upstream_finished.set()
                 finally:
                     connection.close()
-            except Exception as exc:  # surfaced to parent without credentials
+            except Exception as exc:  # Surface category without credentials.
                 state.error = f"fault proxy upstream failure: {type(exc).__name__}"
                 state.upstream_finished.set()
                 try:
                     self.send_error(502)
                 except OSError:
                     pass
+
+        def do_PUT(self) -> None:  # noqa: N802
+            self._handle_mutation("PUT")
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            self._handle_mutation("DELETE")
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     server.daemon_threads = True
@@ -213,9 +242,20 @@ def run_faulted_caller(
     request_id: str,
     body: bytes,
     timeout: int,
+    *,
+    method: str = "PUT",
+    if_match: str | None = None,
+    accepted_statuses: tuple[int, ...] = (204,),
 ) -> int:
+    """SIGKILL the caller after a real upstream mutation ACK is withheld."""
     state = FaultState()
-    server = ack_drop_proxy(base_url, path, state)
+    server = ack_drop_proxy(
+        base_url,
+        path,
+        state,
+        expected_method=method,
+        accepted_statuses=accepted_statuses,
+    )
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
     proxy_url = f"http://127.0.0.1:{server.server_port}"
@@ -233,6 +273,10 @@ def run_faulted_caller(
             request_id,
             "--body-base64",
             encoded_body,
+            "--method",
+            method,
+            "--if-match",
+            if_match or "",
         ],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
@@ -246,16 +290,19 @@ def run_faulted_caller(
             fail(state.error or "upstream Management API did not answer before timeout")
         if state.error:
             fail(state.error)
-        if state.backend_status != 204:
+        if state.backend_status not in accepted_statuses:
             child.wait(timeout=10)
-            fail(f"expected upstream HTTP 204 Desired commit, got {state.backend_status}")
+            fail(
+                f"expected upstream status in {accepted_statuses}, "
+                f"got {state.backend_status}"
+            )
         if child.poll() is not None:
             fail("caller exited before the ACK-drop barrier; the fault injection is invalid")
         child.kill()  # Real process-boundary crash while the HTTP response is withheld.
         return_code = child.wait(timeout=10)
         if return_code != -signal.SIGKILL:
             fail(f"caller process was not SIGKILLed as required (exit={return_code})")
-        state.release_connection.set()  # Proxy now closes the downstream socket without ACK.
+        state.release_connection.set()  # Proxy closes downstream without forwarding ACK.
         return return_code
     finally:
         state.release_connection.set()
@@ -486,7 +533,34 @@ def cleanup_workload(
     # exact generation authorized by the original durable create receipt.
     generation = expected_generation
     delete_id = secrets.token_hex(16)
-    delete_status, _ = http_call(
+    run_faulted_caller(
+        base_url,
+        path,
+        delete_id,
+        b"",
+        timeout,
+        method="DELETE",
+        if_match=f'"{generation}"',
+        accepted_statuses=(202, 204),
+    )
+    print("PASS: DELETE intent committed (HTTP 202/204) but caller was SIGKILLed before ACK")
+
+    code, delete_receipt = json_call(base_url, receipt_path(cluster, project, delete_id), token)
+    if code != 200 or delete_receipt is None:
+        fail(f"lost DELETE ACK could not be recovered from its receipt (HTTP {code})")
+    delete_result_generation = verify_receipt(
+        delete_receipt,
+        request_id=delete_id,
+        cluster=cluster,
+        project=project,
+        workload=workload,
+        action="delete-request",
+        expected_generation=generation,
+    )
+
+    # Explicitly replay the same release operation ID. It must not create a
+    # second tombstone/operation or change the immutable receipt snapshot.
+    replay_status, _ = http_call(
         base_url,
         "DELETE",
         path,
@@ -495,25 +569,22 @@ def cleanup_workload(
         if_match=f'"{generation}"',
         timeout=30,
     )
-    if delete_status not in (202, 204):
-        # The initial DELETE could itself have committed but lost its ACK.
-        # Recover its receipt using the same delete id before deciding.
-        code, receipt = json_call(base_url, receipt_path(cluster, project, delete_id), token)
-        if code != 200 or receipt is None:
-            fail(f"delete outcome is not confirmed (HTTP {delete_status}); preserve resource for reconciliation")
-    code, delete_receipt = json_call(base_url, receipt_path(cluster, project, delete_id), token)
-    if code != 200 or delete_receipt is None:
-        fail(f"delete commit receipt is not authoritatively readable (HTTP {code})")
-    if code == 200 and delete_receipt is not None:
-        verify_receipt(
+    if replay_status not in (202, 204):
+        fail(f"same-key DELETE replay returned HTTP {replay_status}")
+    replay_code, replay_receipt = json_call(
+        base_url, receipt_path(cluster, project, delete_id), token
+    )
+    if (
+        replay_code != 200
+        or replay_receipt is None
+        or not receipt_snapshot_matches(
             delete_receipt,
-            request_id=delete_id,
-            cluster=cluster,
-            project=project,
-            workload=workload,
-            action="delete-request",
-            expected_generation=generation,
+            replay_receipt,
+            expected_generation=delete_result_generation,
         )
+    ):
+        fail("same-key DELETE replay changed or obscured the original operation receipt")
+    print("PASS: same-key DELETE replay reused the single committed release receipt")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         management_status, current = json_call(base_url, path, token)
@@ -792,17 +863,24 @@ if __name__ == "__main__":
             parser.add_argument("--path", required=True)
             parser.add_argument("--request-id", required=True)
             parser.add_argument("--body-base64", required=True)
+            parser.add_argument("--method", choices=("PUT", "DELETE"), default="PUT")
+            parser.add_argument("--if-match", default="")
             args = parser.parse_args(sys.argv[1:])
             token = required_env("OIDC_ACCESS_TOKEN")
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Idempotency-Key": args.request_id,
+            }
+            body = base64.b64decode(args.body_base64, validate=True)
+            if args.method == "PUT":
+                headers["Content-Type"] = "application/json"
+            if args.if_match:
+                headers["If-Match"] = args.if_match
             req = urllib.request.Request(
                 args.url + args.path,
-                data=base64.b64decode(args.body_base64, validate=True),
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                    "Idempotency-Key": args.request_id,
-                },
-                method="PUT",
+                data=body,
+                headers=headers,
+                method=args.method,
             )
             with urllib.request.urlopen(req, timeout=90) as response:
                 response.read()
