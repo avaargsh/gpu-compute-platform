@@ -8,6 +8,7 @@ import (
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -41,13 +42,14 @@ func createACKProjection() baseprovider.WorkloadProjection {
 
 func TestKueueOnlyPublishesActualAPICreateACK(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
+		name string
 		disposition JobApplyDisposition
-		wantCalls   int
+		wantCalls int
+		wantErr bool
 	}{
-		{"created", JobCreateAcknowledged, 1},
-		{"existing", JobExistingUnbound, 0},
-		{"already-exists-race", JobRaceAdoptedUnbound, 0},
+		{"created", JobCreateAcknowledged, 1, false},
+		{"existing", JobExistingUnbound, 0, true},
+		{"already-exists-race", JobRaceAdoptedUnbound, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &ackCaptureClient{fakeClient: &fakeClient{}, response: JobCreateResponse{
@@ -64,13 +66,18 @@ func TestKueueOnlyPublishesActualAPICreateACK(t *testing.T) {
 				return nil
 			}
 			_, err := NewProvider(c).ReconcileWorkload(context.Background(), p)
+			if tc.wantErr {
+				if !errors.Is(err, verifiedops.ErrCreateUIDUnproven) || calls != 0 || c.captures != 1 {
+					t.Fatalf("unbound disposition was promoted: capture=%d publish=%d err=%v", c.captures, calls, err)
+				}
+				return
+			}
 			if err != nil || c.captures != 1 || calls != tc.wantCalls {
 				t.Fatalf("decision %s: capture=%d publish=%d err=%v", tc.disposition, c.captures, calls, err)
 			}
 		})
 	}
 }
-
 func TestKueuePublishFailureStopsObservationAndReportsRetryable(t *testing.T) {
 	c := &ackCaptureClient{fakeClient: &fakeClient{}, response: JobCreateResponse{Disposition: JobCreateAcknowledged, UID: "uid", ResourceVersion: "9"}}
 	p := createACKProjection()
@@ -104,5 +111,58 @@ func TestKueueTimeoutCannotPublishACK(t *testing.T) {
 	_, err := NewProvider(c).ReconcileWorkload(context.Background(), p)
 	if err == nil || calls != 0 {
 		t.Fatalf("ambiguous CREATE became candidate proof: %v calls %d", err, calls)
+	}
+}
+
+type boundInspectTestClient struct {
+	*fakeClient
+	expectedUID string
+	observedUID string
+	inspectErr error
+	inspectCalls int
+}
+
+func (c *boundInspectTestClient) InspectBoundJob(_ context.Context, job Job, expectedUID string) error {
+	c.inspectCalls++
+	c.order = append(c.order, "inspect-bound:"+job.Name)
+	if expectedUID != c.expectedUID { return verifiedops.ErrCreateUIDUnproven }
+	return c.inspectErr
+}
+
+func (c *boundInspectTestClient) ObserveJob(context.Context, string, string) (JobObservation, error) {
+	return JobObservation{JobUID: c.observedUID, Phase: "Running", PodsReady: true}, nil
+}
+
+func TestKueueACKBoundRecoveryIsReadOnlyAndChecksUIDAgainOnObservation(t *testing.T) {
+	client := &boundInspectTestClient{fakeClient: &fakeClient{}, expectedUID: "bound-uid", observedUID: "bound-uid"}
+	p := createACKProjection()
+	p.ExpectedCreateUID = "bound-uid"
+	p.OnBeforeCreate = nil
+	p.OnCreateACK = nil
+	got, err := NewProvider(client).ReconcileWorkload(context.Background(), p)
+	if err != nil { t.Fatal(err) }
+	if client.inspectCalls != 1 || client.order[0] != "inspect-bound:job-train-a" {
+		t.Fatalf("bound Job was not inspected read-only: calls=%d order=%#v", client.inspectCalls, client.order)
+	}
+	for _, action := range client.order {
+		if strings.HasPrefix(action, "job:") || strings.HasPrefix(action, "claim:") {
+			t.Fatalf("ACK-bound recovery issued a write: %#v", client.order)
+		}
+	}
+	if got.ObservedGeneration != p.Generation { t.Fatalf("generation changed: %#v", got) }
+}
+
+func TestKueueACKBoundRecoveryRejectsReplacedJobUID(t *testing.T) {
+	client := &boundInspectTestClient{fakeClient: &fakeClient{}, expectedUID: "bound-uid", observedUID: "replacement-uid"}
+	p := createACKProjection()
+	p.ExpectedCreateUID = "bound-uid"
+	p.OnBeforeCreate = nil
+	p.OnCreateACK = nil
+	_, err := NewProvider(client).ReconcileWorkload(context.Background(), p)
+	if !errors.Is(err, verifiedops.ErrCreateUIDUnproven) { t.Fatalf("replacement UID was accepted: %v", err) }
+	for _, action := range client.order {
+		if strings.HasPrefix(action, "job:") || strings.HasPrefix(action, "claim:") {
+			t.Fatalf("failed identity check still issued a write: %#v", client.order)
+		}
 	}
 }
