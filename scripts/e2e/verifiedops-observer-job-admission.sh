@@ -260,10 +260,36 @@ if [[ "$namespace_name" != "verifiedops-observer" ]]; then
   echo "Observer namespace has no Kubernetes-managed name label: $namespace_name" >&2
   exit 1
 fi
-# The refusal must come from the named policy; arbitrary schema errors are
-# insufficient proof that the Observer envelope still applies.
+# Verify the mutable selector label really is absent before probing the
+# admission cache. Namespace writes are synchronous, but API-server admission
+# matching can briefly retain the old binding selector after a label change.
+namespace_component="$(kubectl get namespace verifiedops-observer -o jsonpath='{.metadata.labels.app\.kubernetes\.io/component}')"
+if [[ -n "$namespace_component" ]]; then
+  echo "Observer namespace app label was not removed: $namespace_component" >&2
+  exit 1
+fi
+
+# Discover the complete guard selector from the live API server. The binding
+# must be exactly name-only to count as immutable scope: a conjunction of the
+# Kubernetes-managed name and mutable app label still stops matching when the
+# mutable label is removed, so it is not sufficient evidence.
+guard_selector="$(kubectl get validatingadmissionpolicybinding verifiedops-observer-job-guard -o json | python -c 'import json,sys; obj=json.load(sys.stdin); selector=((obj.get("spec") or {}).get("matchResources") or {}).get("namespaceSelector"); print(json.dumps(selector, sort_keys=True, separators=(",", ":")))' )"
+if [[ "$guard_selector" == '{"matchLabels":{"kubernetes.io/metadata.name":"verifiedops-observer"}}' ]]; then
+  guard_uses_immutable_scope=true
+elif [[ "$guard_selector" == '{"matchLabels":{"app.kubernetes.io/component":"verifiedops-observer"}}' ]]; then
+  guard_uses_immutable_scope=false
+else
+  echo "Observer guard binding must use an exact name-only or legacy component-only namespace selector; got: $guard_selector" >&2
+  exit 1
+fi
+
+# The unsafe Job must be denied while the mutable app label is absent. Prefer
+# the operator envelope's denial; if the guard was migrated too, its identical
+# immutable namespace-name scope is also valid proof. If the guard still uses
+# the old mutable label, retry only its exact stale-cache denial until it falls
+# out of scope. Successful admission and unrelated errors remain hard failures.
 scope_denied=false
-for attempt in 1 2 3 4 5 6 7 8 9 10; do
+for attempt in $(seq 1 60); do
   if kubectl create --dry-run=server -f "$unsafe" >/dev/null 2>"$unsafe.err"; then
     echo 'Observer Job command override admitted after removing mutable namespace app label' >&2
     exit 1
@@ -272,10 +298,20 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
     scope_denied=true
     break
   fi
-  sleep 1
+  if grep -Fq "ValidatingAdmissionPolicy 'verifiedops-observer-job-guard' with binding 'verifiedops-observer-job-guard' denied request: VerifiedOps Job must have exactly one pinned, non-overridable Observer process" "$unsafe.err"; then
+    if [[ "$guard_uses_immutable_scope" == true ]]; then
+      scope_denied=true
+      break
+    fi
+    sleep 1
+    continue
+  fi
+  echo 'Observer scope probe was rejected for an unexpected reason' >&2
+  cat "$unsafe.err" >&2
+  exit 1
 done
 if [[ "$scope_denied" != true ]]; then
-  echo 'Observer admission scope was not proven after mutable namespace label removal' >&2
+  echo 'Observer admission scope was not proven after 60s of policy-cache convergence' >&2
   cat "$unsafe.err" >&2
   exit 1
 fi
