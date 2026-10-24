@@ -255,7 +255,7 @@ fi
 # The immutable Kubernetes-managed namespace-name label remains the scope.
 namespace_component_removed=true
 kubectl label namespace verifiedops-observer app.kubernetes.io/component- >/dev/null
-namespace_name="$(kubectl get namespace verifiedops-observer -o jsonpath='{.metadata.labels.kubernetes\\.io/metadata\\.name}')"
+namespace_name="$(kubectl get namespace verifiedops-observer -o jsonpath='{.metadata.labels.kubernetes\.io/metadata\.name}')"
 if [[ "$namespace_name" != "verifiedops-observer" ]]; then
   echo "Observer namespace has no Kubernetes-managed name label: $namespace_name" >&2
   exit 1
