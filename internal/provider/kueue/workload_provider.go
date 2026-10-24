@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/avaargsh/gpu-compute-platform/internal/domain"
-	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 	baseprovider "github.com/avaargsh/gpu-compute-platform/internal/provider"
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovider.WorkloadProjection) (baseprovider.WorkloadObservation, error) {
