@@ -738,7 +738,7 @@ def cleanup_workload(
         if_match=f'"{generation}"',
         accepted_statuses=(202, 204),
     )
-    print("PASS: DELETE intent committed (HTTP 202/204) but caller was SIGKILLed before ACK")
+    print(f"PASS: DELETE intent committed then ACK dropped; releaseRequestId={delete_id}; expectedGeneration={generation}; caller=SIGKILL")
 
     code, delete_receipt = json_call(base_url, receipt_path(cluster, project, delete_id), token)
     if code != 200 or delete_receipt is None:
@@ -779,7 +779,7 @@ def cleanup_workload(
         )
     ):
         fail("same-key DELETE replay changed or obscured the original operation receipt")
-    print("PASS: same-key DELETE replay reused the single committed release receipt")
+    print(f"PASS: same-key DELETE replay reused the single committed release receipt; releaseRequestId={delete_id}; resultingGeneration={delete_result_generation}")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         management_status, current = json_call(base_url, path, token)
@@ -1061,7 +1061,7 @@ def main() -> int:
                 expected_accelerator_class=accelerator_class,
                 expected_quota=quota,
             )
-            print("PASS: Workload deletion finalized and provider Job/Pod absence independently checked")
+            print(f"PASS: release finalized; releaseRequestId={delete_id}; generation={generation}; Management/ControlPlane=404; Job/Pod independently absent")
     return 0
 
 
