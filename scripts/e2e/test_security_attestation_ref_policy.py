@@ -47,6 +47,20 @@ class ReleaseAttestationRefPolicyTests(unittest.TestCase):
         self.assertIn("refs/heads/master", condition.group(1))
         self.assertIn("github.event_name == 'workflow_dispatch'", condition.group(1))
 
+    def test_release_attestation_checks_out_source_before_ref_guard(self) -> None:
+        source = WORKFLOW.read_text(encoding="utf-8")
+        match = re.search(
+            r"(?ms)^  release-attestation:\n(?P<body>.*?)(?=^  [a-zA-Z0-9_-]+:|\Z)",
+            source,
+        )
+        self.assertIsNotNone(match, "release-attestation job must exist")
+        body = match.group("body")
+        checkout = re.search(r"(?m)^      - uses: actions/checkout@v4$", body)
+        guard = re.search(r"(?m)^      - name: Enforce trusted ref before attestation$", body)
+        self.assertIsNotNone(checkout, "release-attestation must checkout its own workspace")
+        self.assertIsNotNone(guard, "release-attestation must run the trusted-ref guard")
+        self.assertLess(checkout.start(), guard.start(), "checkout must precede the local ref guard")
+
 
 if __name__ == "__main__":
     unittest.main()
