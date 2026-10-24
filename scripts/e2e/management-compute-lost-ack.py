@@ -32,7 +32,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, NoReturn
 
 ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-REQUEST_RE = re.compile(r"^[0-9a-f]{32}$")
 IMAGE_DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")
 REQUEST_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 POLL_SECONDS = 2
@@ -266,27 +265,6 @@ def run_faulted_caller(
         server.shutdown()
         server.server_close()
         server_thread.join(timeout=5)
-
-
-def client_mode(args: list[str]) -> int:
-    if len(args) != 8:
-        return 64
-    _, url, path, request_id, encoded_body, *_ = args
-    token = required_env("OIDC_ACCESS_TOKEN")
-    body = base64.b64decode(encoded_body, validate=True)
-    request = urllib.request.Request(
-        url + path,
-        data=body,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Idempotency-Key": request_id,
-        },
-        method="PUT",
-    )
-    with urllib.request.urlopen(request, timeout=90) as response:
-        response.read()
-    return 0
 
 
 def receipt_path(cluster: str, project: str, request_id: str) -> str:
