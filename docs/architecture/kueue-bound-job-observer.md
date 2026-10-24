@@ -16,7 +16,8 @@ still require cluster integration tests; an in-process fake does not prove them.
 Readback checks: Job UID/RV, expected generation, batch/v1 controller
 OwnerReference identity, fresh Pod GET and Pod UID/RV, Pod Ready and bound Node,
 Node Ready/UID/RV, pinned container image and resolved ImageID digest, followed
-by second Job/Pod GET identity confirmation. A Pod must have exactly one
+by second Job/Pod GET identity confirmation and a final Pod LIST confirming
+the original Pod is still the only matching controller-owned Pod. A Pod must have exactly one
 controller OwnerReference matching `apiVersion=batch/v1`, `kind=Job`, the exact
 Job name and UID. Labels, a matching UID with a different name, or duplicate
 controller references are insufficient. Multiple owned Pods and mismatched or
