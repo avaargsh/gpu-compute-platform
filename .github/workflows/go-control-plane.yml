@@ -142,7 +142,6 @@ jobs:
       KIND_NODE_IMAGE: ${{ inputs.kind_node_image || 'kindest/node:v1.34.0' }}
       CLUSTER_ID: ${{ inputs.cluster_id || format('kueue-compat-{0}', github.run_id) }}
       KUEUE_VERSION: v0.20.3
-      EVIDENCE_DIR: ${{ runner.temp }}/kueue-compatibility-evidence
     steps:
       - uses: actions/checkout@v4
         with:
@@ -204,6 +203,8 @@ jobs:
           echo "PASS: requested kind image is published: $KIND_NODE_IMAGE"
       - name: Run real Golden Path and capture evidence
         shell: bash
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/kueue-compatibility-evidence
         run: |
           set -euo pipefail
           mkdir -p "$EVIDENCE_DIR"
