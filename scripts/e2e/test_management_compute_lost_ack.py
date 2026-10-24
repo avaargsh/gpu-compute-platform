@@ -209,10 +209,12 @@ class CleanupGenerationFenceTests(unittest.TestCase):
             patch.object(MODULE, "json_call", side_effect=[
                 (200, desired()),
                 (200, receipt),
+                (200, receipt),
                 (404, None),
                 (404, None),
             ]),
-            patch.object(MODULE, "http_call", return_value=(202, b"")) as delete,
+            patch.object(MODULE, "run_faulted_caller") as drop_ack,
+            patch.object(MODULE, "http_call", return_value=(204, b"")) as replay,
             patch.object(MODULE, "verify_provider_absent") as verify_absent,
             patch.object(MODULE.secrets, "token_hex", return_value="f" * 32),
         ):
@@ -233,7 +235,18 @@ class CleanupGenerationFenceTests(unittest.TestCase):
                 expected_accelerator_class=ACCELERATOR_CLASS,
                 expected_quota=QUOTA,
             )
-        self.assertEqual(delete.call_args.kwargs["if_match"], '"1"')
+        drop_ack.assert_called_once_with(
+            "http://127.0.0.1:8081",
+            "/api/v1/management/clusters/cluster-a/projects/project-a/resources/Workload/ack-loss-test",
+            "f" * 32,
+            b"",
+            30,
+            method="DELETE",
+            if_match='"1"',
+            accepted_statuses=(202, 204),
+        )
+        self.assertEqual(replay.call_args.kwargs["method"], "DELETE")
+        self.assertEqual(replay.call_args.kwargs["if_match"], '"1"')
         verify_absent.assert_called_once_with("golden-go", "ack-loss-test", None)
 
 
