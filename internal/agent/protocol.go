@@ -90,6 +90,12 @@ type CreateAttemptPreparer interface {
 	PrepareJobCreateAttempt(context.Context, verifiedops.JobCreateAttempt) error
 }
 
+// CreateAttemptResolver reads the durable disposition before the Agent
+// touches the provider again. UNKNOWN and STALE must never reissue CREATE.
+type CreateAttemptResolver interface {
+	ResolveJobCreateAttempt(context.Context, string, domain.ID, domain.ID, int64) (verifiedops.JobCreateAttemptResolution, error)
+}
+
 type CreateUIDPublisher interface {
 	PublishJobCreateUID(context.Context, JobCreateUIDCandidate) error
 }
