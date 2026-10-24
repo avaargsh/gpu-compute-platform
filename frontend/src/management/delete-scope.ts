@@ -1,4 +1,4 @@
-import { desiredMatchesScope, type DesiredView, type Scope } from './api'
+import { desiredMatchesScope, type DesiredView, type Scope } from './api.ts'
 
 // UI-side defense in depth: a Generation read from resource A cannot be used
 // to send DELETE for resource B after the form's scope has been edited.
