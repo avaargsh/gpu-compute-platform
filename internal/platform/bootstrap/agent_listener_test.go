@@ -55,3 +55,44 @@ func TestAgentTLSConfigRequiresTrustedClientCA(t *testing.T) {
 		t.Fatalf("invalid CA accepted: %v", err)
 	}
 }
+
+func TestDevelopmentCanUseDedicatedLoopbackAgentMTLSListener(t *testing.T) {
+	env := map[string]string{
+		"CONTROL_PLANE_AGENT_LISTEN_ADDR":  "127.0.0.1:8082",
+		"CONTROL_PLANE_TLS_CERT":           "/tmp/agent-server.crt",
+		"CONTROL_PLANE_TLS_KEY":            "/tmp/agent-server.key",
+		"CONTROL_PLANE_AGENT_CLIENT_CA":    "/tmp/agent-client-ca.crt",
+		"CONTROL_PLANE_AGENT_TRUST_DOMAIN": "gpu-compute-ci",
+	}
+	cfg, err := LoadAgentListener(getEnv(env), "development")
+	if err != nil {
+		t.Fatalf("dedicated loopback Agent listener rejected: %#v %v", cfg, err)
+	}
+	if !cfg.Enabled || !cfg.Separate || cfg.ListenAddr != "127.0.0.1:8082" {
+		t.Fatalf("unexpected dedicated listener config: %#v", cfg)
+	}
+	if _, err := LoadAgentListener(getEnv(env), "poc"); err == nil {
+		t.Fatal("poc profile accepted a separate Agent listener alongside the anonymous main API")
+	}
+
+	for _, addr := range []string{"0.0.0.0:8082", "192.0.2.1:8082", "127.0.0.1:0"} {
+		t.Run(addr, func(t *testing.T) {
+			candidate := make(map[string]string, len(env))
+			for key, value := range env {
+				candidate[key] = value
+			}
+			candidate["CONTROL_PLANE_AGENT_LISTEN_ADDR"] = addr
+			if _, err := LoadAgentListener(getEnv(candidate), "development"); err == nil {
+				t.Fatalf("accepted non-loopback or invalid Agent listener address %q", addr)
+			}
+		})
+	}
+
+	delete(env, "CONTROL_PLANE_AGENT_LISTEN_ADDR")
+	if _, err := LoadAgentListener(getEnv(env), "development"); err == nil {
+		t.Fatal("development profile accepted the legacy single-listener mTLS mode")
+	}
+	if _, err := LoadAgentListener(getEnv(env), "production"); err == nil {
+		t.Fatal("production profile accepted the Agent mTLS PoC listener")
+	}
+}

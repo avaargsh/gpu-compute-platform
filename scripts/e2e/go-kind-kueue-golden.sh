@@ -13,11 +13,13 @@ set -euo pipefail
 : "${ACCELERATOR_RESOURCE:=nvidia.com/gpu}"
 : "${ACCELERATOR_CLASS:=h100-80g}"
 : "${ACCELERATOR_FLAVOR:=h100-80g}"
+AGENT_TLS_TMP=""
 
 cleanup() {
   [[ -z "${AGENT_A_PID:-}" ]] || kill "$AGENT_A_PID" 2>/dev/null || true
   [[ -z "${AGENT_B_PID:-}" ]] || kill "$AGENT_B_PID" 2>/dev/null || true
   [[ -z "${CONTROL_PID:-}" ]] || kill "$CONTROL_PID" 2>/dev/null || true
+  [[ -z "${AGENT_TLS_TMP:-}" ]] || rm -rf "$AGENT_TLS_TMP"
 }
 trap cleanup EXIT
 
@@ -68,7 +70,19 @@ PY
 }
 
 put() {
-  curl -fsS -X PUT "$BASE_URL$1" -H 'Content-Type: application/json' -d "$2" >/dev/null
+  local path="$1" payload="$2" response_file status
+  response_file="$(mktemp)"
+  if ! status="$(curl -sS -o "$response_file" -w '%{http_code}' -X PUT "$BASE_URL$path" -H 'Content-Type: application/json' -d "$payload")"; then
+    printf 'PUT %s failed before receiving an HTTP status: %s\n' "$path" "$(cat "$response_file")" >&2
+    rm -f "$response_file"
+    return 1
+  fi
+  if [[ ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+    printf 'PUT %s returned HTTP %s: %s\n' "$path" "$status" "$(cat "$response_file")" >&2
+    rm -f "$response_file"
+    return 1
+  fi
+  rm -f "$response_file"
 }
 
 condition_true() {
@@ -229,19 +243,113 @@ kubectl label node "$node" topology.kubernetes.io/zone=gpu-zone-a ai.compute/rac
 bash scripts/e2e/install-fake-gpu.sh
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
+AGENT_CONTROL_PLANE_URL="${AGENT_CONTROL_PLANE_URL:-$BASE_URL}"
+if [[ "${RUN_MANAGEMENT_LOST_ACK_ACCEPTANCE:-0}" == "1" ]]; then
+  # Management-originated Workloads carry an operation ID. Durable pre-CREATE
+  # and CREATE-ACK publication intentionally require the Agent's verified
+  # SPIFFE mTLS identity; do not weaken that authority in the test harness.
+  AGENT_TLS_TMP="$(mktemp -d)"
+  chmod 700 "$AGENT_TLS_TMP"
+  trust_domain="gpu-compute-ci"
+
+  # Server identity for the dedicated Agent listener. This certificate is
+  # ephemeral and trusted only by the test Agent for 127.0.0.1:8082.
+  openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+    -keyout "$AGENT_TLS_TMP/server.key" -out "$AGENT_TLS_TMP/server.crt" \
+    -subj "/CN=127.0.0.1" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign,cRLSign" \
+    -addext "extendedKeyUsage=serverAuth" \
+    -addext "subjectAltName=IP:127.0.0.1" >/dev/null 2>&1
+
+  # Separate Agent-issuing CA. The client certificate has exactly one
+  # cluster-scoped SPIFFE URI and ClientAuth EKU.
+  openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+    -keyout "$AGENT_TLS_TMP/agent-ca.key" -out "$AGENT_TLS_TMP/agent-ca.crt" \
+    -subj "/CN=Disposable GPU Compute Agent CA" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+  openssl req -new -newkey rsa:2048 -sha256 -nodes \
+    -keyout "$AGENT_TLS_TMP/agent-client.key" -out "$AGENT_TLS_TMP/agent-client.csr" \
+    -subj "/CN=cluster-agent-$CLUSTER_ID" >/dev/null 2>&1
+  cat > "$AGENT_TLS_TMP/agent-client.ext" <<CERT
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth
+subjectAltName=URI:spiffe://$trust_domain/cluster/$CLUSTER_ID/agent
+CERT
+  openssl x509 -req -sha256 -days 1 -in "$AGENT_TLS_TMP/agent-client.csr" \
+    -CA "$AGENT_TLS_TMP/agent-ca.crt" -CAkey "$AGENT_TLS_TMP/agent-ca.key" \
+    -CAcreateserial -out "$AGENT_TLS_TMP/agent-client.crt" \
+    -extfile "$AGENT_TLS_TMP/agent-client.ext" >/dev/null 2>&1
+  chmod 600 "$AGENT_TLS_TMP/server.key" "$AGENT_TLS_TMP/agent-ca.key" "$AGENT_TLS_TMP/agent-client.key"
+  chmod 644 "$AGENT_TLS_TMP/server.crt" "$AGENT_TLS_TMP/agent-ca.crt" "$AGENT_TLS_TMP/agent-client.crt"
+
+  export CONTROL_PLANE_AGENT_LISTEN_ADDR=127.0.0.1:8082
+  export CONTROL_PLANE_TLS_CERT="$AGENT_TLS_TMP/server.crt"
+  export CONTROL_PLANE_TLS_KEY="$AGENT_TLS_TMP/server.key"
+  export CONTROL_PLANE_AGENT_CLIENT_CA="$AGENT_TLS_TMP/agent-ca.crt"
+  export CONTROL_PLANE_AGENT_TRUST_DOMAIN="$trust_domain"
+  export AGENT_CONTROL_PLANE_URL=https://127.0.0.1:8082
+  export CLUSTER_AGENT_TLS_CA="$AGENT_TLS_TMP/server.crt"
+  export CLUSTER_AGENT_TLS_CERT="$AGENT_TLS_TMP/agent-client.crt"
+  export CLUSTER_AGENT_TLS_KEY="$AGENT_TLS_TMP/agent-client.key"
+fi
+export AGENT_CONTROL_PLANE_URL
+
 go run ./cmd/control-plane >/tmp/go-control-plane.log 2>&1 &
 CONTROL_PID=$!
 wait_http
 
+if [[ -n "$AGENT_TLS_TMP" ]]; then
+  agent_tls_ready=0
+  for attempt in $(seq 1 60); do
+    if curl -fsS --max-time 2 --cacert "$CONTROL_PLANE_TLS_CERT" \
+        --cert "$CLUSTER_AGENT_TLS_CERT" --key "$CLUSTER_AGENT_TLS_KEY" \
+        "$AGENT_CONTROL_PLANE_URL/healthz" >/dev/null 2>&1; then
+      agent_tls_ready=1
+      break
+    fi
+    sleep 0.25
+  done
+  [[ "$agent_tls_ready" == "1" ]] || {
+    echo "Agent mTLS listener did not become ready on $AGENT_CONTROL_PLANE_URL" >&2
+    cat /tmp/go-control-plane.log >&2 || true
+    exit 1
+  }
+fi
+
 go build -o /tmp/gpu-cluster-agent ./cmd/cluster-agent
 
-put "/api/v1/projects/$PROJECT_ID/binding" "{\"metadata\":{\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"clusterId\":\"$CLUSTER_ID\",\"namespace\":\"$NAMESPACE\"}"
-put "/api/v1/compute-pools/$POOL_ID/binding" "{\"metadata\":{\"generation\":1},\"poolId\":\"$POOL_ID\",\"clusterId\":\"$CLUSTER_ID\",\"provider\":\"kueue\"}"
+# The full-stack OIDC fixture pre-seeds bindings in the shared PostgreSQL
+# database. Verify the authoritative rows rather than replaying a generation-1
+# CAS write. Standalone Golden Path runs continue to create their own bindings.
+if [[ "${PRESEEDED_BINDINGS:-0}" == "1" ]]; then
+  : "${GPU_MANAGEMENT_E2E_PG_CONTAINER:?shared PostgreSQL fixture is required}"
+  project_binding="$(docker exec "$GPU_MANAGEMENT_E2E_PG_CONTAINER" psql -X -qAt -U gpu -d gpu_management_fullstack_ci \
+    -c "SELECT project_id || '|' || cluster_id || '|' || namespace FROM project_bindings WHERE project_id='lost-ack-project'")"
+  expected_project_binding="lost-ack-project|lost-ack-ci|lost-ack"
+  [[ "$project_binding" == "$expected_project_binding" ]] || {
+    echo "preseeded project binding mismatch: expected=$expected_project_binding actual=$project_binding" >&2
+    exit 1
+  }
+  pool_binding="$(docker exec "$GPU_MANAGEMENT_E2E_PG_CONTAINER" psql -X -qAt -U gpu -d gpu_management_fullstack_ci \
+    -c "SELECT pool_id || '|' || cluster_id || '|' || provider FROM cluster_bindings WHERE pool_id='pool-lost-ack-ci'")"
+  expected_pool_binding="pool-lost-ack-ci|lost-ack-ci|kueue"
+  [[ "$pool_binding" == "$expected_pool_binding" ]] || {
+    echo "preseeded Kueue binding mismatch: expected=$expected_pool_binding actual=$pool_binding" >&2
+    exit 1
+  }
+  echo "PASS: verified preseeded project and sole Kueue provider bindings"
+else
+  put "/api/v1/projects/$PROJECT_ID/binding" "{\"metadata\":{\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"clusterId\":\"$CLUSTER_ID\",\"namespace\":\"$NAMESPACE\"}"
+  put "/api/v1/compute-pools/$POOL_ID/binding" "{\"metadata\":{\"generation\":1},\"poolId\":\"$POOL_ID\",\"clusterId\":\"$CLUSTER_ID\",\"provider\":\"kueue\"}"
+fi
 put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":4}],\"acceleratorBindings\":[{\"class\":\"$ACCELERATOR_CLASS\",\"resourceName\":\"$ACCELERATOR_RESOURCE\",\"flavor\":\"$ACCELERATOR_FLAVOR\",\"nodeLabels\":{\"nvidia.com/gpu.product\":\"NVIDIA-H100-80GB-HBM3\",\"topology.kubernetes.io/zone\":\"gpu-zone-a\",\"ai.compute/rack\":\"rack-a01\"}}],\"scheduling\":{\"mode\":\"default\"}}}"
 put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":1}}}"
 
 AGENT_INSTANCE_ID=agent-a AGENT_SYNC_INTERVAL=60s \
-  CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" \
+  CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$AGENT_CONTROL_PLANE_URL" \
   /tmp/gpu-cluster-agent >/tmp/go-cluster-agent-a.log 2>&1 &
 AGENT_A_PID=$!
 
@@ -293,7 +401,7 @@ wait_workload_lease_free
 claim_workload_lease "agent-a" 12
 
 AGENT_INSTANCE_ID=agent-b AGENT_SYNC_INTERVAL=1s \
-  CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" \
+  CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$AGENT_CONTROL_PLANE_URL" \
   /tmp/gpu-cluster-agent >/tmp/go-cluster-agent-b.log 2>&1 &
 AGENT_B_PID=$!
 
@@ -399,6 +507,33 @@ wait_api_gone() {
   echo "timeout waiting for API resource to disappear: $path" >&2
   return 1
 }
+
+# Optional combined Management API ACK-drop experiment. Run it while the
+# Control Plane, Cluster Agent, Kueue and parent ComputePool remain live.
+if [[ "${RUN_MANAGEMENT_LOST_ACK_ACCEPTANCE:-0}" == "1" ]]; then
+  : "${ACK_OIDC_ISSUER:?disposable OIDC issuer is required for lost-ACK acceptance}"
+  : "${ACK_OIDC_CA_CERT:?disposable OIDC CA certificate is required for lost-ACK acceptance}"
+  : "${IMAGE:?digest-pinned workload image is required for lost-ACK acceptance}"
+  # Mint a fresh short-lived token after cluster startup to avoid expiration.
+  token_response="$(curl --silent --show-error --fail --max-time 20 \
+    --cacert "$ACK_OIDC_CA_CERT" \
+    -X POST "$ACK_OIDC_ISSUER/protocol/openid-connect/token" \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode 'grant_type=password' \
+    --data-urlencode 'client_id=gpu-e2e-direct' \
+    --data-urlencode 'client_secret=e2e-direct-secret-not-for-production' \
+    --data-urlencode 'username=ci-operator' \
+    --data-urlencode 'password=ci-disposable-password-not-for-production')"
+  export OIDC_ACCESS_TOKEN="$(TOKEN_RESPONSE="$token_response" python3 -c 'import json,os,sys; token=json.loads(os.environ["TOKEN_RESPONSE"]).get("access_token",""); sys.stdout.write(token) if token else sys.exit("token response omitted access_token")')"
+  unset token_response
+  if [[ -z "$OIDC_ACCESS_TOKEN" ]]; then
+    echo "FAIL: disposable OIDC provider did not issue an access token" >&2
+    exit 1
+  fi
+  echo "Running Management lost-ACK acceptance on the shared disposable PostgreSQL + kind/Kueue stack"
+  ( unset WORKLOAD_ID; make management-compute-lost-ack-acceptance )
+  unset OIDC_ACCESS_TOKEN
+fi
 
 # A realized workload must be cleaned at the provider before desired state is
 # finalized. The finalization transaction also removes observation and lease.

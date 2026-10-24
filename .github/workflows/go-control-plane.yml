@@ -56,6 +56,10 @@ jobs:
           docker exec "${{ job.services.postgres.id }}" \
             psql -U gpu -d gpu_platform_test -v ON_ERROR_STOP=1 \
             -c 'CREATE DATABASE gpu_store_test'
+      - name: Unit-test Management lost-ACK cleanup safety
+        run: python3 -m unittest discover -s scripts/e2e -p 'test_management_compute_lost_ack.py' -v
+      - name: Syntax-check opt-in Management lost-ACK harness
+        run: python3 -m py_compile scripts/e2e/management-compute-lost-ack.py
       - name: Format check
         run: make fmt-check
       - name: Vet
@@ -63,7 +67,7 @@ jobs:
       - name: Test (parallel Go packages with independent PostgreSQL databases)
         run: make test-parallel-isolated
       - name: Release acceptance contracts
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path')) }}
         run: make acceptance-contract
       - name: Production supply-chain policy
         if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
@@ -178,3 +182,42 @@ jobs:
           # provider-specific Kueue ResourceFlavor name.
           ACCELERATOR_FLAVOR: kueue-h100
         run: bash scripts/e2e/go-kind-kueue-golden.sh
+
+  management-lost-ack:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path')) }}
+    name: Real Management OIDC + PostgreSQL + kind/Kueue ACK-drop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: azure/setup-helm@v4
+      - name: Install kind
+        run: |
+          curl -fsSLo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          chmod +x /tmp/kind
+          sudo install /tmp/kind /usr/local/bin/kind
+      - name: Install pinned frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Install ephemeral Playwright runner without lockfile mutation
+        working-directory: frontend
+        run: npm install --no-save --package-lock=false @playwright/test@1.56.1
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Verify integration harness syntax
+        run: |
+          bash -n scripts/e2e/management-fullstack-real-oidc-pg.sh
+          bash -n scripts/e2e/go-kind-kueue-golden.sh
+          python3 -m py_compile scripts/e2e/management-compute-lost-ack.py
+      - name: Run real OIDC + TLS PostgreSQL + kind/Kueue ACK-drop experiment
+        run: RUN_MANAGEMENT_LOST_ACK_ACCEPTANCE=1 bash scripts/e2e/management-fullstack-real-oidc-pg.sh

@@ -17,7 +17,7 @@ concurrency:
 jobs:
   real-oidc-pg-browser:
     name: Real Keycloak PKCE / Chromium / guarded Go / PostgreSQL TLS
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
