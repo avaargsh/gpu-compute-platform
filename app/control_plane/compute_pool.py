@@ -85,7 +85,7 @@ class KueuePoolManifestBuilder:
             # labels for the CPU/fake-accelerator Golden Path.
             manifests.append(
                 {
-                    "apiVersion": "kueue.x-k8s.io/v1beta1",
+                    "apiVersion": "kueue.x-k8s.io/v1beta2",
                     "kind": "ResourceFlavor",
                     "metadata": {"name": flavor.name},
                     "spec": {"nodeLabels": flavor.node_labels},
@@ -126,7 +126,7 @@ class KueuePoolManifestBuilder:
 
         manifests.append(
             {
-                "apiVersion": "kueue.x-k8s.io/v1beta1",
+                "apiVersion": "kueue.x-k8s.io/v1beta2",
                 "kind": "ClusterQueue",
                 "metadata": {"name": binding.cluster_queue},
                 "spec": cluster_queue_spec,
@@ -134,7 +134,7 @@ class KueuePoolManifestBuilder:
         )
         manifests.append(
             {
-                "apiVersion": "kueue.x-k8s.io/v1beta1",
+                "apiVersion": "kueue.x-k8s.io/v1beta2",
                 "kind": "LocalQueue",
                 "metadata": {
                     "name": binding.local_queue,

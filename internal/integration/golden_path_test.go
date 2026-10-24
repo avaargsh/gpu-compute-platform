@@ -66,7 +66,7 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{
-			{Group: "kueue.x-k8s.io", Version: "v1beta1", Resource: "workloads"}: "WorkloadList",
+			{Group: "kueue.x-k8s.io", Version: "v1beta2", Resource: "workloads"}: "WorkloadList",
 		},
 	)
 	runtime, err := cluster.NewRuntime(&cluster.Clients{Core: coreClient, Dynamic: dynamicClient})
@@ -110,7 +110,7 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 		t.Fatal(err)
 	}
 	workloadObject := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "kueue.x-k8s.io/v1beta1",
+		"apiVersion": "kueue.x-k8s.io/v1beta2",
 		"kind":       "Workload",
 		"metadata": map[string]any{
 			"name":      "job-train-1-workload",
@@ -125,7 +125,7 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 	}}
 	workloadController := true
 	workloadObject.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &workloadController}})
-	workloadGVR := schema.GroupVersionResource{Group: "kueue.x-k8s.io", Version: "v1beta1", Resource: "workloads"}
+	workloadGVR := schema.GroupVersionResource{Group: "kueue.x-k8s.io", Version: "v1beta2", Resource: "workloads"}
 	if _, err := dynamicClient.Resource(workloadGVR).Namespace("project-1").Create(ctx, workloadObject, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}

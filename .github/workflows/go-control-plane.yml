@@ -1,13 +1,33 @@
 name: Go Control Plane
 
 concurrency:
-  group: go-control-plane-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'run-kueue-compatibility' && format('kueue-compatibility-{0}', github.event.pull_request.number) || format('go-control-plane-{0}', github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ !(github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'run-kueue-compatibility') }}
 
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
+    inputs:
+      target_row:
+        description: "Compatibility row to qualify; both candidates use Kueue v0.20.3"
+        type: choice
+        options:
+          - C1
+          - C2
+        default: C1
+        required: true
+      kind_node_image:
+        description: "Published node image; C1 v1.34.0; C2 exact v1.35.x@sha256 digest"
+        type: string
+        default: kindest/node:v1.34.0
+        required: true
+      cluster_id:
+        description: "Fresh kind cluster name used for this run"
+        type: string
+        default: kueue-compat-c1
+        required: true
   push:
     tags: ['v*']
 
@@ -16,6 +36,7 @@ permissions:
 
 jobs:
   test:
+    if: ${{ github.event_name != 'workflow_dispatch' && (github.event.action != 'labeled' || github.event.label.name == 'run-golden-path') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -60,6 +81,14 @@ jobs:
         run: python3 -m unittest discover -s scripts/e2e -p 'test_management_compute_lost_ack.py' -v
       - name: Syntax-check opt-in Management lost-ACK harness
         run: python3 -m py_compile scripts/e2e/management-compute-lost-ack.py
+      - name: Read-only Kueue storage upgrade preflight tests
+        run: python3 -m unittest discover -s scripts/e2e -p 'test_kueue_storage_preflight.py' -v
+      - name: Ephemeral Kueue in-place upgrade rehearsal guard tests
+        run: python3 -m unittest discover -s scripts/e2e -p 'test_kueue_upgrade_rehearsal.py' -v
+      - name: Kueue storage lineage evidence classification tests
+        run: python3 -m unittest discover -s scripts/e2e -p 'test_kueue_upgrade_lineage.py' -v
+      - name: Kueue direct etcd fixture evidence tests
+        run: python3 -m unittest discover -s scripts/e2e -p 'test_kueue_etcd_fixture_probe.py' -v
       - name: Format check
         run: make fmt-check
       - name: Vet
@@ -67,10 +96,10 @@ jobs:
       - name: Test (parallel Go packages with independent PostgreSQL databases)
         run: make test-parallel-isolated
       - name: Release acceptance contracts
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path')) }}
+        if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path')) }}
         run: make acceptance-contract
       - name: Production supply-chain policy
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: make supply-chain-check
       - name: Build binaries
         run: |
@@ -78,24 +107,185 @@ jobs:
           go build ./cmd/cluster-agent
           go build ./cmd/management-api
       - name: Build canonical container entrypoints
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           docker build -f Dockerfile -t gpu-control-plane:test .
           docker build -f Dockerfile --target control-plane -t gpu-control-plane:target-test .
           docker build -f Dockerfile --target cluster-agent -t gpu-cluster-agent:test .
           docker build -f Dockerfile --target management-api -t gpu-management-api:ci .
       - name: Verify nonroot Management container and fail-closed startup
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           bash -n scripts/e2e/management-image-security-smoke.sh
           bash scripts/e2e/management-image-security-smoke.sh gpu-management-api:ci
       - name: Build compatibility container targets
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           docker build -f Dockerfile.control-plane --target control-plane -t gpu-control-plane:compat-test .
           docker build -f Dockerfile.control-plane --target cluster-agent -t gpu-cluster-agent:compat-test .
 
+  kueue-compatibility:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name == 'run-kueue-compatibility') }}
+    name: Kueue v0.20.3 compatibility (C1/C2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: gpu
+          POSTGRES_PASSWORD: gpu
+          POSTGRES_DB: gpu_platform_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gpu -d gpu_platform_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_POSTGRES_DSN: postgres://gpu:gpu@localhost:5432/gpu_platform_test?sslmode=disable
+      TEST_POSTGRES_STORE_DSN: postgres://gpu:gpu@localhost:5432/gpu_store_test?sslmode=disable
+      TARGET_ROW: ${{ inputs.target_row || 'C1' }}
+      KIND_NODE_IMAGE: ${{ inputs.kind_node_image || 'kindest/node:v1.34.0' }}
+      CLUSTER_ID: ${{ inputs.cluster_id || format('kueue-compat-{0}', github.run_id) }}
+      KUEUE_VERSION: v0.20.3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - name: Check module tidiness
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: Provision independent Store package test database
+        run: |
+          docker exec "${{ job.services.postgres.id }}" \
+            psql -U gpu -d gpu_platform_test -v ON_ERROR_STOP=1 \
+            -c 'CREATE DATABASE gpu_store_test'
+      - name: Format check
+        run: make fmt-check
+      - name: Vet
+        run: go vet ./...
+      - name: Kueue API, provider registry and lifecycle contracts
+        run: |
+          go test ./internal/provider/kueue ./internal/cluster
+          make acceptance-contract
+      - uses: azure/setup-helm@v4
+      - name: Install version-matched kind
+        shell: bash
+        run: |
+          set -euo pipefail
+          kind_version=v0.30.0
+          [[ "$TARGET_ROW" != C2 ]] || kind_version=v0.33.0
+          rm -f /tmp/kind /tmp/kind.download
+          downloaded=false
+          for url in \
+            "https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64" \
+            "https://kind.sigs.k8s.io/dl/${kind_version}/kind-linux-amd64"; do
+            if curl --fail --show-error --location --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o /tmp/kind.download; then
+              mv /tmp/kind.download /tmp/kind
+              downloaded=true
+              break
+            fi
+            rm -f /tmp/kind.download
+          done
+          [[ "$downloaded" == true && -s /tmp/kind ]] || { echo "Unable to download pinned kind $kind_version from official release endpoints" >&2; exit 1; }
+          chmod +x /tmp/kind
+          sudo install /tmp/kind /usr/local/bin/kind
+          kind version
+      - name: Validate compatibility row and image
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CLUSTER_ID" =~ ^[a-z0-9][a-z0-9-]{0,49}$ ]] || {
+            echo "CLUSTER_ID must be a DNS-safe lowercase name of at most 50 characters" >&2
+            exit 2
+          }
+          case "$TARGET_ROW" in
+            C1)
+              [[ "$KIND_NODE_IMAGE" == "kindest/node:v1.34.0" ]] || {
+                echo "C1 requires kindest/node:v1.34.0" >&2
+                exit 2
+              }
+              ;;
+            C2)
+              [[ "$KIND_NODE_IMAGE" =~ ^kindest/node:v1\.35\.[0-9]+@sha256:[a-f0-9]{64}$ ]] || {
+                echo "C2 requires a published kindest/node:v1.35.x@sha256:<64 hex> image" >&2
+                exit 2
+              }
+              ;;
+            *)
+              echo "unsupported compatibility row: $TARGET_ROW" >&2
+              exit 2
+              ;;
+          esac
+          docker manifest inspect "$KIND_NODE_IMAGE" >/dev/null
+          echo "PASS: requested kind image is published: $KIND_NODE_IMAGE"
+      - name: Run real Golden Path and capture evidence
+        shell: bash
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/kueue-compatibility-evidence
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          {
+            echo "target_row=$TARGET_ROW"
+            echo "kind_node_image=$KIND_NODE_IMAGE"
+            echo "kueue_version=$KUEUE_VERSION"
+            echo "cluster_id=$CLUSTER_ID"
+            echo "checked_out_sha=$(git rev-parse HEAD)"
+          } > "$EVIDENCE_DIR/manifest.txt"
+
+          set +e
+          make e2e-golden 2>&1 | tee "$EVIDENCE_DIR/golden-path.log"
+          golden_status=${PIPESTATUS[0]}
+          set -e
+
+          server_version=""
+          if kubectl version -o json > "$EVIDENCE_DIR/kubernetes-version.json" 2> "$EVIDENCE_DIR/kubernetes-version.err"; then
+            server_version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["serverVersion"]["gitVersion"])' "$EVIDENCE_DIR/kubernetes-version.json")"
+          else
+            echo "Kubernetes server version unavailable after Golden Path" >&2
+            [[ "$golden_status" -ne 0 ]] || golden_status=1
+          fi
+
+          kueue_image="$(kubectl get deployment kueue-controller-manager -n kueue-system -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+          printf 'server_version=%s\nkueue_image=%s\n' "$server_version" "$kueue_image" >> "$EVIDENCE_DIR/manifest.txt"
+          kubectl get deployment kueue-controller-manager -n kueue-system -o yaml > "$EVIDENCE_DIR/kueue-controller-manager.yaml" 2>/dev/null || true
+          kubectl get nodes -o wide > "$EVIDENCE_DIR/nodes.txt" 2>/dev/null || true
+          kind get clusters > "$EVIDENCE_DIR/kind-clusters.txt" 2>/dev/null || true
+
+          case "$TARGET_ROW" in
+            C1) expected_minor="1.34" ;;
+            C2) expected_minor="1.35" ;;
+            *) expected_minor="unsupported" ;;
+          esac
+          if [[ -n "$server_version" && "$server_version" != "v${expected_minor}."* ]]; then
+            echo "FAIL: target $TARGET_ROW expected Kubernetes $expected_minor.x but server reports $server_version" >&2
+            golden_status=1
+          fi
+          if [[ "$kueue_image" != *":${KUEUE_VERSION}" ]]; then
+            echo "FAIL: expected Kueue image tag $KUEUE_VERSION, observed $kueue_image" >&2
+            golden_status=1
+          fi
+          echo "golden_path_exit_code=$golden_status" >> "$EVIDENCE_DIR/manifest.txt"
+          exit "$golden_status"
+      - name: Upload compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kueue-compatibility-${{ inputs.target_row || 'C1' }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/kueue-compatibility-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
   portal:
+    if: ${{ github.event_name != 'workflow_dispatch' && github.event.action != 'labeled' }}
     name: Go Portal / Vue contract build
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -126,7 +316,7 @@ jobs:
         run: npm run management:build
 
   portal-browser:
-    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     name: Portal / real Chromium to Go API
     runs-on: ubuntu-latest
     timeout-minutes: 18
@@ -159,7 +349,7 @@ jobs:
         run: bash scripts/e2e/portal-local-launch-smoke.sh
 
   golden-path:
-    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path')) }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path')) }}
     name: Golden Path / kind + Kueue
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -173,18 +363,34 @@ jobs:
       - uses: azure/setup-helm@v4
       - name: Install kind
         run: |
-          curl -Lo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          rm -f /tmp/kind /tmp/kind.download
+          downloaded=false
+          for url in \
+            "https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-amd64" \
+            "https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64"; do
+            if curl --fail --show-error --location --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o /tmp/kind.download; then
+              mv /tmp/kind.download /tmp/kind
+              downloaded=true
+              break
+            fi
+            rm -f /tmp/kind.download
+          done
+          [[ "$downloaded" == true && -s /tmp/kind ]] || { echo "Unable to download pinned kind v0.30.0 binary from official release endpoints" >&2; exit 1; }
           chmod +x /tmp/kind
           sudo mv /tmp/kind /usr/local/bin/kind
       - name: Run Go Golden Path
         env:
+          # Keep ordinary PR/tag acceptance pinned to the frozen baseline.
+          CLUSTER_ID: kind-golden
+          KUEUE_VERSION: v0.19.6
+          KIND_NODE_IMAGE: kindest/node:v1.34.0
           # Prove the portable accelerator class is independent from the
           # provider-specific Kueue ResourceFlavor name.
           ACCELERATOR_FLAVOR: kueue-h100
         run: bash scripts/e2e/go-kind-kueue-golden.sh
 
   management-lost-ack:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path')) }}
+    if: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path') }}
     name: Real Management OIDC + PostgreSQL + kind/Kueue ACK-drop
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -202,7 +408,19 @@ jobs:
       - uses: azure/setup-helm@v4
       - name: Install kind
         run: |
-          curl -fsSLo /tmp/kind https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64
+          rm -f /tmp/kind /tmp/kind.download
+          downloaded=false
+          for url in \
+            "https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-amd64" \
+            "https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64"; do
+            if curl --fail --show-error --location --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 60 "$url" -o /tmp/kind.download; then
+              mv /tmp/kind.download /tmp/kind
+              downloaded=true
+              break
+            fi
+            rm -f /tmp/kind.download
+          done
+          [[ "$downloaded" == true && -s /tmp/kind ]] || { echo "Unable to download pinned kind v0.30.0 binary from official release endpoints" >&2; exit 1; }
           chmod +x /tmp/kind
           sudo install /tmp/kind /usr/local/bin/kind
       - name: Install pinned frontend dependencies

@@ -80,10 +80,13 @@ recovery model.
 ## Watch-only upstream matrix
 
 These rows are **signals to preserve in compatibility planning**, not acceptance
-claims.
+claims. The Stage B Kueue/API upgrade and regression gates are detailed in
+[KUEUE_COMPATIBILITY_MATRIX.md](KUEUE_COMPATIBILITY_MATRIX.md).
 
 | Upstream | Version observed | Relevant changes | Current platform action |
 | --- | --- | --- | --- |
+| Kueue | [`v0.20.3`](https://github.com/kubernetes-sigs/kueue/releases/tag/v0.20.3) (released 2026-10-22) | `v0.20.0` removes `kueue.x-k8s.io/v1beta1`; `v0.20.3` fixes concurrent-admission flavor-removal recovery and a MultiKueue batch/Job re-dispatch loop on Kubernetes 1.35+ | watch-only; move clients/GVRs to `v1beta2` before upgrade; keep `v0.19.6` as the frozen baseline until candidate gates pass; MultiKueue stays out of scope |
+| Kubernetes | `1.37.1`, `1.36.5`, `1.35.9` (released 2026-09-15) | current supported minor lines; Kueue v0.20 installation docs recommend Kubernetes 1.34+ | candidate compatibility only; v0.1 remains kind node `v1.34.0` until the exact matrix row is accepted |
 | KAI Scheduler | `0.18.1` | fractional-GPU quota/binding fixes; avoids treating unrelated `*gpu` extended resources such as HAMi `nvidia.com/vgpu` as whole-GPU capacity; v0.18 line continues NvFractions and GPU-sharing work | record only; no KAI provider or HAMi/fractional acceptance in v0.1 |
 | Volcano | `1.15.2` | fixes DRA capacity-accounting DoS/overflow risk; rechecks device feasibility after reclaim; includes additional HAMi/PodGroup correctness fixes | record only; no Volcano or real-DRA acceptance in v0.1 |
 | LWS | later stage | multi-replica naming stability is relevant to leader/worker identity | observe until Scheduler/Serving stages |

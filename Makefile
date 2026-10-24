@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: fmt fmt-check test test-parallel-isolated vet build supply-chain-check acceptance-contract stage-b-volcano-contract kind-up install-kueue install-fake-gpu e2e-golden management-compute-lost-ack-acceptance
+.PHONY: fmt fmt-check test test-parallel-isolated vet build supply-chain-check acceptance-contract stage-b-volcano-contract kind-up install-kueue install-fake-gpu e2e-golden management-compute-lost-ack-acceptance kueue-storage-preflight kueue-upgrade-rehearsal
 
 fmt:
 	bash scripts/go-format.sh
@@ -56,3 +56,12 @@ e2e-golden:
 # Real ACK-loss integration acceptance; requires an isolated authenticated Management API + Postgres + kind/Kueue environment.
 management-compute-lost-ack-acceptance:
 	python3 scripts/e2e/management-compute-lost-ack.py
+
+# Non-mutating CRD storage-version inventory. Requires an explicit kubeconfig context.
+kueue-storage-preflight:
+	@test -n "$(KUBECTL_CONTEXT)" || { echo "Set KUBECTL_CONTEXT to the intended Kubernetes context" >&2; exit 2; }
+	python3 scripts/e2e/kueue_storage_preflight.py --context "$(KUBECTL_CONTEXT)"
+
+# Destructive ONLY to a fresh, isolated kind cluster. The script refuses adoption.
+kueue-upgrade-rehearsal:
+	bash scripts/e2e/kueue_inplace_upgrade_kind.sh
