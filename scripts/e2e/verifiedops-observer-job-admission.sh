@@ -263,7 +263,7 @@ fi
 # Verify the mutable selector label really is absent before probing the
 # admission cache. Namespace writes are synchronous, but API-server admission
 # matching can briefly retain the old binding selector after a label change.
-namespace_component="$(kubectl get namespace verifiedops-observer -o jsonpath='{.metadata.labels.app\\.kubernetes\\.io/component}')"
+namespace_component="$(kubectl get namespace verifiedops-observer -o jsonpath='{.metadata.labels.app\.kubernetes\.io/component}')"
 if [[ -n "$namespace_component" ]]; then
   echo "Observer namespace app label was not removed: $namespace_component" >&2
   exit 1
@@ -273,8 +273,8 @@ fi
 # migrated to the API-server-managed namespace-name selector. During a rolling
 # policy change this lets the acceptance distinguish a stale old binding from
 # a legitimate denial produced by either immutable-name-scoped policy.
-guard_scope_name="$(kubectl get validatingadmissionpolicybinding verifiedops-observer-job-guard -o jsonpath='{.spec.matchResources.namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name}')"
-guard_scope_component="$(kubectl get validatingadmissionpolicybinding verifiedops-observer-job-guard -o jsonpath='{.spec.matchResources.namespaceSelector.matchLabels.app\\.kubernetes\\.io/component}')"
+guard_scope_name="$(kubectl get validatingadmissionpolicybinding verifiedops-observer-job-guard -o jsonpath='{.spec.matchResources.namespaceSelector.matchLabels.kubernetes\.io/metadata\.name}')"
+guard_scope_component="$(kubectl get validatingadmissionpolicybinding verifiedops-observer-job-guard -o jsonpath='{.spec.matchResources.namespaceSelector.matchLabels.app\.kubernetes\.io/component}')"
 if [[ "$guard_scope_name" == "verifiedops-observer" ]]; then
   guard_uses_immutable_scope=true
 elif [[ "$guard_scope_component" == "verifiedops-observer" ]]; then
