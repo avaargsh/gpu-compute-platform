@@ -71,6 +71,9 @@ func TestDevelopmentCanUseDedicatedLoopbackAgentMTLSListener(t *testing.T) {
 	if !cfg.Enabled || !cfg.Separate || cfg.ListenAddr != "127.0.0.1:8082" {
 		t.Fatalf("unexpected dedicated listener config: %#v", cfg)
 	}
+	if _, err := LoadAgentListener(getEnv(env), "poc"); err == nil {
+		t.Fatal("poc profile accepted a separate Agent listener alongside the anonymous main API")
+	}
 
 	for _, addr := range []string{"0.0.0.0:8082", "192.0.2.1:8082", "127.0.0.1:0"} {
 		t.Run(addr, func(t *testing.T) {
