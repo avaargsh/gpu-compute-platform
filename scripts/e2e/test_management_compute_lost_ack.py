@@ -252,8 +252,8 @@ class CleanupGenerationFenceTests(unittest.TestCase):
             wait_absent.call_args.args[:3],
             ("golden-go", "ack-loss-test", None),
         )
-        self.assertGreater(wait_absent.call_args.args[3], 0.0)
-        self.assertLessEqual(wait_absent.call_args.args[3], 30.0)
+        self.assertGreater(wait_absent.call_args.kwargs["timeout"], 0.0)
+        self.assertLessEqual(wait_absent.call_args.kwargs["timeout"], 30.0)
 
 
 if __name__ == "__main__":
