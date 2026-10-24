@@ -215,7 +215,7 @@ class CleanupGenerationFenceTests(unittest.TestCase):
             ]),
             patch.object(MODULE, "run_faulted_caller") as drop_ack,
             patch.object(MODULE, "http_call", return_value=(204, b"")) as replay,
-            patch.object(MODULE, "verify_provider_absent") as verify_absent,
+            patch.object(MODULE, "wait_for_provider_absent") as wait_absent,
             patch.object(MODULE.secrets, "token_hex", return_value="f" * 32),
         ):
             MODULE.cleanup_workload(
@@ -247,7 +247,13 @@ class CleanupGenerationFenceTests(unittest.TestCase):
         )
         self.assertEqual(replay.call_args.args[1], "DELETE")
         self.assertEqual(replay.call_args.kwargs["if_match"], '"1"')
-        verify_absent.assert_called_once_with("golden-go", "ack-loss-test", None)
+        wait_absent.assert_called_once()
+        self.assertEqual(
+            wait_absent.call_args.args[:3],
+            ("golden-go", "ack-loss-test", None),
+        )
+        self.assertGreater(wait_absent.call_args.args[3], 0.0)
+        self.assertLessEqual(wait_absent.call_args.args[3], 30.0)
 
 
 if __name__ == "__main__":
