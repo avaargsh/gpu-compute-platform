@@ -538,14 +538,16 @@ func TestRunnerPassesACKBoundUIDToReadOnlyProviderPath(t *testing.T) {
 			}},
 			{Kind: "Workload", ID: "train-1", Generation: 4, OperationID: operationID, Spec: map[string]any{
 				"projectID": "project-1", "poolID": "pool-1", "namespace": "project-1",
-				"image": "example/train@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"image":       "example/train@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				"accelerator": map[string]any{"class": "h100", "quota": float64(1)},
 			}},
 		},
 	}
 	runtime := &fakeRuntime{}
 	runner := NewRunnerWithLeaseOwner("cluster-a", control, runtime, "new-agent")
-	if err := runner.Sync(context.Background()); err != nil { t.Fatal(err) }
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if runtime.workloadCalls != 1 || runtime.workload.ExpectedCreateUID != "apiserver-uid-1" {
 		t.Fatalf("ACK-bound UID was not provided for read-only reconciliation: calls=%d projection=%#v", runtime.workloadCalls, runtime.workload)
 	}
