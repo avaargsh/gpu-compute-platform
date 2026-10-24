@@ -14,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 var (
@@ -133,6 +135,34 @@ func (c *KubeClient) ApplyJobWithGuardedCreate(ctx context.Context, in Job, befo
 	return c.applyJobWithResponse(ctx, in, before)
 }
 
+// InspectBoundJob is strictly read-only. It permits a previously ACK-bound
+// operation to resume observation only while the same API-server UID still
+// occupies the deterministic resource name. It never adopts by name or
+// launches a replacement when the old Job is absent.
+func (c *KubeClient) InspectBoundJob(ctx context.Context, in Job, expectedUID string) error {
+	if c.core == nil {
+		return fmt.Errorf("kubernetes client is required")
+	}
+	if expectedUID == "" || in.Namespace == "" || in.Name == "" || in.Generation < 1 {
+		return verifiedops.ErrCreateUIDUnproven
+	}
+	current, err := c.core.BatchV1().Jobs(in.Namespace).Get(ctx, in.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return fmt.Errorf("%w: ACK-bound Job is absent", verifiedops.ErrCreateUIDUnproven)
+	}
+	if err != nil {
+		return err
+	}
+	if current.Namespace != in.Namespace || current.Name != in.Name ||
+		string(current.UID) != expectedUID || current.ResourceVersion == "" {
+		return fmt.Errorf("%w: live Job identity differs from durable CREATE ACK", verifiedops.ErrCreateUIDUnproven)
+	}
+	if err := validateProviderGeneration("job", in.Name, current.Annotations, in.Generation); err != nil {
+		return fmt.Errorf("%w: %v", verifiedops.ErrCreateUIDUnproven, err)
+	}
+	return nil
+}
+
 func (c *KubeClient) applyJobWithResponse(ctx context.Context, in Job, before func(context.Context) error) (JobCreateResponse, error) {
 	if c.core == nil {
 		return JobCreateResponse{}, fmt.Errorf("kubernetes client is required")
@@ -207,7 +237,7 @@ func (c *KubeClient) ObserveJob(ctx context.Context, namespace, name string) (Jo
 		return JobObservation{}, err
 	}
 
-	out := JobObservation{Phase: "Pending"}
+	out := JobObservation{Phase: "Pending", JobUID: string(job.UID)}
 	if job.Status.Failed > 0 {
 		out.Phase = "Failed"
 		out.Failed = true
