@@ -602,8 +602,29 @@ def provider_resource_diagnostics(kind: str, items: list[dict[str, Any]]) -> lis
             "name": metadata.get("name"),
             "uid": metadata.get("uid"),
             "deletionTimestamp": metadata.get("deletionTimestamp"),
+            "labels": {
+                key: value
+                for key, value in (metadata.get("labels") or {}).items()
+                if key == "ai.compute/workload"
+            },
+            "generationAnnotation": (metadata.get("annotations") or {}).get("ai.compute/generation"),
         }
         if kind == "pods":
+            # Include attribution identity in a cleanup failure report. Labels
+            # alone are not ownership proof, so retain the API-server owner UID
+            # and controller bit needed to distinguish a Job-owned Pod from a
+            # foreign same-label Pod without dumping the whole object.
+            summary["ownerReferences"] = [
+                {
+                    "apiVersion": owner.get("apiVersion"),
+                    "kind": owner.get("kind"),
+                    "name": owner.get("name"),
+                    "uid": owner.get("uid"),
+                    "controller": owner.get("controller"),
+                }
+                for owner in (metadata.get("ownerReferences") or [])
+                if isinstance(owner, dict)
+            ]
             summary["phase"] = status.get("phase")
             summary["reason"] = status.get("reason")
             summary["conditions"] = [
