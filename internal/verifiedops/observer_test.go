@@ -58,6 +58,15 @@ func TestBoundUIDGenerationAndOwnerFailures(t *testing.T) {
 		{"wrong-controller-ref", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
 			p.OwnerReferences[0].UID = "foreign"
 		}, OutcomePending},
+		{"wrong-controller-name", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
+			p.OwnerReferences[0].Name = "job-foreign"
+		}, OutcomePending},
+		{"multiple-controller-references", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
+			yes := true
+			p.OwnerReferences = append(p.OwnerReferences, metav1.OwnerReference{
+				APIVersion: "batch/v1", Kind: "Job", Name: "job-foreign", UID: "foreign", Controller: &yes,
+			})
+		}, OutcomePending},
 		{"spoofed-ready-label", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) { p.OwnerReferences = nil }, OutcomePending},
 		{"not-ready", func(w *ExpectedJob, j *batchv1.Job, p *corev1.Pod, n *corev1.Node) {
 			p.Status.Conditions[0].Status = corev1.ConditionFalse
