@@ -83,6 +83,38 @@ func TestGuardedDeleteJobDoesNotReportGoneWhileForegroundDeletionIsPending(t *te
 	}
 }
 
+func TestGuardedDeleteJobDoesNotFinalizeWhileOwnedPodRemains(t *testing.T) {
+	ctx := context.Background()
+	job := ownedDeletionJob()
+	controller := true
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Name: "job-train-1-orphan-check", Namespace: "project-1",
+		UID: types.UID("pod-uid-7"), ResourceVersion: "91",
+		Labels: map[string]string{"ai.compute/workload": "job-train-1"},
+		OwnerReferences: []metav1.OwnerReference{{
+			APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID,
+			Controller: &controller,
+		}},
+	}}
+	client := kubefake.NewSimpleClientset(job, pod)
+
+	gone, err := NewKubeClient(client, nil).DeleteJob(
+		ctx, "project-1", "job-train-1", 7,
+	)
+	if err != nil {
+		t.Fatalf("delete should remain retryable while Kubernetes garbage collection is pending: %v", err)
+	}
+	if gone {
+		t.Fatal("Job absence alone must not finalize a workload while its Job-owned Pod remains")
+	}
+	stillPresent, err := client.CoreV1().Pods("project-1").Get(
+		ctx, pod.Name, metav1.GetOptions{},
+	)
+	if err != nil || stillPresent.UID != pod.UID {
+		t.Fatalf("delete path must not bypass Kubernetes owner deletion: pod=%#v err=%v", stillPresent, err)
+	}
+}
+
 func TestGuardedDeleteJobFailsClosedOnGenerationOwnerOrIdentityDrift(t *testing.T) {
 	cases := []struct {
 		name   string
