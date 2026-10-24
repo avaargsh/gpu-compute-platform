@@ -22,7 +22,7 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 IMAGE = "registry.example.test/worker@sha256:" + ("a" * 64)
-COMMAND = ["/bin/sh", "-c", "sleep 120"]
+COMMAND = ["/bin/sh", "-c", "sleep 3600"]
 ACCELERATOR_CLASS = "h100-80g"
 QUOTA = 1
 
@@ -425,5 +425,96 @@ class ProviderAbsenceWaitTests(unittest.TestCase):
                     "ack-loss-test",
                     context=None,
                     timeout=0,
+                )
+
+class ProviderPresenceTests(unittest.TestCase):
+    def test_requires_real_job_ready_pod_and_kueue_evidence(self) -> None:
+        objects = {
+            "jobs": {"items": [{
+                "metadata": {
+                    "name": "job-ack-loss-test",
+                    "annotations": {"ai.compute/generation": "1"},
+                },
+            }]},
+            "pods": {"items": [{
+                "metadata": {"name": "job-ack-loss-test-abc"},
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }]},
+        }
+
+        def list_resources(namespace: str, kind: str, selector: str, context: str | None) -> dict:
+            return objects[kind]
+
+        evidence = [
+            "k8s://cluster-a/namespaces/project-a/jobs/job-ack-loss-test",
+            "kueue://cluster-a/namespaces/project-a/workloads/job-ack-loss-test",
+        ]
+        with patch.object(MODULE, "kubectl_json", side_effect=list_resources):
+            MODULE.verify_provider_present(
+                "project-a", "ack-loss-test", "cluster-a", 1, evidence, context=None
+            )
+
+    def test_rejects_job_without_a_running_ready_pod(self) -> None:
+        objects = {
+            "jobs": {"items": [{
+                "metadata": {
+                    "name": "job-ack-loss-test",
+                    "annotations": {"ai.compute/generation": "1"},
+                },
+            }]},
+            "pods": {"items": [{
+                "metadata": {"name": "job-ack-loss-test-abc"},
+                "status": {
+                    "phase": "Pending",
+                    "conditions": [{"type": "Ready", "status": "False"}],
+                },
+            }]},
+        }
+
+        def list_resources(namespace: str, kind: str, selector: str, context: str | None) -> dict:
+            return objects[kind]
+
+        evidence = [
+            "k8s://cluster-a/namespaces/project-a/jobs/job-ack-loss-test",
+            "kueue://cluster-a/namespaces/project-a/workloads/job-ack-loss-test",
+        ]
+        with patch.object(MODULE, "kubectl_json", side_effect=list_resources):
+            with self.assertRaisesRegex(RuntimeError, r"no Running\+Ready Pod"):
+                MODULE.verify_provider_present(
+                    "project-a", "ack-loss-test", "cluster-a", 1, evidence, context=None
+                )
+
+    def test_rejects_missing_kueue_evidence_even_when_job_and_pod_exist(self) -> None:
+        objects = {
+            "jobs": {"items": [{
+                "metadata": {
+                    "name": "job-ack-loss-test",
+                    "annotations": {"ai.compute/generation": "1"},
+                },
+            }]},
+            "pods": {"items": [{
+                "metadata": {"name": "job-ack-loss-test-abc"},
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }]},
+        }
+
+        def list_resources(namespace: str, kind: str, selector: str, context: str | None) -> dict:
+            return objects[kind]
+
+        with patch.object(MODULE, "kubectl_json", side_effect=list_resources):
+            with self.assertRaisesRegex(RuntimeError, "omits the namespaced Kueue"):
+                MODULE.verify_provider_present(
+                    "project-a",
+                    "ack-loss-test",
+                    "cluster-a",
+                    1,
+                    ["k8s://cluster-a/namespaces/project-a/jobs/job-ack-loss-test"],
+                    context=None,
                 )
 

@@ -533,6 +533,55 @@ def kubectl_json(namespace: str, kind: str, selector: str, context: str | None) 
     return value
 
 
+def verify_provider_present(
+    namespace: str,
+    workload: str,
+    cluster: str,
+    expected_generation: int,
+    evidence_refs: list[Any],
+    context: str | None,
+) -> None:
+    """Require real Job/Ready Pod evidence before issuing the cleanup DELETE."""
+    selector = f"ai.compute/workload=job-{workload}"
+    jobs = kubectl_json(namespace, "jobs", selector, context)["items"]
+    if len(jobs) != 1:
+        fail(f"expected exactly one provider Job before deletion, found {len(jobs)}")
+    job = jobs[0]
+    metadata = job.get("metadata") or {}
+    annotations = metadata.get("annotations") or {}
+    if metadata.get("name") != f"job-{workload}":
+        fail(f"provider Job name does not match the Workload: {metadata.get('name')!r}")
+    if annotations.get("ai.compute/generation") != str(expected_generation):
+        fail("provider Job generation annotation does not match the original create receipt")
+
+    pods = kubectl_json(namespace, "pods", selector, context)["items"]
+    ready_running_pods = []
+    for pod in pods:
+        status = pod.get("status") or {}
+        ready = any(
+            condition.get("type") == "Ready"
+            and condition.get("status") in (True, "True", "TRUE")
+            for condition in (status.get("conditions") or [])
+            if isinstance(condition, dict)
+        )
+        if status.get("phase") == "Running" and ready:
+            ready_running_pods.append(pod)
+    if not ready_running_pods:
+        diagnostics = provider_resource_diagnostics("pods", pods)
+        fail(
+            "provider Job exists but no Running+Ready Pod proves execution before deletion: "
+            f"{json.dumps(diagnostics, sort_keys=True, ensure_ascii=True)}"
+        )
+
+    refs = [ref for ref in evidence_refs if isinstance(ref, str)]
+    expected_job_ref = f"k8s://{cluster}/namespaces/{namespace}/jobs/job-{workload}"
+    expected_kueue_prefix = f"kueue://{cluster}/namespaces/{namespace}/workloads/"
+    if expected_job_ref not in refs:
+        fail(f"current-generation evidence omits the concrete Job reference {expected_job_ref}")
+    if not any(ref.startswith(expected_kueue_prefix) for ref in refs):
+        fail("current-generation evidence omits the namespaced Kueue Workload reference")
+
+
 def verify_provider_absent(namespace: str, workload: str, context: str | None) -> None:
     """Fail immediately if a supposedly unused Workload ID already owns provider objects."""
     selector = f"ai.compute/workload=job-{workload}"
@@ -755,7 +804,7 @@ def main() -> int:
 
     request_id = secrets.token_hex(16)
     workload = safe_id("WORKLOAD_ID", os.environ.get("WORKLOAD_ID", f"ack-loss-{request_id[:12]}"))
-    command_raw = os.environ.get("COMMAND_JSON", '["/bin/sh","-c","sleep 120"]')
+    command_raw = os.environ.get("COMMAND_JSON", '["/bin/sh","-c","sleep 3600"]')
     command = json.loads(command_raw)
     if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
         fail("COMMAND_JSON must be a non-empty JSON array of strings")
@@ -907,10 +956,19 @@ def main() -> int:
             control_plane_url, workload, generation, timeout, namespace, context
         )
         status = observed.get("status") or {}
+        verify_provider_present(
+            namespace,
+            workload,
+            cluster,
+            generation,
+            status.get("evidenceRefs") or [],
+            context,
+        )
         print(
             "PASS: provider status synchronized; "
             f"syncState={status.get('syncState')} generation={generation}"
         )
+        print("PASS: concrete Job, Running+Ready Pod and Kueue evidence verified before DELETE")
     finally:
         if may_have_committed and not receipt_proven:
             # A lost connection or test-process error may happen after commit.
