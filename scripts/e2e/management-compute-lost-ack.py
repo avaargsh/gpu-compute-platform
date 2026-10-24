@@ -374,11 +374,47 @@ def desired_matches_create(
     )
 
 
+def print_provider_diagnostics(namespace: str, context: str | None) -> None:
+    """Dump non-secret Kueue/Job/Pod state when current-generation observation stalls."""
+    commands = (
+        (
+            "namespaced Job/Pod/Kueue state",
+            ["-n", namespace, "get", "jobs,pods,workloads.kueue.x-k8s.io,localqueues", "-o", "wide"],
+        ),
+        ("cluster-scoped Kueue state", ["get", "clusterqueues,resourceflavors", "-o", "wide"]),
+        ("recent namespace events", ["-n", namespace, "get", "events", "--sort-by=.lastTimestamp"]),
+    )
+    for title, args in commands:
+        command = ["kubectl"]
+        if context:
+            command.extend(["--context", context])
+        command.extend(args)
+        print(f"--- Provider diagnostics: {title} ---", file=sys.stderr, flush=True)
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f"diagnostic command failed: {type(exc).__name__}", file=sys.stderr, flush=True)
+            continue
+        if result.stdout:
+            print(result.stdout[-16000:], file=sys.stderr, flush=True)
+        if result.stderr:
+            print(result.stderr[-4000:], file=sys.stderr, flush=True)
+
+
 def wait_for_workload(
     control_plane_url: str,
     workload: str,
     expected_generation: int,
     timeout: int,
+    namespace: str,
+    context: str | None,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     path = f"/api/v1/workloads/{workload}"
@@ -407,10 +443,23 @@ def wait_for_workload(
             ):
                 return data
         time.sleep(POLL_SECONDS)
-    fail(
-        "timed out waiting for current-generation Kueue/provider observations "
-        f"(last status keys: {sorted(last_status.keys())})"
+    status = last_status.get("status") or {}
+    diagnostic = {
+        "metadata": last_status.get("metadata"),
+        "syncState": status.get("syncState"),
+        "desiredGeneration": status.get("desiredGeneration"),
+        "observedGeneration": status.get("observedGeneration"),
+        "conditions": status.get("conditions"),
+        "evidenceRefs": status.get("evidenceRefs"),
+    }
+    print(
+        "Last Workload observation before timeout: "
+        + json.dumps(diagnostic, sort_keys=True, ensure_ascii=True),
+        file=sys.stderr,
+        flush=True,
     )
+    print_provider_diagnostics(namespace, context)
+    fail("timed out waiting for current-generation Kueue/provider observations")
 
 
 def kubectl_json(namespace: str, kind: str, selector: str, context: str | None) -> dict[str, Any]:
@@ -699,7 +748,9 @@ def main() -> int:
             fail("idempotency-key conflict changed or obscured the original operation receipt")
         print("PASS: changed-body replay rejected with 409; Desired and receipt remained unchanged")
 
-        observed = wait_for_workload(control_plane_url, workload, generation, timeout)
+        observed = wait_for_workload(
+            control_plane_url, workload, generation, timeout, namespace, context
+        )
         status = observed.get("status") or {}
         print(
             "PASS: provider status synchronized; "
