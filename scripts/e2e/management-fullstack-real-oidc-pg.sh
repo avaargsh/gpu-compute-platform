@@ -171,10 +171,23 @@ if [[ "${RUN_MANAGEMENT_LOST_ACK_ACCEPTANCE:-0}" == "1" ]]; then
   export ACK_OIDC_CA_CERT="$TMP/keycloak.crt"
 
   export DATABASE_URL="postgres://gpu:ci-disposable-dba@localhost:55433/gpu_management_fullstack_ci?sslmode=verify-full&sslrootcert=$TMP/db-ca.pem"
-  export CLUSTER_ID=browser-ci
-  export PROJECT_ID=research
-  export POOL_ID=pool-browser-ci
-  export NAMESPACE=research
+
+  # The browser acceptance above deliberately created pool-browser-ci and then
+  # revoked the research grant. Use a separate identity scope for this live
+  # Control Plane/Kueue experiment so generations and revocation state cannot
+  # contaminate the lost-ACK test.
+  psql_fixture <<SQL
+INSERT INTO project_bindings(project_id,cluster_id,namespace)
+VALUES ('lost-ack-project','lost-ack-ci','lost-ack');
+INSERT INTO cluster_bindings(pool_id,cluster_id,provider)
+VALUES ('pool-lost-ack-ci','lost-ack-ci','kueue');
+INSERT INTO management_project_grants(issuer,subject,project_id,role)
+VALUES ('$ISSUER','08d71ae7-c789-4c56-b0b4-6a987efdaa12','lost-ack-project','operator');
+SQL
+  export CLUSTER_ID=lost-ack-ci
+  export PROJECT_ID=lost-ack-project
+  export POOL_ID=pool-lost-ack-ci
+  export NAMESPACE=lost-ack
   export ACCELERATOR_CLASS=h100-80g
   export ACCELERATOR_RESOURCE=nvidia.com/gpu
   export ACCELERATOR_FLAVOR=h100-80g

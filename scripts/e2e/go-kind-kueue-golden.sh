@@ -68,7 +68,15 @@ PY
 }
 
 put() {
-  curl -fsS -X PUT "$BASE_URL$1" -H 'Content-Type: application/json' -d "$2" >/dev/null
+  local path="$1" payload="$2" response_file status
+  response_file="$(mktemp)"
+  status="$(curl -sS -o "$response_file" -w '%{http_code}' -X PUT "$BASE_URL$path" -H 'Content-Type: application/json' -d "$payload")"
+  if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
+    printf 'PUT %s returned HTTP %s: %s\n' "$path" "$status" "$(cat "$response_file")" >&2
+    rm -f "$response_file"
+    return 1
+  fi
+  rm -f "$response_file"
 }
 
 condition_true() {
