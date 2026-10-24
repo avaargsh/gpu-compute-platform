@@ -19,6 +19,9 @@ func (p *Provider) ReconcileWorkload(ctx context.Context, projection baseprovide
 	if err != nil {
 		return baseprovider.WorkloadObservation{}, err
 	}
+	if projection.ExpectedCreateUID != "" && projection.OperationID == "" {
+		return baseprovider.WorkloadObservation{}, fmt.Errorf("expected CREATE UID requires an audited operation")
+	}
 	// A bound operation is a read-only recovery path. Validate its mode before
 	// any provider mutation, including DRA ResourceClaim creation.
 	if projection.OperationID != "" {
