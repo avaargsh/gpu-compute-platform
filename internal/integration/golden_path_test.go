@@ -123,7 +123,8 @@ func TestGoldenPathDesiredToObserved(t *testing.T) {
 			},
 		},
 	}}
-	workloadObject.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Job", UID: job.UID}})
+	workloadController := true
+	workloadObject.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: &workloadController}})
 	workloadGVR := schema.GroupVersionResource{Group: "kueue.x-k8s.io", Version: "v1beta1", Resource: "workloads"}
 	if _, err := dynamicClient.Resource(workloadGVR).Namespace("project-1").Create(ctx, workloadObject, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
