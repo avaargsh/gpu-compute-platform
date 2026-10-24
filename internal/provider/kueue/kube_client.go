@@ -7,6 +7,8 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -58,7 +60,7 @@ func (c *KubeClient) ApplyResourceClaim(ctx context.Context, in Job) error {
 	claims := c.core.ResourceV1().ResourceClaims(in.Namespace)
 	current, err := claims.Get(ctx, claim.Name, metav1.GetOptions{})
 	if err == nil {
-		return validateProviderGeneration("resource claim", claim.Name, current.Annotations, in.Generation)
+		return validateExistingResourceClaim(current, claim, in.Generation)
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
@@ -80,7 +82,36 @@ func (c *KubeClient) ApplyResourceClaim(ctx context.Context, in Job) error {
 	if err != nil {
 		return fmt.Errorf("adopt resource claim %s after create race: %w", claim.Name, err)
 	}
-	return validateProviderGeneration("resource claim", claim.Name, current.Annotations, in.Generation)
+	return validateExistingResourceClaim(current, claim, in.Generation)
+}
+
+// validateExistingResourceClaim permits convergence only when a same-name
+// claim has the original generation, workload owner, identity annotations, and
+// requested device class/count. Generation equality alone is not ownership or
+// desired-state equivalence.
+func validateExistingResourceClaim(current, desired *resourcev1.ResourceClaim, generation int64) error {
+	if current == nil || desired == nil {
+		return fmt.Errorf("resource claim identity is missing")
+	}
+	if current.Name != desired.Name || current.Namespace != desired.Namespace {
+		return fmt.Errorf("resource claim %s identity mismatch", desired.Name)
+	}
+	if err := validateProviderGeneration("resource claim", desired.Name, current.Annotations, generation); err != nil {
+		return err
+	}
+	owner := desired.Labels["ai.compute/workload"]
+	if owner == "" || current.Labels["ai.compute/workload"] != owner {
+		return fmt.Errorf("resource claim %s owner identity mismatch", desired.Name)
+	}
+	for key, want := range desired.Annotations {
+		if current.Annotations[key] != want {
+			return fmt.Errorf("resource claim %s identity annotation %q mismatch", desired.Name, key)
+		}
+	}
+	if !apiequality.Semantic.DeepEqual(current.Spec, desired.Spec) {
+		return fmt.Errorf("resource claim %s desired spec drift", desired.Name)
+	}
+	return nil
 }
 
 // JobApplyDisposition distinguishes a response to our actual API-server
@@ -159,6 +190,13 @@ func (c *KubeClient) applyJobWithResponse(ctx context.Context, in Job, before fu
 	if before != nil {
 		if err := before(ctx); err != nil {
 			return JobCreateResponse{}, fmt.Errorf("durable CREATE attempt denied: %w", err)
+		}
+		// A ResourceClaim is a Kubernetes side effect too. Create it only after
+		// durable admission, and before the Job that references it.
+		if in.DRA != nil {
+			if err := c.ApplyResourceClaim(ctx, in); err != nil {
+				return JobCreateResponse{}, fmt.Errorf("apply DRA ResourceClaim after durable CREATE preparation: %w", err)
+			}
 		}
 	}
 	created, err := jobs.Create(ctx, job, metav1.CreateOptions{})
