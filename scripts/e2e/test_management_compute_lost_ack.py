@@ -6,7 +6,12 @@ import copy
 import importlib.util
 from pathlib import Path
 import sys
+import threading
+import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib import request as urllib_request
+from urllib.error import URLError
 from unittest.mock import patch
 
 SCRIPT = Path(__file__).with_name("management-compute-lost-ack.py")
@@ -234,3 +239,83 @@ class CleanupGenerationFenceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DeleteAckDropProxyTests(unittest.TestCase):
+    def test_delete_202_is_withheld_until_caller_connection_is_dropped(self) -> None:
+        upstream_requests: list[tuple[str, str, str]] = []
+
+        class UpstreamHandler(BaseHTTPRequestHandler):
+            def log_message(self, _format: str, *_args: object) -> None:
+                return
+
+            def do_DELETE(self) -> None:  # noqa: N802
+                upstream_requests.append((
+                    self.command,
+                    self.headers.get("Idempotency-Key", ""),
+                    self.headers.get("If-Match", ""),
+                ))
+                self.send_response(202)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        upstream = ThreadingHTTPServer(("127.0.0.1", 0), UpstreamHandler)
+        upstream_thread = threading.Thread(target=upstream.serve_forever, daemon=True)
+        upstream_thread.start()
+        state = MODULE.FaultState()
+        path = "/api/v1/management/clusters/cluster-a/projects/project-a/resources/Workload/ack-loss-test"
+        proxy = MODULE.ack_drop_proxy(
+            f"http://127.0.0.1:{upstream.server_port}",
+            path,
+            state,
+            expected_method="DELETE",
+            accepted_statuses=(202, 204),
+        )
+        proxy_thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+        proxy_thread.start()
+        request_finished = threading.Event()
+        client_error: list[BaseException] = []
+
+        def send_delete() -> None:
+            req = urllib_request.Request(
+                f"http://127.0.0.1:{proxy.server_port}{path}",
+                data=b"",
+                headers={
+                    "Idempotency-Key": "f" * 32,
+                    "If-Match": '"1"',
+                    "Authorization": "Bearer test-token",
+                },
+                method="DELETE",
+            )
+            try:
+                with urllib_request.urlopen(req, timeout=5) as response:
+                    response.read()
+            except (URLError, TimeoutError, ConnectionError, OSError) as exc:
+                client_error.append(exc)
+            finally:
+                request_finished.set()
+
+        client_thread = threading.Thread(target=send_delete, daemon=True)
+        client_thread.start()
+        try:
+            self.assertTrue(state.upstream_finished.wait(timeout=5))
+            self.assertEqual(state.backend_status, 202)
+            self.assertEqual(
+                upstream_requests,
+                [("DELETE", "f" * 32, '"1"')],
+            )
+            # The provider has committed the delete intent, but the caller must
+            # not see the 202 until the fault injector is released.
+            self.assertFalse(request_finished.is_set())
+            state.release_connection.set()
+            self.assertTrue(request_finished.wait(timeout=5))
+            self.assertTrue(client_error, "the dropped ACK should surface as a transport error")
+        finally:
+            state.release_connection.set()
+            proxy.shutdown()
+            proxy.server_close()
+            proxy_thread.join(timeout=5)
+            upstream.shutdown()
+            upstream.server_close()
+            upstream_thread.join(timeout=5)
+
