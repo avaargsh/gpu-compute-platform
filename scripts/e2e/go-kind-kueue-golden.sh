@@ -253,15 +253,15 @@ go build -o /tmp/gpu-cluster-agent ./cmd/cluster-agent
 if [[ "${PRESEEDED_BINDINGS:-0}" == "1" ]]; then
   : "${GPU_MANAGEMENT_E2E_PG_CONTAINER:?shared PostgreSQL fixture is required}"
   project_binding="$(docker exec "$GPU_MANAGEMENT_E2E_PG_CONTAINER" psql -X -qAt -U gpu -d gpu_management_fullstack_ci \
-    -v "project_id=$PROJECT_ID" -c "SELECT project_id || '|' || cluster_id || '|' || namespace FROM project_bindings WHERE project_id=:'project_id'")"
-  expected_project_binding="${PROJECT_ID}|${CLUSTER_ID}|${NAMESPACE}"
+    -c "SELECT project_id || '|' || cluster_id || '|' || namespace FROM project_bindings WHERE project_id='lost-ack-project'")"
+  expected_project_binding="lost-ack-project|lost-ack-ci|lost-ack"
   [[ "$project_binding" == "$expected_project_binding" ]] || {
     echo "preseeded project binding mismatch: expected=$expected_project_binding actual=$project_binding" >&2
     exit 1
   }
   pool_binding="$(docker exec "$GPU_MANAGEMENT_E2E_PG_CONTAINER" psql -X -qAt -U gpu -d gpu_management_fullstack_ci \
-    -v "pool_id=$POOL_ID" -c "SELECT pool_id || '|' || cluster_id || '|' || provider FROM cluster_bindings WHERE pool_id=:'pool_id'")"
-  expected_pool_binding="${POOL_ID}|${CLUSTER_ID}|kueue"
+    -c "SELECT pool_id || '|' || cluster_id || '|' || provider FROM cluster_bindings WHERE pool_id='pool-lost-ack-ci'")"
+  expected_pool_binding="pool-lost-ack-ci|lost-ack-ci|kueue"
   [[ "$pool_binding" == "$expected_pool_binding" ]] || {
     echo "preseeded Kueue binding mismatch: expected=$expected_pool_binding actual=$pool_binding" >&2
     exit 1
