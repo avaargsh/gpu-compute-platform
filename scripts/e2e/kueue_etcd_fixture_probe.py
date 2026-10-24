@@ -17,6 +17,27 @@ RESOURCE_KEY = "/registry/resourceflavors.kueue.x-k8s.io/rehearsal-flavor"
 ENCODED_VERSION = re.compile(rb'"apiVersion"\s*:\s*"(kueue\.x-k8s\.io/v1beta[12])"')
 
 
+def discover_key(payload):
+    """Find exactly one disposable ResourceFlavor fixture key, without values."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("kvs"), list):
+        raise ValueError("invalid_etcdctl_response")
+    candidates = []
+    for entry in payload["kvs"]:
+        try:
+            key = base64.b64decode(entry["key"], validate=True).decode("utf-8")
+        except (KeyError, ValueError, UnicodeError) as exc:
+            raise ValueError("invalid_etcd_key") from exc
+        if (
+            key.startswith("/registry/")
+            and key.endswith("/rehearsal-flavor")
+            and "resourceflavors" in key
+        ):
+            candidates.append(key)
+    if len(candidates) != 1:
+        raise ValueError("expected_one_disposable_fixture_key")
+    return candidates[0]
+
+
 def inspect(payload, *, expected_version, key=RESOURCE_KEY):
     if not isinstance(payload, dict):
         raise ValueError("invalid_etcdctl_response")
@@ -53,13 +74,25 @@ def inspect(payload, *, expected_version, key=RESOURCE_KEY):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--expected-version", choices=("v1beta1", "v1beta2"), required=True)
-    p.add_argument("--evidence-file", type=Path, required=True)
+    p.add_argument("--discover-key", action="store_true",
+                   help="Input: etcdctl get /registry/ --prefix --keys-only -w json")
+    p.add_argument("--key", help="Exact discovered disposable etcd key for verification")
+    p.add_argument("--expected-version", choices=("v1beta1", "v1beta2"))
+    p.add_argument("--evidence-file", type=Path)
     args = p.parse_args(argv)
+    if args.discover_key:
+        try:
+            print(discover_key(json.load(sys.stdin)))
+            return 0
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+            print("BLOCKED: cannot find exactly one disposable fixture key", file=sys.stderr)
+            return 2
+    if not args.expected_version or not args.evidence_file or not args.key:
+        p.error("--key, --expected-version and --evidence-file required for verification")
     report = {"result": "BLOCKED", "scope": "isolated_kind_fixture_only"}
     try:
         response = json.load(sys.stdin)
-        report = inspect(response, expected_version=args.expected_version)
+        report = inspect(response, expected_version=args.expected_version, key=args.key)
     except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
         # Emit only finite, predefined diagnostic classes, never raw etcd bytes.
         reason = str(exc)

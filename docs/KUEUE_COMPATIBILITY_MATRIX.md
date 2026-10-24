@@ -147,7 +147,9 @@ It then restores the CRD storage selection to `v1beta2`, invokes the pinned
 official migration script, directly verifies the fixture's etcd bytes now
 declare `v1beta2`, and only then drops `v1beta1` from the fixture CRD's
 `status.storedVersions`. Both etcd evidence files store the observed
-version, record key and SHA-256, **not raw object data**. This capability
+version, record key and SHA-256, **not raw object data**. The fixture key is
+discovered using an etcd `--keys-only` read and must uniquely match the
+disposable ResourceFlavor; the harness never guesses a CRD's etcd storage prefix. This capability
 is strictly for the new disposable kind; it must never be run on a real
 cluster. Failures block the upgrade rather than clearing stale version
 markers without proof.

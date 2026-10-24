@@ -6,7 +6,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from kueue_etcd_fixture_probe import inspect, RESOURCE_KEY
+from kueue_etcd_fixture_probe import inspect, discover_key, RESOURCE_KEY
 
 
 def encoded(version, *, key=RESOURCE_KEY):
@@ -21,6 +21,31 @@ def encoded(version, *, key=RESOURCE_KEY):
 
 
 class EtcdStorageEvidenceTests(unittest.TestCase):
+    def test_discover_key_uses_actual_etcd_prefix_not_assumed_path(self):
+        actual = "/registry/kueue.x-k8s.io/resourceflavors/rehearsal-flavor"
+        self.assertEqual(discover_key(encoded("v1beta1", key=actual)), actual)
+
+    def test_discovery_refuses_ambiguous_fixture_keys(self):
+        sample = encoded("v1beta1")
+        sample["kvs"].append(encoded("v1beta1", key="/registry/kueue.x-k8s.io/resourceflavors/rehearsal-flavor")["kvs"][0])
+        with self.assertRaisesRegex(ValueError, "expected_one_disposable_fixture_key"):
+            discover_key(sample)
+
+    def test_cli_discovers_only_keys_and_never_prints_value(self):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        from kueue_etcd_fixture_probe import main
+        actual = "/registry/kueue.x-k8s.io/resourceflavors/rehearsal-flavor"
+        payload = encoded("v1beta1", key=actual)
+        payload["kvs"][0].pop("value")
+        out = io.StringIO()
+        with patch("sys.stdin", io.StringIO(json.dumps(payload))):
+            with contextlib.redirect_stdout(out):
+                code = main(["--discover-key"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue().strip(), actual)
+
     def test_actual_encoded_v1beta1_is_detected(self):
         r = inspect(encoded("v1beta1"), expected_version="v1beta1")
         self.assertEqual(r["result"], "PASS")
@@ -60,7 +85,7 @@ class EtcdStorageEvidenceTests(unittest.TestCase):
             evidence = Path(d) / "evidence.json"
             with patch("sys.stdin", io.StringIO(json.dumps(encoded("v1beta2")))):
                 with contextlib.redirect_stdout(io.StringIO()):
-                    code = main(["--expected-version", "v1beta1",
+                    code = main(["--key", RESOURCE_KEY, "--expected-version", "v1beta1",
                                  "--evidence-file", str(evidence)])
             self.assertEqual(code, 2)
             result = json.loads(evidence.read_text())

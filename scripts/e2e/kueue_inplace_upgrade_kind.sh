@@ -96,13 +96,24 @@ probe_disposable_etcd() {
   [[ "$pod" == "etcd-$CLUSTER_ID-control-plane" ]] || {
     echo "BLOCKED: unexpected etcd pod in disposable kind" >&2; exit 2;
   }
+  # Generic CRD storage prefixes are an API-server implementation detail.
+  # Enumerate only keys (no object values), then require exactly one fixture
+  # key. Do not assume an etcd key prefix from its public API resource name.
+  local key
+  key="$(kubectl -n kube-system exec "$pod" -- etcdctl \
+    --endpoints=https://127.0.0.1:2379 \
+    --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+    --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
+    --key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
+    get /registry/ --prefix --keys-only --write-out=json |
+    python3 scripts/e2e/kueue_etcd_fixture_probe.py --discover-key)"
   kubectl -n kube-system exec "$pod" -- etcdctl \
     --endpoints=https://127.0.0.1:2379 \
     --cacert=/etc/kubernetes/pki/etcd/ca.crt \
     --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt \
     --key=/etc/kubernetes/pki/etcd/healthcheck-client.key \
-    get /registry/resourceflavors.kueue.x-k8s.io/rehearsal-flavor --write-out=json |
-    python3 scripts/e2e/kueue_etcd_fixture_probe.py --expected-version "$expected" \
+    get "$key" --write-out=json |
+    python3 scripts/e2e/kueue_etcd_fixture_probe.py --key "$key" --expected-version "$expected" \
       --evidence-file "$EVIDENCE_DIR/etcd-$expected.json"
 }
 
