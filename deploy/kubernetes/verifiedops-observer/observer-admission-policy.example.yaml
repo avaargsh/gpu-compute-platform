@@ -121,7 +121,7 @@ spec:
   matchResources:
     namespaceSelector:
       matchLabels:
-        app.kubernetes.io/component: verifiedops-observer
+        kubernetes.io/metadata.name: verifiedops-observer
 
 ---
 # Direct Pods must satisfy the same security envelope: otherwise a user with
@@ -240,4 +240,4 @@ spec:
   matchResources:
     namespaceSelector:
       matchLabels:
-        app.kubernetes.io/component: verifiedops-observer
+        kubernetes.io/metadata.name: verifiedops-observer

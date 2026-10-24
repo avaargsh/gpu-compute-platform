@@ -28,7 +28,9 @@ one_shot="$(mktemp)"
 one_shot_err="$(mktemp)"
 # Single EXIT trap: remove every temporary created by this script. Reassigning
 # the trap later silently dropped earlier entries, so declare the full list once.
-trap 'rm -f "$canary_err" "$canary_manifest" "$unsafe" "$unsafe.err" "$update_manifest" "$mutated" "$pod_base" "$pod_negative" "$pod_negative.err" "$one_shot" "$one_shot_err"' EXIT
+namespace_component_removed=false
+# Restore the operator label even if a negative admission probe fails midway.
+trap 'if [[ "$namespace_component_removed" == true ]]; then kubectl label namespace verifiedops-observer app.kubernetes.io/component=verifiedops-observer --overwrite >/dev/null || true; fi; rm -f "$canary_err" "$canary_manifest" "$unsafe" "$unsafe.err" "$update_manifest" "$mutated" "$pod_base" "$pod_negative" "$pod_negative.err" "$one_shot" "$one_shot_err"' EXIT
 
 # A one-shot probe is only proven by a named Observer Job admission policy
 # denying the request with its own one-shot message. The API server reports
@@ -247,6 +249,38 @@ if ! grep -Eiq 'denied|forbidden|validation' "$unsafe.err"; then
   cat "$unsafe.err" >&2
   exit 1
 fi
+
+# Regression: the business app label is mutable, so removing it must NOT
+# switch off the API-server admission policy for this dedicated namespace.
+# The immutable Kubernetes-managed namespace-name label remains the scope.
+namespace_component_removed=true
+kubectl label namespace verifiedops-observer app.kubernetes.io/component- >/dev/null
+namespace_name="$(kubectl get namespace verifiedops-observer -o jsonpath='{.metadata.labels.kubernetes\\.io/metadata\\.name}')"
+if [[ "$namespace_name" != "verifiedops-observer" ]]; then
+  echo "Observer namespace has no Kubernetes-managed name label: $namespace_name" >&2
+  exit 1
+fi
+# The refusal must come from the named policy; arbitrary schema errors are
+# insufficient proof that the Observer envelope still applies.
+scope_denied=false
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if kubectl create --dry-run=server -f "$unsafe" >/dev/null 2>"$unsafe.err"; then
+    echo 'Observer Job command override admitted after removing mutable namespace app label' >&2
+    exit 1
+  fi
+  if grep -Fq "ValidatingAdmissionPolicy 'verifiedops-observer-job-envelope' with binding 'verifiedops-observer-job-envelope'" "$unsafe.err"; then
+    scope_denied=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$scope_denied" != true ]]; then
+  echo 'Observer admission scope was not proven after mutable namespace label removal' >&2
+  cat "$unsafe.err" >&2
+  exit 1
+fi
+kubectl label namespace verifiedops-observer app.kubernetes.io/component=verifiedops-observer --overwrite >/dev/null
+namespace_component_removed=false
 sed 's#example.invalid/verifiedops-observer@sha256:0000000000000000000000000000000000000000000000000000000000000000#attacker.invalid/observer@sha256:1111111111111111111111111111111111111111111111111111111111111111#' "$manifest" > "$unsafe"
 if kubectl create --dry-run=server -f "$unsafe" >/dev/null 2>"$unsafe.err"; then
   echo 'Observer Job with unpinned image was admitted' >&2

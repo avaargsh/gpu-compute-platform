@@ -81,3 +81,55 @@ func assertObserverNamespaceMatch(t *testing.T, source string, selector *metav1.
 		t.Fatalf("%s must use only the API-server-managed namespace-name label; got %+v, want %v", source, selector, expected)
 	}
 }
+
+func TestObserverGuardBindingsUseServerControlledNamespaceName(t *testing.T) {
+	const path = "../../deploy/kubernetes/verifiedops-observer/observer-admission-policy.example.yaml"
+	want := map[string]string{"kubernetes.io/metadata.name": "verifiedops-observer"}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(content)))
+	expected := map[string]bool{
+		"verifiedops-observer-job-guard": false,
+		"verifiedops-observer-pod-guard": false,
+	}
+	for {
+		doc, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var header struct {
+			Kind string `json:"kind"`
+		}
+		if err := yaml.Unmarshal(doc, &header); err != nil {
+			t.Fatal(err)
+		}
+		if header.Kind != "ValidatingAdmissionPolicyBinding" {
+			continue
+		}
+		var binding admissionregistrationv1.ValidatingAdmissionPolicyBinding
+		if err := yaml.Unmarshal(doc, &binding); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := expected[binding.Name]; !ok {
+			continue
+		}
+		expected[binding.Name] = true
+		if binding.Spec.MatchResources == nil {
+			t.Fatalf("guard %s lacks namespace scope", binding.Name)
+		}
+		assertObserverNamespaceMatch(t, binding.Name, binding.Spec.MatchResources.NamespaceSelector, want)
+		if len(binding.Spec.ValidationActions) != 1 || binding.Spec.ValidationActions[0] != admissionregistrationv1.Deny {
+			t.Fatalf("guard %s must use Deny: %v", binding.Name, binding.Spec.ValidationActions)
+		}
+	}
+	for name, found := range expected {
+		if !found {
+			t.Fatalf("required fail-closed Observer guard binding %s missing", name)
+		}
+	}
+}
