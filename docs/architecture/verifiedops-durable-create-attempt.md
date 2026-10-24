@@ -18,7 +18,21 @@ The authenticated Agent can read the exact durable attempt using the original Op
 - `ACK_BOUND`: the API-server CREATE candidate was durably recorded and still matches the current non-deleting Desired generation and current project/cluster binding. This is **not** an execution-ownership attestation. The successor Agent uses the bound UID for read-only inspection and requires the fresh observed Job UID to match; it must not apply/create a replacement Job or mutate a DRA claim on this path.
 - `STALE`: Desired is deleted, deleting, at a different generation, or its current project/provider binding differs from the persisted attempt. Fail closed and do not touch the provider.
 
-The resolver is exposed only through the verified cluster-agent mTLS route, returns no-store responses, and never creates or rewrites the UID binding. A name/label match, Kueue admission, Ready condition, and provider GET cannot change UNKNOWN into ACK_BOUND. The signed Observer remains responsible for independently proving operation ownership and current Pod/Node/image context.
+The resolver is exposed only through the verified cluster-agent mTLS route, returns no-store responses, and never creates or rewrites the UID binding.
+
+## Acceptance matrix
+
+| Durable record | Resolver result | Allowed provider action |
+|---|---|---|
+| No row for the globally unique Operation ID | `NOT_FOUND` | A first guarded CREATE may prepare the row, issue one API-server CREATE, and persist only that call's UID/RV response. |
+| PREPARED row but no exact ACK binding | `UNKNOWN` | No CREATE, GET-based adoption, or DRA claim mutation. Report unresolved and preserve evidence. |
+| Full binding and current Desired tuple still match | `ACK_BOUND` | Read-only GET of the expected Job name; require exact recorded UID and current generation, then compare UID again in the independent observation. |
+| Operation ID exists but Cluster, Workload, Generation, namespace, Desired state or Provider binding mismatches | `STALE` | No provider mutation; reconcile the authoritative object mapping and surface the conflict. |
+
+The negative cases for a wrong Cluster, Workload or Generation are deliberately tested against the same Operation ID. The query must locate the unique operation first and compare the scope tuple afterwards; otherwise filtering by the mismatched generation could turn a stale record into a false `NOT_FOUND` and authorize a second CREATE.
+
+For full-stack acceptance, label the PR `run-golden-path` before the next PR synchronization event. The gated job runs the actual ephemeral OIDC + PostgreSQL + kind/Kueue ACK-drop experiment alongside the normal Kueue Golden Path. A regular unit/Go CI pass is not a substitute for that integration result.
+ A name/label match, Kueue admission, Ready condition, and provider GET cannot change UNKNOWN into ACK_BOUND. The signed Observer remains responsible for independently proving operation ownership and current Pod/Node/image context.
 
 
 `RecordJobCreateUID` now requires that exact prepared operation/lease owner
