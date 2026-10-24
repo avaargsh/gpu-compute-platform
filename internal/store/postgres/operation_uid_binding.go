@@ -183,6 +183,8 @@ func (s *Store) ResolveJobCreateAttempt(ctx context.Context, operationID string,
 		desiredGeneration sql.NullInt64
 		desiredProject sql.NullString
 		deleting sql.NullTime
+		currentNamespace sql.NullString
+		currentProvider sql.NullString
 		bindingOperation sql.NullString
 		bindingCluster sql.NullString
 		bindingProject sql.NullString
@@ -198,18 +200,21 @@ func (s *Store) ResolveJobCreateAttempt(ctx context.Context, operationID string,
 SELECT a.operation_id, a.cluster_id, a.project_id, a.workload_id,
 	a.generation, a.namespace, a.job_name, a.lease_owner,
 	d.generation, d.spec->>'projectID', d.deletion_timestamp,
+	p.namespace, cb.provider,
 	b.operation_id, b.cluster_id, b.project_id, b.workload_id,
 	b.generation, b.namespace, b.job_name, b.job_uid,
 	b.job_resource_version, b.lease_owner
 FROM provider_job_create_attempts a
 LEFT JOIN desired_resources d
   ON d.cluster_id=a.cluster_id AND d.kind='Workload' AND d.resource_id=a.workload_id
-LEFT JOIN provider_job_create_uid_bindings b ON b.operation_id=a.operation_id
+	LEFT JOIN project_bindings p ON p.project_id=a.project_id AND p.cluster_id=a.cluster_id
+	LEFT JOIN cluster_bindings cb ON cb.pool_id=d.spec->>'poolID' AND cb.cluster_id=a.cluster_id
+	LEFT JOIN provider_job_create_uid_bindings b ON b.operation_id=a.operation_id
 WHERE a.operation_id=$1 AND a.cluster_id=$2 AND a.workload_id=$3 AND a.generation=$4
 `, operationID, clusterID, workloadID, generation).Scan(
 		&attemptOperation, &attemptCluster, &attemptProject, &attemptWorkload,
 		&attemptGeneration, &attemptNamespace, &attemptName, &attemptOwner,
-		&desiredGeneration, &desiredProject, &deleting,
+		&desiredGeneration, &desiredProject, &deleting, &currentNamespace, &currentProvider,
 		&bindingOperation, &bindingCluster, &bindingProject, &bindingWorkload,
 		&bindingGeneration, &bindingNamespace, &bindingName, &bindingUID,
 		&bindingResourceVersion, &bindingOwner,
@@ -224,7 +229,9 @@ WHERE a.operation_id=$1 AND a.cluster_id=$2 AND a.workload_id=$3 AND a.generatio
 		return verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptStale}, nil
 	}
 	if !desiredGeneration.Valid || desiredGeneration.Int64 != attemptGeneration ||
-		!desiredProject.Valid || desiredProject.String != attemptProject || deleting.Valid {
+		!desiredProject.Valid || desiredProject.String != attemptProject || deleting.Valid ||
+		!currentNamespace.Valid || currentNamespace.String != attemptNamespace ||
+		!currentProvider.Valid || currentProvider.String != "kueue" {
 		return verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptStale}, nil
 	}
 	if !bindingOperation.Valid {
