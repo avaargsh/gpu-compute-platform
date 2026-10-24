@@ -302,7 +302,7 @@ func (r *Runner) reconcile(ctx context.Context, item DesiredResource, bindings m
 				return Observation{}, fmt.Errorf("unsupported durable CREATE attempt state %q", resolution.State)
 			}
 		}
-		
+
 		got, err := r.runtime.ReconcileWorkload(ctx, projection)
 		if err != nil {
 			return Observation{}, err
