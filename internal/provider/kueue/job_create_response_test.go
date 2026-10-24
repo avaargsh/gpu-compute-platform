@@ -208,7 +208,9 @@ func TestACKBoundInspectionRequiresExactLiveUIDAndGeneration(t *testing.T) {
 		t.Fatalf("same-name replacement UID was accepted: %v", err)
 	}
 	staleJob, err := jobObject(responseJob())
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	staleJob.UID = types.UID("old-generation-job")
 	staleJob.ResourceVersion = "43"
 	staleJob.Annotations[generationAnnotation] = "6"
