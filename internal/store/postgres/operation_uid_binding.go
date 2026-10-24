@@ -195,7 +195,8 @@ func (s *Store) ResolveJobCreateAttempt(ctx context.Context, operationID string,
 		bindingUID             sql.NullString
 		bindingResourceVersion sql.NullString
 		bindingOwner           sql.NullString
-	)	err := s.db.QueryRowContext(ctx, `
+	)
+	err := s.db.QueryRowContext(ctx, `
 SELECT a.operation_id, a.cluster_id, a.project_id, a.workload_id,
 	a.generation, a.namespace, a.job_name, a.lease_owner,
 	d.generation, d.spec->>'projectID', d.deletion_timestamp,
