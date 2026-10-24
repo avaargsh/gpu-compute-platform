@@ -243,8 +243,27 @@ wait_http
 
 go build -o /tmp/gpu-cluster-agent ./cmd/cluster-agent
 
-put "/api/v1/projects/$PROJECT_ID/binding" "{\"metadata\":{\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"clusterId\":\"$CLUSTER_ID\",\"namespace\":\"$NAMESPACE\"}"
-put "/api/v1/compute-pools/$POOL_ID/binding" "{\"metadata\":{\"generation\":1},\"poolId\":\"$POOL_ID\",\"clusterId\":\"$CLUSTER_ID\",\"provider\":\"kueue\"}"
+# The full-stack OIDC fixture seeds the same authoritative bindings before
+# Control Plane startup. In that mode, read them from the shared PostgreSQL
+# database and do not issue a second generation-1 CAS PUT. Standalone Golden Path
+# execution still owns and creates its own bindings below.
+if [[ "${PRESEEDED_BINDINGS:-0}" == "1" ]]; then
+  : "${GPU_MANAGEMENT_E2E_PG_CONTAINER:?shared PostgreSQL container is required}"
+  project_binding="$(docker exec "$GPU_MANAGEMENT_E2E_PG_CONTAINER" psql -X -qAt -U gpu -d gpu_management_fullstack_ci -c "SELECT project_id || '|' || cluster_id || '|' || namespace FROM project_bindings WHERE project_id='lost-ack-project'")"
+  [[ "$project_binding" == "lost-ack-project|lost-ack-ci|lost-ack" ]] || {
+    echo "preseeded project binding is missing or mismatched: $project_binding" >&2
+    exit 1
+  }
+  pool_binding="$(docker exec "$GPU_MANAGEMENT_E2E_PG_CONTAINER" psql -X -qAt -U gpu -d gpu_management_fullstack_ci -c "SELECT pool_id || '|' || cluster_id || '|' || provider FROM cluster_bindings WHERE pool_id='pool-lost-ack-ci'")"
+  [[ "$pool_binding" == "pool-lost-ack-ci|lost-ack-ci|kueue" ]] || {
+    echo "preseeded Kueue pool binding is missing or mismatched: $pool_binding" >&2
+    exit 1
+  }
+  echo "PASS: verified preseeded lost-ACK project and sole Kueue provider bindings"
+else
+  put "/api/v1/projects/$PROJECT_ID/binding" "{\"metadata\":{\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"clusterId\":\"$CLUSTER_ID\",\"namespace\":\"$NAMESPACE\"}"
+  put "/api/v1/compute-pools/$POOL_ID/binding" "{\"metadata\":{\"generation\":1},\"poolId\":\"$POOL_ID\",\"clusterId\":\"$CLUSTER_ID\",\"provider\":\"kueue\"}"
+fi
 put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":4}],\"acceleratorBindings\":[{\"class\":\"$ACCELERATOR_CLASS\",\"resourceName\":\"$ACCELERATOR_RESOURCE\",\"flavor\":\"$ACCELERATOR_FLAVOR\",\"nodeLabels\":{\"nvidia.com/gpu.product\":\"NVIDIA-H100-80GB-HBM3\",\"topology.kubernetes.io/zone\":\"gpu-zone-a\",\"ai.compute/rack\":\"rack-a01\"}}],\"scheduling\":{\"mode\":\"default\"}}}"
 put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":1}}}"
 
