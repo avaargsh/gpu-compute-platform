@@ -9,6 +9,18 @@ the original Agent repeats it. This is deliberate: it is impossible to
 distinguish crash-before-Kubernetes from crash-after-CREATE without external
 evidence. Do NOT retry external CREATE or infer ownership from a Job GET.
 
+## Restart resolution protocol
+
+The authenticated Agent can read the exact durable attempt using the original Operation ID, cluster, Workload and generation. The resolver returns one of four states:
+
+- `NOT_FOUND`: no PREPARED row exists for this tuple. A first guarded CREATE may proceed, but only through the current lease and original Management audit.
+- `UNKNOWN`: PREPARED exists without an immutable CREATE ACK binding. This includes a process crash or lost ACK around the external CREATE. Do not call CREATE again; report `Ready=False / CreateAttemptUnresolved` and preserve the evidence for explicit reconciliation.
+- `ACK_BOUND`: the API-server CREATE candidate was durably recorded and still matches the current non-deleting Desired generation and current project/cluster binding. This is **not** an execution-ownership attestation. The successor Agent uses the bound UID for read-only inspection and requires the fresh observed Job UID to match; it must not apply/create a replacement Job or mutate a DRA claim on this path.
+- `STALE`: Desired is deleted, deleting, at a different generation, or its current project/provider binding differs from the persisted attempt. Fail closed and do not touch the provider.
+
+The resolver is exposed only through the verified cluster-agent mTLS route, returns no-store responses, and never creates or rewrites the UID binding. A name/label match, Kueue admission, Ready condition, and provider GET cannot change UNKNOWN into ACK_BOUND. The signed Observer remains responsible for independently proving operation ownership and current Pod/Node/image context.
+
+
 `RecordJobCreateUID` now requires that exact prepared operation/lease owner
 in the same transaction before writing the actual API-server CREATE response
 UID/RV. Existing candidate binding remains immutable. Status lookup is
