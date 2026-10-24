@@ -1,0 +1,64 @@
+name: Kueue 0.19 to 0.20 In-Place Kind Rehearsal
+on:
+  push:
+    branches: [compat/kueue-v0203-upgrade]
+permissions:
+  contents: read
+concurrency:
+  group: kueue-upgrade-rehearsal
+  cancel-in-progress: false
+jobs:
+  upgrade-rehearsal:
+    name: Fresh isolated kind, retained resources, migrate, upgrade
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout exact PR source under test
+        uses: actions/checkout@v4
+        with:
+          ref: 71a46fe4fcce2875e026e0ed3dfe2d9488dbd132
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+      - uses: azure/setup-helm@v4
+      - name: Install pinned kind v0.30.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f /tmp/kind
+          downloaded=false
+          for url in \
+            https://github.com/kubernetes-sigs/kind/releases/download/v0.30.0/kind-linux-amd64 \
+            https://kind.sigs.k8s.io/dl/v0.30.0/kind-linux-amd64; do
+            if curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 90 "$url" -o /tmp/kind; then
+              downloaded=true
+              break
+            fi
+          done
+          [[ "$downloaded" == true && -s /tmp/kind ]]
+          sudo install -m 0755 /tmp/kind /usr/local/bin/kind
+          kind version
+      - name: Check guard contract first
+        run: |
+          bash -n scripts/e2e/kueue_inplace_upgrade_kind.sh
+          python3 -m unittest discover -s scripts/e2e -p 'test_kueue_upgrade_rehearsal.py' -v
+      - name: Run isolated in-place upgrade and product Golden Path
+        shell: bash
+        env:
+          ALLOW_EPHEMERAL_KUEUE_UPGRADE: YES
+          CLUSTER_ID: kueue-upgrade-rehearsal
+          KIND_NODE_IMAGE: kindest/node:v1.34.0
+          EVIDENCE_DIR: ${{ runner.temp }}/kueue-upgrade-rehearsal-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          echo "Exact source SHA: $(git rev-parse HEAD)"
+          bash scripts/e2e/kueue_inplace_upgrade_kind.sh
+      - name: Upload upgrade evidence (also on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kueue-inplace-upgrade-${{ github.run_id }}
+          path: ${{ runner.temp }}/kueue-upgrade-rehearsal-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
