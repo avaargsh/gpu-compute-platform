@@ -172,31 +172,30 @@ func (s *Store) ResolveJobCreateAttempt(ctx context.Context, operationID string,
 	}
 
 	var (
-		attemptOperation string
-		attemptCluster domain.ID
-		attemptProject string
-		attemptWorkload domain.ID
-		attemptGeneration int64
-		attemptNamespace string
-		attemptName string
-		attemptOwner string
-		desiredGeneration sql.NullInt64
-		desiredProject sql.NullString
-		deleting sql.NullTime
-		currentNamespace sql.NullString
-		currentProvider sql.NullString
-		bindingOperation sql.NullString
-		bindingCluster sql.NullString
-		bindingProject sql.NullString
-		bindingWorkload sql.NullString
-		bindingGeneration sql.NullInt64
-		bindingNamespace sql.NullString
-		bindingName sql.NullString
-		bindingUID sql.NullString
+		attemptOperation       string
+		attemptCluster         domain.ID
+		attemptProject         string
+		attemptWorkload        domain.ID
+		attemptGeneration      int64
+		attemptNamespace       string
+		attemptName            string
+		attemptOwner           string
+		desiredGeneration      sql.NullInt64
+		desiredProject         sql.NullString
+		deleting               sql.NullTime
+		currentNamespace       sql.NullString
+		currentProvider        sql.NullString
+		bindingOperation       sql.NullString
+		bindingCluster         sql.NullString
+		bindingProject         sql.NullString
+		bindingWorkload        sql.NullString
+		bindingGeneration      sql.NullInt64
+		bindingNamespace       sql.NullString
+		bindingName            sql.NullString
+		bindingUID             sql.NullString
 		bindingResourceVersion sql.NullString
-		bindingOwner sql.NullString
-	)
-	err := s.db.QueryRowContext(ctx, `
+		bindingOwner           sql.NullString
+	)	err := s.db.QueryRowContext(ctx, `
 SELECT a.operation_id, a.cluster_id, a.project_id, a.workload_id,
 	a.generation, a.namespace, a.job_name, a.lease_owner,
 	d.generation, d.spec->>'projectID', d.deletion_timestamp,
