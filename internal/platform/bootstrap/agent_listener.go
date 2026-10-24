@@ -32,7 +32,11 @@ func LoadAgentListener(getenv func(string) string, profile string) (AgentListene
 	}
 	// The legacy single-listener mTLS profile remains PoC-only. Development may
 	// opt into mTLS only for a second loopback listener; its original listener
-	// is independently constrained to loopback by bootstrap.Load.
+	// is independently constrained to loopback by bootstrap.Load. The PoC
+	// profile must not combine mTLS Agent routes with an anonymous main API.
+	if cfg.ListenAddr != "" && profile != "development" {
+		return AgentListener{}, errors.New("separate Agent mTLS listener requires the loopback-only development profile")
+	}
 	if profile != "poc" && !(profile == "development" && cfg.ListenAddr != "") {
 		return AgentListener{}, errors.New("Agent mTLS listener requires the loopback-only poc profile or a dedicated development listener")
 	}
