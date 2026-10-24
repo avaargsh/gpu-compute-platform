@@ -3,6 +3,9 @@ package kueue
 import "context"
 
 type JobObservation struct {
+	// JobUID is the identity from the same fresh Job GET used for observation.
+	// It is compared with the durable CREATE ACK candidate during recovery.
+	JobUID        string
 	Phase         string
 	WorkloadName  string
 	QuotaReserved bool
