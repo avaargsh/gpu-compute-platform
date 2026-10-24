@@ -10,6 +10,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
@@ -60,7 +62,7 @@ func (c *KubeClient) ApplyResourceClaim(ctx context.Context, in Job) error {
 	claims := c.core.ResourceV1().ResourceClaims(in.Namespace)
 	current, err := claims.Get(ctx, claim.Name, metav1.GetOptions{})
 	if err == nil {
-		return validateProviderGeneration("resource claim", claim.Name, current.Annotations, in.Generation)
+		return validateExistingResourceClaim(current, claim, in.Generation)
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
@@ -82,7 +84,36 @@ func (c *KubeClient) ApplyResourceClaim(ctx context.Context, in Job) error {
 	if err != nil {
 		return fmt.Errorf("adopt resource claim %s after create race: %w", claim.Name, err)
 	}
-	return validateProviderGeneration("resource claim", claim.Name, current.Annotations, in.Generation)
+	return validateExistingResourceClaim(current, claim, in.Generation)
+}
+
+// validateExistingResourceClaim permits convergence only when a same-name
+// claim has the original generation, workload owner, identity annotations, and
+// requested device class/count. Generation equality alone is not ownership or
+// desired-state equivalence.
+func validateExistingResourceClaim(current, desired *resourcev1.ResourceClaim, generation int64) error {
+	if current == nil || desired == nil {
+		return fmt.Errorf("resource claim identity is missing")
+	}
+	if current.Name != desired.Name || current.Namespace != desired.Namespace {
+		return fmt.Errorf("resource claim %s identity mismatch", desired.Name)
+	}
+	if err := validateProviderGeneration("resource claim", desired.Name, current.Annotations, generation); err != nil {
+		return err
+	}
+	owner := desired.Labels["ai.compute/workload"]
+	if owner == "" || current.Labels["ai.compute/workload"] != owner {
+		return fmt.Errorf("resource claim %s owner identity mismatch", desired.Name)
+	}
+	for key, want := range desired.Annotations {
+		if current.Annotations[key] != want {
+			return fmt.Errorf("resource claim %s identity annotation %q mismatch", desired.Name, key)
+		}
+	}
+	if !apiequality.Semantic.DeepEqual(current.Spec, desired.Spec) {
+		return fmt.Errorf("resource claim %s desired spec drift", desired.Name)
+	}
+	return nil
 }
 
 // JobApplyDisposition distinguishes a response to our actual API-server
