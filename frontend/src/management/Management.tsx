@@ -127,6 +127,8 @@ export function ManagementApp() {
     session: object
     cluster: string
     project: string
+    kind: Kind
+    resource: string
     operationId: string
   } | null>(null)
   const [watchReadCount, setWatchReadCount] = useState(0)
@@ -168,7 +170,8 @@ export function ManagementApp() {
       const now = receiptContext.current
       return now.authenticated && now.session === current.session &&
         now.cluster === current.cluster && now.project === current.project &&
-        now.operationId === current.operationId
+        now.operationId === current.operationId &&
+        kind === current.kind && resource === current.resource
     }
     if (!authenticated || !matches()) {
       setEvidenceWatch(null)
@@ -228,7 +231,7 @@ export function ManagementApp() {
       active = false
       window.clearInterval(intervalId)
     }
-  }, [evidenceWatch, authenticated, session, cluster, project, operationId, refreshEvidenceChainFn])
+  }, [evidenceWatch, authenticated, session, cluster, project, kind, resource, operationId, refreshEvidenceChainFn])
 
   // Load any one-tab recovery pointer from sessionStorage on mount so the
   // "恢复操作范围与 ID" button can appear after a reload + re-login.
@@ -1090,14 +1093,18 @@ export function ManagementApp() {
             </Button>
             <Button
               onClick={() => {
-                if (!session || !authenticated || !/^[0-9a-f]{32}$/.test(operationId)) return
+                if (!session || !authenticated || !/^[0-9a-f]{32}$/.test(operationId) ||
+                    !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(cluster) ||
+                    !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(project)) return
                 clearResult()
                 setWatchReadCount(0)
                 setWatchStatus('已开始有限次数的只读核对；不会自动提交或重试写操作。')
-                setEvidenceWatch({ session, cluster, project, operationId })
+                setEvidenceWatch({ session, cluster, project, kind, resource, operationId })
               }}
               disabled={!authenticated || busy || !session ||
-                !/^[0-9a-f]{32}$/.test(operationId) || !!evidenceWatch}
+                !/^[0-9a-f]{32}$/.test(operationId) ||
+                !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(cluster) ||
+                !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(project) || !!evidenceWatch}
               variant="outline"
               className="px-4 py-2 rounded-md border"
             >
