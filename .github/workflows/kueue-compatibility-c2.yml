@@ -1,0 +1,57 @@
+name: Kueue C2 v0.20.3 Kubernetes 1.35.8
+on:
+  push:
+    branches: [compat/kueue-v0203-c2]
+permissions:
+  contents: read
+jobs:
+  c2:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      KUEUE_VERSION: v0.20.3
+      CLUSTER_ID: kueue-c2-1358
+      KIND_NODE_IMAGE: kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 65bf8236c99d25e6f2d6e2c0a22f434250a875d1
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+      - uses: azure/setup-helm@v4
+      - name: Install kind v0.33.0
+        run: |
+          curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 90 \
+            https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64 -o /tmp/kind
+          chmod +x /tmp/kind
+          sudo install /tmp/kind /usr/local/bin/kind
+          kind version
+      - name: Verify image digest
+        run: docker manifest inspect "$KIND_NODE_IMAGE" >/dev/null
+      - name: Golden Path and evidence
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/c2-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          git rev-parse HEAD > "$EVIDENCE_DIR/tested-sha.txt"
+          printf '%s\n' "$KIND_NODE_IMAGE" > "$EVIDENCE_DIR/node-image.txt"
+          printf '%s\n' "$KUEUE_VERSION" > "$EVIDENCE_DIR/kueue-version.txt"
+          make e2e-golden 2>&1 | tee "$EVIDENCE_DIR/golden.log"
+          kubectl version -o json > "$EVIDENCE_DIR/kubernetes-version.json"
+          actual="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["serverVersion"]["gitVersion"])' "$EVIDENCE_DIR/kubernetes-version.json")"
+          [[ "$actual" == v1.35.* ]] || { echo "wrong Kubernetes server version: $actual"; exit 1; }
+          image="$(kubectl get deployment kueue-controller-manager -n kueue-system -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          [[ "$image" == *:v0.20.3 ]] || { echo "wrong Kueue image: $image"; exit 1; }
+          echo "C2 PASS: source=$(git rev-parse HEAD), kubernetes=$actual, kueue=$image"
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kueue-c2-${{ github.run_id }}
+          path: ${{ runner.temp }}/c2-evidence
+          if-no-files-found: warn
+          retention-days: 14
