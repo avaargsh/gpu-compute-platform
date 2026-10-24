@@ -662,7 +662,6 @@ func TestApplyResourceClaimAdoptsSameGenerationAfterCreateRace(t *testing.T) {
 	}
 }
 
-
 func TestGuardedKubernetesCREATEPreparesBeforeDRAClaim(t *testing.T) {
 	ctx := context.Background()
 	job := Job{
