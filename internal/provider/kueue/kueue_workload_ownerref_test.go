@@ -87,7 +87,7 @@ func TestObserveJobRejectsUnownedKueueAdmissionConditions(t *testing.T) {
 				runtime.NewScheme(), map[schema.GroupVersionResource]string{workloadGVR: "WorkloadList"},
 			)
 			workload := &unstructured.Unstructured{Object: map[string]any{
-				"apiVersion": "kueue.x-k8s.io/v1beta1",
+				"apiVersion": "kueue.x-k8s.io/v1beta2",
 				"kind":       "Workload",
 				"metadata":   map[string]any{"name": "job-a-wl", "namespace": "project-a"},
 				"status": map[string]any{"conditions": []any{
