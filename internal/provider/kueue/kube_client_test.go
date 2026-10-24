@@ -74,7 +74,7 @@ func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
 	}
 
 	workload := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "kueue.x-k8s.io/v1beta1",
+		"apiVersion": "kueue.x-k8s.io/v1beta2",
 		"kind":       "Workload",
 		"metadata": map[string]any{
 			"name":      "job-train-1-workload",
@@ -302,7 +302,7 @@ func TestObserveSucceededJobPreservesKueueEvidenceWithoutInferringPodsReady(t *t
 		t.Fatal(err)
 	}
 	workload := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "kueue.x-k8s.io/v1beta1", "kind": "Workload",
+		"apiVersion": "kueue.x-k8s.io/v1beta2", "kind": "Workload",
 		"metadata": map[string]any{"name": "job-success-workload", "namespace": "project-1"},
 		"status": map[string]any{"conditions": []any{
 			map[string]any{"type": "QuotaReserved", "status": "True"},
@@ -357,7 +357,7 @@ func TestObserveFailedJobPreservesKueueEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	workload := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "kueue.x-k8s.io/v1beta1", "kind": "Workload",
+		"apiVersion": "kueue.x-k8s.io/v1beta2", "kind": "Workload",
 		"metadata": map[string]any{"name": "job-failed-workload", "namespace": "project-1"},
 		"status": map[string]any{"conditions": []any{
 			map[string]any{"type": "QuotaReserved", "status": "True"},
@@ -657,5 +657,32 @@ func TestApplyResourceClaimAdoptsSameGenerationAfterCreateRace(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("same-generation ResourceClaim create race must converge by adoption: %v", err)
+	}
+}
+
+
+func TestKueueObjectsAndGVRsUseV1beta2API(t *testing.T) {
+	const wantAPIVersion = "kueue.x-k8s.io/v1beta2"
+	objects := map[string]*unstructured.Unstructured{
+		"ResourceFlavor": resourceFlavorObject(ResourceFlavor{Name: "rf"}),
+		"ClusterQueue":   clusterQueueObject(ClusterQueue{Name: "cq"}),
+		"LocalQueue":     localQueueObject(LocalQueue{Name: "lq", Namespace: "ns", ClusterQueue: "cq"}),
+	}
+	for kind, object := range objects {
+		if got := object.GetAPIVersion(); got != wantAPIVersion {
+			t.Errorf("%s apiVersion = %q, want %q", kind, got, wantAPIVersion)
+		}
+	}
+
+	gvrs := map[string]schema.GroupVersionResource{
+		"ResourceFlavor": resourceFlavorGVR,
+		"ClusterQueue":   clusterQueueGVR,
+		"LocalQueue":     localQueueGVR,
+		"Workload":       workloadGVR,
+	}
+	for kind, gvr := range gvrs {
+		if gvr.Group != "kueue.x-k8s.io" || gvr.Version != "v1beta2" {
+			t.Errorf("%s GVR = %s, want kueue.x-k8s.io/v1beta2", kind, gvr.String())
+		}
 	}
 }
