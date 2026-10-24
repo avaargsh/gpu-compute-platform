@@ -678,7 +678,7 @@ func TestApplyExistingResourceClaimRejectsSameGenerationIdentityOrSpecDrift(t *t
 			client := NewKubeClient(coreClient, nil)
 			job := Job{
 				Generation: 5,
- 				Name:       "job-dra-identity",
+				Name:       "job-dra-identity",
 				Namespace:  "project-1",
 				Image:      "busybox:1.36",
 				Annotations: map[string]string{
