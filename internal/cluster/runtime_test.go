@@ -135,7 +135,6 @@ func TestRuntimeRequiresExplicitNonNilAdapters(t *testing.T) {
 	}
 }
 
-
 func TestProductionRuntimeRegistersOnlyAcceptedKueueProvider(t *testing.T) {
 	// NewRuntime is the production registration path. Keep this separate from
 	// NewRuntimeWithAdapters tests, which intentionally permit test-only adapters.
@@ -201,15 +200,21 @@ func TestRuntimeFailsClosedAcrossAllLifecycleMethods(t *testing.T) {
 		},
 	}
 
-	for _, providerName := range []string{"", "volcano"} {
+	for _, providerCase := range []struct {
+		name string
+		value string
+	}{
+		{name: "missing", value: ""},
+		{name: "unregistered-volcano", value: "volcano"},
+	} {
 		for _, operation := range operations {
-			t.Run(operation.name+"/"+providerName, func(t *testing.T) {
-				err := operation.call(providerName)
+			t.Run(operation.name+"/"+providerCase.name, func(t *testing.T) {
+				err := operation.call(providerCase.value)
 				if err == nil {
-					t.Fatalf("provider %q unexpectedly dispatched for %s", providerName, operation.name)
+					t.Fatalf("provider %q unexpectedly dispatched for %s", providerCase.value, operation.name)
 				}
 				if !strings.Contains(err.Error(), "provider") {
-					t.Fatalf("provider %q returned an unclear dispatch error: %v", providerName, err)
+					t.Fatalf("provider %q returned an unclear dispatch error: %v", providerCase.value, err)
 				}
 			})
 		}
