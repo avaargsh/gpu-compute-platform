@@ -230,7 +230,6 @@ func TestACKBoundInspectionRequiresExactLiveUIDAndGeneration(t *testing.T) {
 	}
 }
 
-
 // A DRA claim is a provider mutation too. The durable PRE-CREATE guard must win
 // before either claim creation or Job creation, while an admitted attempt still
 // creates the claim before the Job that references it.
