@@ -27,12 +27,28 @@ type fakeControlPlane struct {
 	prepareErr             error
 	publishErr             error
 	publishedBeforeRelease bool
+	attemptResolution     verifiedops.JobCreateAttemptResolution
+	attemptResolveErr     error
+	attemptResolveCalls   int
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }
 func (f *fakeControlPlane) Heartbeat(context.Context, Heartbeat) error   { return nil }
 func (f *fakeControlPlane) PullDesired(context.Context, domain.ID) ([]DesiredResource, error) {
 	return f.desired, nil
+}
+
+func (f *fakeControlPlane) ResolveJobCreateAttempt(
+	_ context.Context, _ string, _ domain.ID, _ domain.ID, _ int64,
+) (verifiedops.JobCreateAttemptResolution, error) {
+	f.attemptResolveCalls++
+	if f.attemptResolveErr != nil {
+		return verifiedops.JobCreateAttemptResolution{}, f.attemptResolveErr
+	}
+	if f.attemptResolution.State == "" {
+		return verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptNotFound}, nil
+	}
+	return f.attemptResolution, nil
 }
 func (f *fakeControlPlane) Report(_ context.Context, _ domain.ID, observations []Observation) error {
 	if f.releaseCalls == 0 {
@@ -467,5 +483,72 @@ func TestRunnerPreservesProviderSpecificBindingWithoutKueueFields(t *testing.T) 
 	}
 	if got.ResourceName != "" || got.Flavor != "" {
 		t.Fatalf("generic runner invented Kueue/extended-resource fields: %#v", got)
+	}
+}
+
+
+func TestRunnerNeverRepeatsUnknownCreateOutcome(t *testing.T) {
+	control := &fakeControlPlane{
+		attemptResolution: verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptUnknown},
+		desired: []DesiredResource{
+			{Kind: "ComputePool", ID: "pool-1", Generation: 1, Spec: map[string]any{
+				"projectID": "project-1", "namespace": "project-1",
+				"acceleratorBindings": []any{map[string]any{"class": "h100", "resourceName": "nvidia.com/gpu", "flavor": "h100"}},
+			}},
+			{Kind: "Workload", ID: "train-1", Generation: 4, OperationID: "0123456789abcdef0123456789abcdef", Spec: map[string]any{
+				"projectID": "project-1", "poolID": "pool-1", "namespace": "project-1",
+				"image": "example/train@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"accelerator": map[string]any{"class": "h100", "quota": float64(1)},
+			}},
+		},
+	}
+	runtime := &fakeRuntime{}
+	runner := NewRunnerWithLeaseOwner("cluster-a", control, runtime, "agent-recovery")
+	if err := runner.Sync(context.Background()); err != nil { t.Fatal(err) }
+	if runtime.workloadCalls != 0 || len(control.prepared) != 0 || len(control.published) != 0 {
+		t.Fatalf("UNKNOWN attempt touched provider or retried CREATE: workloadCalls=%d prepared=%d published=%d", runtime.workloadCalls, len(control.prepared), len(control.published))
+	}
+	var workloadObservation *Observation
+	for i := range control.reported {
+		if control.reported[i].Kind == "Workload" { workloadObservation = &control.reported[i]; break }
+	}
+	if workloadObservation == nil || len(workloadObservation.Conditions) != 1 ||
+		workloadObservation.Conditions[0].Reason != "CreateAttemptUnresolved" || workloadObservation.Conditions[0].Status != "False" {
+		t.Fatalf("UNKNOWN state was not reported fail-closed: %#v", control.reported)
+	}
+}
+
+func TestRunnerPassesACKBoundUIDToReadOnlyProviderPath(t *testing.T) {
+	const operationID = "0123456789abcdef0123456789abcdef"
+	binding := &verifiedops.JobCreateUIDBinding{
+		OperationID: operationID, ClusterID: "cluster-a", ProjectID: "project-1",
+		WorkloadID: "train-1", Generation: 4, Namespace: "project-1",
+		JobName: "job-train-1", JobUID: "apiserver-uid-1", JobResourceVersion: "42", LeaseOwner: "prior-agent",
+	}
+	control := &fakeControlPlane{
+		attemptResolution: verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptACKBound, Binding: binding},
+		desired: []DesiredResource{
+			{Kind: "ComputePool", ID: "pool-1", Generation: 1, Spec: map[string]any{
+				"projectID": "project-1", "namespace": "project-1",
+				"acceleratorBindings": []any{map[string]any{"class": "h100", "resourceName": "nvidia.com/gpu", "flavor": "h100"}},
+			}},
+			{Kind: "Workload", ID: "train-1", Generation: 4, OperationID: operationID, Spec: map[string]any{
+				"projectID": "project-1", "poolID": "pool-1", "namespace": "project-1",
+				"image": "example/train@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"accelerator": map[string]any{"class": "h100", "quota": float64(1)},
+			}},
+		},
+	}
+	runtime := &fakeRuntime{}
+	runner := NewRunnerWithLeaseOwner("cluster-a", control, runtime, "new-agent")
+	if err := runner.Sync(context.Background()); err != nil { t.Fatal(err) }
+	if runtime.workloadCalls != 1 || runtime.workload.ExpectedCreateUID != "apiserver-uid-1" {
+		t.Fatalf("ACK-bound UID was not provided for read-only reconciliation: calls=%d projection=%#v", runtime.workloadCalls, runtime.workload)
+	}
+	if runtime.workload.OnBeforeCreate != nil || runtime.workload.OnCreateACK != nil {
+		t.Fatal("ACK-bound recovery must not carry CREATE callbacks")
+	}
+	if len(control.prepared) != 0 || len(control.published) != 0 {
+		t.Fatalf("ACK-bound recovery attempted to reissue or republish CREATE: prepared=%d published=%d", len(control.prepared), len(control.published))
 	}
 }
