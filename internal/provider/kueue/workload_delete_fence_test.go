@@ -46,6 +46,9 @@ func TestGuardedDeleteJobUsesActualKubernetesUIDAndResourceVersion(t *testing.T)
 			opts.Preconditions.ResourceVersion == nil || *opts.Preconditions.ResourceVersion != "73" {
 			t.Fatalf("DELETE was not fenced against observed exact Job: %#v", opts.Preconditions)
 		}
+		if opts.PropagationPolicy == nil || *opts.PropagationPolicy != metav1.DeletePropagationForeground {
+			t.Fatalf("DELETE must foreground-delete dependents before reporting the Job gone: %#v", opts.PropagationPolicy)
+		}
 		return false, nil, nil
 	})
 	gone, err := NewKubeClient(client, nil).DeleteJob(ctx, "project-1", "job-train-1", 7)
@@ -55,6 +58,28 @@ func TestGuardedDeleteJobUsesActualKubernetesUIDAndResourceVersion(t *testing.T)
 	gone, err = NewKubeClient(client, nil).DeleteJob(ctx, "project-1", "job-train-1", 7)
 	if err != nil || !gone || called != 1 {
 		t.Fatalf("absent Job replay must not issue a second DELETE: gone=%v err=%v called=%d", gone, err, called)
+	}
+}
+
+
+func TestGuardedDeleteJobDoesNotReportGoneWhileForegroundDeletionIsPending(t *testing.T) {
+	job := ownedDeletionJob()
+	client := kubefake.NewSimpleClientset(job)
+	client.PrependReactor("delete", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		opts := action.(ktesting.DeleteAction).GetDeleteOptions()
+		if opts.PropagationPolicy == nil || *opts.PropagationPolicy != metav1.DeletePropagationForeground {
+			t.Fatalf("expected foreground propagation while Pods are still dependents: %#v", opts.PropagationPolicy)
+		}
+		// Model the API accepting DELETE but retaining the owner while foreground
+		// garbage collection waits for its dependent Pods to terminate.
+		return true, nil, nil
+	})
+	gone, err := NewKubeClient(client, nil).DeleteJob(context.Background(), "project-1", "job-train-1", 7)
+	if err != nil || gone {
+		t.Fatalf("pending foreground deletion must not be finalized: gone=%v err=%v", gone, err)
+	}
+	if _, err := client.BatchV1().Jobs("project-1").Get(context.Background(), "job-train-1", metav1.GetOptions{}); err != nil {
+		t.Fatalf("foreground owner must remain until dependents are gone: %v", err)
 	}
 }
 

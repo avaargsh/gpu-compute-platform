@@ -309,7 +309,11 @@ func (c *KubeClient) DeleteJob(ctx context.Context, namespace, name string, gene
 	if err != nil {
 		return false, fmt.Errorf("job %s: %w", name, err)
 	}
-	err = jobs.Delete(ctx, name, metav1.DeleteOptions{Preconditions: preconditions})
+	propagation := metav1.DeletePropagationForeground
+	err = jobs.Delete(ctx, name, metav1.DeleteOptions{
+		Preconditions:     preconditions,
+		PropagationPolicy: &propagation,
+	})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err
 	}
