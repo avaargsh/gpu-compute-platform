@@ -1,0 +1,787 @@
+#!/usr/bin/env python3
+"""Inject a real lost HTTP ACK into the authenticated Management API path.
+
+This is an opt-in acceptance test, not a mock/unit fixture. The loopback proxy
+waits until the upstream Management API has fully returned HTTP 204 (the
+PostgreSQL Desired + operation-receipt transaction has committed), holds that
+response, lets the parent SIGKILL the caller process, and then closes the
+socket without forwarding the ACK. The parent recovers using the original
+Idempotency-Key, verifies Desired/receipt state, checks Kueue observations,
+and releases the Workload.
+
+Only Python's standard library is required. All endpoints must be loopback.
+"""
+
+from __future__ import annotations
+
+import base64
+import http.client
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import secrets
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, NoReturn
+
+ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+REQUEST_RE = re.compile(r"^[0-9a-f]{32}$")
+IMAGE_DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")
+POLL_SECONDS = 2
+
+
+def fail(message: str) -> NoReturn:
+    raise RuntimeError(message)
+
+
+def required_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        fail(f"required environment variable is missing: {name}")
+    return value
+
+
+def safe_id(name: str, value: str) -> str:
+    if not ID_RE.fullmatch(value):
+        fail(f"{name} must be a lowercase DNS-safe identifier (max 63 characters)")
+    return value
+
+
+def local_http_base(name: str, default: str) -> str:
+    raw = os.environ.get(name, default).strip().rstrip("/")
+    parsed = urllib.parse.urlsplit(raw)
+    if (
+        parsed.scheme != "http"
+        or parsed.hostname != "127.0.0.1"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in ("", "/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        fail(f"{name} must be an http://127.0.0.1[:port] loopback URL with no path")
+    if parsed.port is not None and not (1 <= parsed.port <= 65535):
+        fail(f"{name} contains an invalid port")
+    return raw
+
+
+def timeout_seconds() -> int:
+    value = int(os.environ.get("ACCEPTANCE_TIMEOUT_SECONDS", "240"))
+    if value < 15 or value > 1800:
+        fail("ACCEPTANCE_TIMEOUT_SECONDS must be between 15 and 1800")
+    return value
+
+
+def http_call(
+    base_url: str,
+    method: str,
+    path: str,
+    token: str,
+    *,
+    request_id: str | None = None,
+    if_match: str | None = None,
+    body: bytes | None = None,
+    timeout: int = 20,
+) -> tuple[int, bytes]:
+    headers = {"Cache-Control": "no-store"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    if request_id:
+        headers["Idempotency-Key"] = request_id
+    if if_match:
+        headers["If-Match"] = if_match
+    request = urllib.request.Request(base_url + path, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as response:
+        return response.code, response.read()
+    except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
+        # A transport failure does not reveal whether a mutation committed.
+        # Return an explicit unknown status so write callers can reconcile by
+        # the original operation receipt; read callers fail closed on status 0.
+        return 0, b""
+
+
+def json_call(base_url: str, path: str, token: str) -> tuple[int, dict[str, Any] | None]:
+    status, body = http_call(base_url, "GET", path, token)
+    if status != 200:
+        return status, None
+    try:
+        value = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        fail(f"GET {path} returned non-JSON success")
+    if not isinstance(value, dict):
+        fail(f"GET {path} returned a non-object JSON document")
+    return status, value
+
+
+class FaultState:
+    def __init__(self) -> None:
+        self.upstream_finished = threading.Event()
+        self.release_connection = threading.Event()
+        self.backend_status: int | None = None
+        self.error: str | None = None
+
+
+def ack_drop_proxy(base_url: str, expected_path: str, state: FaultState) -> ThreadingHTTPServer:
+    upstream = urllib.parse.urlsplit(base_url)
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, _format: str, *_args: Any) -> None:
+            # Do not log the Authorization header, request body, or provider data.
+            return
+
+        def do_PUT(self) -> None:  # noqa: N802
+            if self.path != expected_path:
+                state.error = "fault proxy received an unexpected request path"
+                state.upstream_finished.set()
+                self.send_error(404)
+                return
+            try:
+                length_header = self.headers.get("Content-Length", "")
+                length = int(length_header)
+                if length < 0 or length > 256 * 1024:
+                    raise ValueError("invalid or oversized request body")
+                body = self.rfile.read(length)
+                forward_headers: dict[str, str] = {}
+                for header in ("Authorization", "Idempotency-Key", "Content-Type", "Origin"):
+                    value = self.headers.get(header)
+                    if value is not None:
+                        forward_headers[header] = value
+                forward_headers["Content-Length"] = str(len(body))
+                connection = http.client.HTTPConnection(
+                    upstream.hostname,
+                    upstream.port or 80,
+                    timeout=30,
+                )
+                try:
+                    connection.request("PUT", self.path, body=body, headers=forward_headers)
+                    response = connection.getresponse()
+                    response_body = response.read()  # Fully drain upstream response first.
+                    state.backend_status = response.status
+                    if response.status == 204:
+                        # The backend has committed and returned its commit ACK.
+                        # Do not forward it until the parent has killed the caller.
+                        state.upstream_finished.set()
+                        if not state.release_connection.wait(timeout=60):
+                            state.error = "timed out waiting for parent to release ACK-drop barrier"
+                        self.close_connection = True
+                        return
+                    self.send_response(response.status)
+                    for key, value in response.getheaders():
+                        if key.lower() not in {
+                            "connection", "keep-alive", "proxy-authenticate",
+                            "proxy-authorization", "te", "trailers",
+                            "transfer-encoding", "upgrade", "content-length",
+                        }:
+                            self.send_header(key, value)
+                    self.send_header("Content-Length", str(len(response_body)))
+                    self.end_headers()
+                    if response_body and response.status not in (204, 304):
+                        self.wfile.write(response_body)
+                    state.upstream_finished.set()
+                finally:
+                    connection.close()
+            except Exception as exc:  # surfaced to parent without credentials
+                state.error = f"fault proxy upstream failure: {type(exc).__name__}"
+                state.upstream_finished.set()
+                try:
+                    self.send_error(502)
+                except OSError:
+                    pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    return server
+
+
+def run_faulted_caller(
+    base_url: str,
+    path: str,
+    request_id: str,
+    body: bytes,
+    timeout: int,
+) -> int:
+    state = FaultState()
+    server = ack_drop_proxy(base_url, path, state)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    proxy_url = f"http://127.0.0.1:{server.server_port}"
+    encoded_body = base64.b64encode(body).decode("ascii")
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            os.path.abspath(__file__),
+            "--client",
+            "--url",
+            proxy_url,
+            "--path",
+            path,
+            "--request-id",
+            request_id,
+            "--body-base64",
+            encoded_body,
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=os.environ.copy(),
+    )
+    try:
+        if not state.upstream_finished.wait(timeout=timeout):
+            child.kill()
+            child.wait(timeout=10)
+            fail(state.error or "upstream Management API did not answer before timeout")
+        if state.error:
+            fail(state.error)
+        if state.backend_status != 204:
+            child.wait(timeout=10)
+            fail(f"expected upstream HTTP 204 Desired commit, got {state.backend_status}")
+        if child.poll() is not None:
+            fail("caller exited before the ACK-drop barrier; the fault injection is invalid")
+        child.kill()  # Real process-boundary crash while the HTTP response is withheld.
+        return_code = child.wait(timeout=10)
+        if return_code != -signal.SIGKILL:
+            fail(f"caller process was not SIGKILLed as required (exit={return_code})")
+        state.release_connection.set()  # Proxy now closes the downstream socket without ACK.
+        return return_code
+    finally:
+        state.release_connection.set()
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=10)
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)
+
+
+def client_mode(args: list[str]) -> int:
+    if len(args) != 8:
+        return 64
+    _, url, path, request_id, encoded_body, *_ = args
+    token = required_env("OIDC_ACCESS_TOKEN")
+    body = base64.b64decode(encoded_body, validate=True)
+    request = urllib.request.Request(
+        url + path,
+        data=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Idempotency-Key": request_id,
+        },
+        method="PUT",
+    )
+    with urllib.request.urlopen(request, timeout=90) as response:
+        response.read()
+    return 0
+
+
+def receipt_path(cluster: str, project: str, request_id: str) -> str:
+    return (
+        f"/api/v1/management/clusters/{cluster}/projects/{project}"
+        f"/operations/{request_id}"
+    )
+
+
+def resource_path(cluster: str, project: str, workload: str) -> str:
+    return (
+        f"/api/v1/management/clusters/{cluster}/projects/{project}"
+        f"/resources/Workload/{workload}"
+    )
+
+
+def verify_receipt(
+    receipt: dict[str, Any],
+    *,
+    request_id: str,
+    cluster: str,
+    project: str,
+    workload: str,
+    action: str,
+    expected_generation: int,
+) -> int:
+    required = {
+        "requestId": request_id,
+        "status": "desired-committed",
+        "clusterId": cluster,
+        "projectId": project,
+        "kind": "Workload",
+        "resourceId": workload,
+        "action": action,
+        "expectedGeneration": expected_generation,
+    }
+    for key, expected in required.items():
+        if receipt.get(key) != expected:
+            fail(f"operation receipt mismatch for field {key}")
+    generation = receipt.get("resultingGeneration")
+    if not isinstance(generation, int) or generation < 1:
+        fail("operation receipt has no positive resultingGeneration")
+    if not isinstance(receipt.get("requestDigest"), str) or not receipt["requestDigest"]:
+        fail("operation receipt is missing the server-authoritative requestDigest")
+    return generation
+
+
+def desired_matches_create(
+    desired: dict[str, Any],
+    *,
+    cluster: str,
+    project: str,
+    workload: str,
+    generation: int,
+    image: str,
+    pool: str,
+    command: list[str],
+    accelerator_class: str,
+    quota: int,
+) -> bool:
+    """Return true only when Desired still matches this operation's exact commit."""
+    if not isinstance(desired, dict) or type(generation) is not int or generation < 1:
+        return False
+    spec = desired.get("spec")
+    if not isinstance(spec, dict):
+        return False
+    return (
+        desired.get("id") == workload
+        and desired.get("clusterId") == cluster
+        and desired.get("projectId") == project
+        and type(desired.get("generation")) is int
+        and desired.get("generation") == generation
+        and desired.get("deleting") is not True
+        and spec.get("image") == image
+        and spec.get("poolID") == pool
+        and spec.get("command") == command
+        and spec.get("accelerator") == {"class": accelerator_class, "quota": quota}
+    )
+
+
+def wait_for_workload(
+    control_plane_url: str,
+    workload: str,
+    expected_generation: int,
+    timeout: int,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    path = f"/api/v1/workloads/{workload}"
+    last_status: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        status_code, data = json_call(control_plane_url, path, "")
+        # The canonical Cluster Agent/status API is loopback-local in this test
+        # and is intentionally not the source of Management API authorization.
+        if status_code == 200 and data is not None:
+            last_status = data
+            metadata = data.get("metadata") or {}
+            status = data.get("status") or {}
+            conditions = status.get("conditions") or []
+            true_conditions = {
+                condition.get("type")
+                for condition in conditions
+                if condition.get("status") in (True, "True", "TRUE")
+            }
+            if metadata.get("generation") != expected_generation:
+                fail("observed Workload generation does not match committed receipt")
+            if (
+                status.get("syncState") == "Synced"
+                and "QuotaReserved" in true_conditions
+                and "Admitted" in true_conditions
+                and ({"Ready", "Succeeded"} & true_conditions)
+            ):
+                return data
+        time.sleep(POLL_SECONDS)
+    fail(
+        "timed out waiting for current-generation Kueue/provider observations "
+        f"(last status keys: {sorted(last_status.keys())})"
+    )
+
+
+def kubectl_json(namespace: str, kind: str, selector: str, context: str | None) -> dict[str, Any]:
+    command = ["kubectl"]
+    if context:
+        command.extend(["--context", context])
+    command.extend(["-n", namespace, "get", kind, "-l", selector, "-o", "json"])
+    completed = subprocess.run(
+        command,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=30,
+    )
+    if completed.returncode != 0:
+        fail(f"kubectl provider absence check failed for {kind}: exit={completed.returncode}")
+    try:
+        value = json.loads(completed.stdout)
+    except ValueError:
+        fail(f"kubectl returned invalid JSON for {kind}")
+    if not isinstance(value, dict) or not isinstance(value.get("items"), list):
+        fail(f"kubectl returned an invalid list for {kind}")
+    return value
+
+
+def verify_provider_absent(namespace: str, workload: str, context: str | None) -> None:
+    selector = f"ai.compute/workload=job-{workload}"
+    for kind in ("jobs", "pods"):
+        value = kubectl_json(namespace, kind, selector, context)
+        if value["items"]:
+            fail(f"provider cleanup is incomplete: {len(value['items'])} {kind} still match Workload")
+
+
+def cleanup_workload(
+    base_url: str,
+    control_plane_url: str,
+    token: str,
+    cluster: str,
+    project: str,
+    workload: str,
+    namespace: str,
+    context: str | None,
+    timeout: int,
+    expected_image: str,
+    expected_pool: str,
+    expected_generation: int,
+    expected_command: list[str],
+    expected_accelerator_class: str,
+    expected_quota: int,
+) -> None:
+    path = resource_path(cluster, project, workload)
+    status_code, desired = json_call(base_url, path, token)
+    if status_code == 404:
+        verify_provider_absent(namespace, workload, context)
+        fail("Workload disappeared before this test issued its DELETE; release acceptance is inconclusive")
+    if status_code != 200 or desired is None:
+        fail(f"cannot safely inspect Workload before cleanup (HTTP {status_code})")
+    if not desired_matches_create(
+        desired,
+        cluster=cluster,
+        project=project,
+        workload=workload,
+        generation=expected_generation,
+        image=expected_image,
+        pool=expected_pool,
+        command=expected_command,
+        accelerator_class=expected_accelerator_class,
+        quota=expected_quota,
+    ):
+        fail("cleanup refused: Desired identity/generation/spec no longer matches the Workload created by this run")
+    # Never adopt the current generation as cleanup authority. Delete only the
+    # exact generation authorized by the original durable create receipt.
+    generation = expected_generation
+    delete_id = secrets.token_hex(16)
+    delete_status, _ = http_call(
+        base_url,
+        "DELETE",
+        path,
+        token,
+        request_id=delete_id,
+        if_match=f'"{generation}"',
+        timeout=30,
+    )
+    if delete_status not in (202, 204):
+        # The initial DELETE could itself have committed but lost its ACK.
+        # Recover its receipt using the same delete id before deciding.
+        code, receipt = json_call(base_url, receipt_path(cluster, project, delete_id), token)
+        if code != 200 or receipt is None:
+            fail(f"delete outcome is not confirmed (HTTP {delete_status}); preserve resource for reconciliation")
+    code, delete_receipt = json_call(base_url, receipt_path(cluster, project, delete_id), token)
+    if code != 200 or delete_receipt is None:
+        fail(f"delete commit receipt is not authoritatively readable (HTTP {code})")
+    if code == 200 and delete_receipt is not None:
+        verify_receipt(
+            delete_receipt,
+            request_id=delete_id,
+            cluster=cluster,
+            project=project,
+            workload=workload,
+            action="delete-request",
+            expected_generation=generation,
+        )
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        management_status, current = json_call(base_url, path, token)
+        runtime_status, _ = json_call(control_plane_url, f"/api/v1/workloads/{workload}", "")
+        if management_status == 404 and runtime_status == 404:
+            verify_provider_absent(namespace, workload, context)
+            return
+        if management_status not in (200, 404) or runtime_status not in (200, 404):
+            fail("unexpected API error while waiting for cleanup/finalization")
+        if current is not None and current.get("deleting") is not True:
+            fail("deletion was not durably projected while waiting for finalization")
+        time.sleep(POLL_SECONDS)
+    fail("cleanup timed out; Workload/tombstone must remain available for reconciliation")
+
+
+def main() -> int:
+    base_url = local_http_base("MANAGEMENT_BASE_URL", "http://127.0.0.1:8081")
+    control_plane_url = local_http_base("CONTROL_PLANE_BASE_URL", "http://127.0.0.1:8080")
+    token = required_env("OIDC_ACCESS_TOKEN")
+    cluster = safe_id("CLUSTER_ID", required_env("CLUSTER_ID"))
+    project = safe_id("PROJECT_ID", required_env("PROJECT_ID"))
+    pool = safe_id("POOL_ID", required_env("POOL_ID"))
+    namespace = safe_id("NAMESPACE", required_env("NAMESPACE"))
+    accelerator_class = required_env("ACCELERATOR_CLASS")
+    if len(accelerator_class) > 128:
+        fail("ACCELERATOR_CLASS is too long")
+    image = required_env("IMAGE")
+    if not IMAGE_DIGEST_RE.search(image):
+        fail("IMAGE must be immutable and end in @sha256:<64 lowercase hex>")
+    quota = int(os.environ.get("ACCELERATOR_QUOTA", "1"))
+    if quota < 1:
+        fail("ACCELERATOR_QUOTA must be positive")
+    timeout = timeout_seconds()
+    context = os.environ.get("KUBECTL_CONTEXT", "").strip() or None
+
+    request_id = secrets.token_hex(16)
+    workload = safe_id("WORKLOAD_ID", os.environ.get("WORKLOAD_ID", f"ack-loss-{request_id[:12]}"))
+    command_raw = os.environ.get("COMMAND_JSON", '["/bin/sh","-c","sleep 120"]')
+    command = json.loads(command_raw)
+    if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
+        fail("COMMAND_JSON must be a non-empty JSON array of strings")
+    body = json.dumps(
+        {
+            "expectedGeneration": 0,
+            "poolId": pool,
+            "spec": {
+                "image": image,
+                "command": command,
+                "accelerator": {"class": accelerator_class, "quota": quota},
+            },
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    create_path = resource_path(cluster, project, workload)
+    receipt_url = receipt_path(cluster, project, request_id)
+
+    # Never let an override cause this harness to delete a pre-existing object.
+    # Require both Desired absence and absence of same-label provider objects
+    # before attempting the create.
+    existing_status, _ = json_call(base_url, create_path, token)
+    if existing_status != 404:
+        fail(f"refusing to reuse Workload ID {workload}: initial Management GET returned HTTP {existing_status}")
+    verify_provider_absent(namespace, workload, context)
+    print(f"Starting lost-ACK acceptance: workloadId={workload}; requestId={request_id}")
+
+    may_have_committed = False
+    receipt_proven = False
+    cleanup_authorized = False
+    cleanup_generation: int | None = None
+    try:
+        # From this point an exception/transport error cannot prove that the
+        # server did not commit. The finally block only deletes after proving
+        # ownership through this exact request's durable operation receipt.
+        may_have_committed = True
+        run_faulted_caller(base_url, create_path, request_id, body, timeout)
+        code, receipt = json_call(base_url, receipt_url, token)
+        if code != 200 or receipt is None:
+            fail(f"lost-ACK recovery could not read owner-scoped receipt (HTTP {code})")
+        generation = verify_receipt(
+            receipt,
+            request_id=request_id,
+            cluster=cluster,
+            project=project,
+            workload=workload,
+            action="create",
+            expected_generation=0,
+        )
+        receipt_proven = True
+        code, desired = json_call(base_url, create_path, token)
+        if code != 200 or desired is None:
+            fail(f"committed Desired state is not readable after lost ACK (HTTP {code})")
+        if not desired_matches_create(
+            desired,
+            cluster=cluster,
+            project=project,
+            workload=workload,
+            generation=generation,
+            image=image,
+            pool=pool,
+            command=command,
+            accelerator_class=accelerator_class,
+            quota=quota,
+        ):
+            fail("authorized Desired state does not exactly match the operation receipt/request")
+        cleanup_authorized = True
+        cleanup_generation = generation
+        print(f"PASS: lost ACK recovered by original requestId={request_id}; generation={generation}")
+
+        replay_status, _ = http_call(
+            base_url,
+            "PUT",
+            create_path,
+            token,
+            request_id=request_id,
+            body=body,
+            timeout=30,
+        )
+        if replay_status != 204:
+            fail(f"identical replay with original Idempotency-Key returned HTTP {replay_status}")
+        code2, replayed_receipt = json_call(base_url, receipt_url, token)
+        code3, replayed_desired = json_call(base_url, create_path, token)
+        if code2 != 200 or replayed_receipt is None or code3 != 200 or replayed_desired is None:
+            fail("receipt or Desired state became unavailable after identical replay")
+        generation2 = verify_receipt(
+            replayed_receipt,
+            request_id=request_id,
+            cluster=cluster,
+            project=project,
+            workload=workload,
+            action="create",
+            expected_generation=0,
+        )
+        if (
+            generation2 != generation
+            or replayed_receipt.get("requestDigest") != receipt.get("requestDigest")
+            or replayed_receipt.get("committedAt") != receipt.get("committedAt")
+            or replayed_desired.get("generation") != generation
+        ):
+            fail("same-key replay changed the authoritative receipt or created a new generation")
+        print("PASS: identical retry reused the single Desired commit and operation receipt")
+
+        # Reusing the original key for a different request must conflict and
+        # must not mutate the already committed Workload.
+        tampered_payload = json.loads(body)
+        tampered_payload["spec"]["image"] = (
+            "registry.invalid/replay-conflict@sha256:" + ("0" * 64)
+        )
+        tampered_body = json.dumps(tampered_payload, separators=(",", ":")).encode("utf-8")
+        conflict_status, _ = http_call(
+            base_url,
+            "PUT",
+            create_path,
+            token,
+            request_id=request_id,
+            body=tampered_body,
+            timeout=30,
+        )
+        if conflict_status != 409:
+            fail(f"same requestId with changed body returned HTTP {conflict_status}, expected 409")
+        code, unchanged = json_call(base_url, create_path, token)
+        if code != 200 or unchanged is None or unchanged.get("spec", {}).get("image") != image:
+            fail("idempotency-key conflict changed or obscured the committed Workload")
+        print("PASS: changed-body replay rejected with 409 and original Workload preserved")
+
+        observed = wait_for_workload(control_plane_url, workload, generation, timeout)
+        status = observed.get("status") or {}
+        print(
+            "PASS: provider status synchronized; "
+            f"syncState={status.get('syncState')} generation={generation}"
+        )
+    finally:
+        if may_have_committed and not receipt_proven:
+            # A lost connection or test-process error may happen after commit.
+            # Reconcile by the original ID; never delete based only on matching
+            # names, labels, image or pool.
+            probe_status, probe_receipt = json_call(base_url, receipt_url, token)
+            if probe_status == 200 and probe_receipt is not None:
+                try:
+                    recovered_generation = verify_receipt(
+                        probe_receipt,
+                        request_id=request_id,
+                        cluster=cluster,
+                        project=project,
+                        workload=workload,
+                        action="create",
+                        expected_generation=0,
+                    )
+                except Exception as exc:
+                    fail(
+                        f"cannot prove ownership for workloadId={workload} requestId={request_id}; "
+                        f"automatic cleanup refused ({type(exc).__name__})"
+                    )
+                probe_code, probe_desired = json_call(base_url, create_path, token)
+                if probe_code != 200 or probe_desired is None or not desired_matches_create(
+                    probe_desired,
+                    cluster=cluster,
+                    project=project,
+                    workload=workload,
+                    generation=recovered_generation,
+                    image=image,
+                    pool=pool,
+                    command=command,
+                    accelerator_class=accelerator_class,
+                    quota=quota,
+                ):
+                    fail(
+                        f"receipt found but exact Desired identity/generation/spec could not be reconciled; "
+                        f"preserve for manual review (workloadId={workload}, requestId={request_id})"
+                    )
+                receipt_proven = True
+                cleanup_authorized = True
+                cleanup_generation = recovered_generation
+                print(f"PASS: recovered cleanup authority from original receipt for workloadId={workload}")
+            elif probe_status == 404:
+                print(
+                    f"RECEIPT UNAVAILABLE (HTTP 404): skipped destructive cleanup; "
+                    f"reconcile workloadId={workload}, requestId={request_id} before retrying"
+                )
+            else:
+                fail(
+                    f"commit outcome is unknown and owner receipt is unavailable (HTTP {probe_status}); "
+                    f"no delete attempted; reconcile workloadId={workload}, requestId={request_id}"
+                )
+        if cleanup_authorized and cleanup_generation is not None:
+            cleanup_workload(
+                base_url,
+                control_plane_url,
+                token,
+                cluster,
+                project,
+                workload,
+                namespace,
+                context,
+                timeout,
+                image,
+                pool,
+                expected_generation=cleanup_generation,
+                expected_command=command,
+                expected_accelerator_class=accelerator_class,
+                expected_quota=quota,
+            )
+            print("PASS: Workload deletion finalized and provider Job/Pod absence independently checked")
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--client":
+        try:
+            # Remaining flags are parsed strictly to keep caller arguments deterministic.
+            import argparse
+
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--client", action="store_true")
+            parser.add_argument("--url", required=True)
+            parser.add_argument("--path", required=True)
+            parser.add_argument("--request-id", required=True)
+            parser.add_argument("--body-base64", required=True)
+            args = parser.parse_args(sys.argv[1:])
+            token = required_env("OIDC_ACCESS_TOKEN")
+            req = urllib.request.Request(
+                args.url + args.path,
+                data=base64.b64decode(args.body_base64, validate=True),
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "Idempotency-Key": args.request_id,
+                },
+                method="PUT",
+            )
+            with urllib.request.urlopen(req, timeout=90) as response:
+                response.read()
+            sys.exit(0)
+        except Exception:
+            sys.exit(1)
+    try:
+        sys.exit(main())
+    except Exception as exc:
+        print(f"FAIL: {exc}", file=sys.stderr)
+        sys.exit(1)

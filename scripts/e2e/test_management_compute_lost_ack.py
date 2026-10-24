@@ -1,0 +1,166 @@
+"""Regression tests for Management lost-ACK cleanup authorization."""
+
+from __future__ import annotations
+
+import copy
+import importlib.util
+from pathlib import Path
+import sys
+import unittest
+from unittest.mock import patch
+
+SCRIPT = Path(__file__).with_name("management-compute-lost-ack.py")
+SPEC = importlib.util.spec_from_file_location("management_compute_lost_ack", SCRIPT)
+assert SPEC is not None and SPEC.loader is not None
+MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
+SPEC.loader.exec_module(MODULE)
+
+IMAGE = "registry.example.test/worker@sha256:" + ("a" * 64)
+COMMAND = ["/bin/sh", "-c", "sleep 120"]
+ACCELERATOR_CLASS = "h100-80g"
+QUOTA = 1
+
+
+def desired(generation: int = 1) -> dict:
+    return {
+        "id": "ack-loss-test",
+        "clusterId": "cluster-a",
+        "projectId": "project-a",
+        "generation": generation,
+        "deleting": False,
+        "spec": {
+            "image": IMAGE,
+            "poolID": "pool-a",
+            "command": list(COMMAND),
+            "accelerator": {"class": ACCELERATOR_CLASS, "quota": QUOTA},
+        },
+    }
+
+
+def match_desired(value: dict, generation: int = 1) -> bool:
+    return MODULE.desired_matches_create(
+        value,
+        cluster="cluster-a",
+        project="project-a",
+        workload="ack-loss-test",
+        generation=generation,
+        image=IMAGE,
+        pool="pool-a",
+        command=COMMAND,
+        accelerator_class=ACCELERATOR_CLASS,
+        quota=QUOTA,
+    )
+
+
+class DesiredCreateIdentityTests(unittest.TestCase):
+    def test_exact_receipt_generation_and_requested_spec_authorize_cleanup(self) -> None:
+        self.assertTrue(match_desired(desired()))
+
+    def test_generation_drift_revokes_cleanup_authorization(self) -> None:
+        self.assertFalse(match_desired(desired(generation=2)))
+
+    def test_command_drift_revokes_cleanup_authorization(self) -> None:
+        value = desired()
+        value["spec"]["command"] = ["/bin/sh", "-c", "echo foreign"]
+        self.assertFalse(match_desired(value))
+
+    def test_accelerator_drift_revokes_cleanup_authorization(self) -> None:
+        value = desired()
+        value["spec"]["accelerator"]["quota"] = 2
+        self.assertFalse(match_desired(value))
+
+    def test_pool_or_image_drift_revokes_cleanup_authorization(self) -> None:
+        for field, replacement in (("poolID", "pool-b"), ("image", "registry.example.test/other@sha256:" + ("b" * 64))):
+            with self.subTest(field=field):
+                value = desired()
+                value["spec"][field] = replacement
+                self.assertFalse(match_desired(value))
+
+
+class CleanupGenerationFenceTests(unittest.TestCase):
+    def run_cleanup(self, value: dict) -> None:
+        with (
+            patch.object(MODULE, "json_call", return_value=(200, value)),
+            patch.object(MODULE, "http_call") as delete,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "generation|spec|identity"):
+                MODULE.cleanup_workload(
+                    "http://127.0.0.1:8081",
+                    "http://127.0.0.1:8080",
+                    "token-not-used",
+                    "cluster-a",
+                    "project-a",
+                    "ack-loss-test",
+                    "golden-go",
+                    None,
+                    30,
+                    IMAGE,
+                    "pool-a",
+                    expected_generation=1,
+                    expected_command=COMMAND,
+                    expected_accelerator_class=ACCELERATOR_CLASS,
+                    expected_quota=QUOTA,
+                )
+            delete.assert_not_called()
+
+    def test_cleanup_refuses_same_name_and_image_after_generation_replacement(self) -> None:
+        self.run_cleanup(desired(generation=2))
+
+    def test_cleanup_refuses_changed_command_even_when_generation_matches(self) -> None:
+        value = desired()
+        value["spec"]["command"] = ["/bin/sh", "-c", "echo foreign"]
+        self.run_cleanup(value)
+
+    def test_cleanup_refuses_changed_accelerator_even_when_generation_matches(self) -> None:
+        value = desired()
+        value["spec"]["accelerator"]["quota"] = 2
+        self.run_cleanup(value)
+
+    def test_cleanup_uses_receipt_generation_as_delete_precondition(self) -> None:
+        receipt = {
+            "requestId": "f" * 32,
+            "status": "desired-committed",
+            "clusterId": "cluster-a",
+            "projectId": "project-a",
+            "kind": "Workload",
+            "resourceId": "ack-loss-test",
+            "action": "delete-request",
+            "expectedGeneration": 1,
+            "resultingGeneration": 2,
+            "requestDigest": "sha256:delete-request",
+        }
+        with (
+            patch.object(MODULE, "json_call", side_effect=[
+                (200, desired()),
+                (200, receipt),
+                (404, None),
+                (404, None),
+            ]),
+            patch.object(MODULE, "http_call", return_value=(202, b"")) as delete,
+            patch.object(MODULE, "verify_provider_absent") as verify_absent,
+            patch.object(MODULE.secrets, "token_hex", return_value="f" * 32),
+        ):
+            MODULE.cleanup_workload(
+                "http://127.0.0.1:8081",
+                "http://127.0.0.1:8080",
+                "token-not-used",
+                "cluster-a",
+                "project-a",
+                "ack-loss-test",
+                "golden-go",
+                None,
+                30,
+                IMAGE,
+                "pool-a",
+                expected_generation=1,
+                expected_command=COMMAND,
+                expected_accelerator_class=ACCELERATOR_CLASS,
+                expected_quota=QUOTA,
+            )
+        self.assertEqual(delete.call_args.kwargs["if_match"], '"1"')
+        verify_absent.assert_called_once_with("golden-go", "ack-loss-test", None)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -56,6 +56,10 @@ jobs:
           docker exec "${{ job.services.postgres.id }}" \
             psql -U gpu -d gpu_platform_test -v ON_ERROR_STOP=1 \
             -c 'CREATE DATABASE gpu_store_test'
+      - name: Unit-test Management lost-ACK cleanup safety
+        run: python3 -m unittest discover -s scripts/e2e -p 'test_management_compute_lost_ack.py' -v
+      - name: Syntax-check opt-in Management lost-ACK harness
+        run: python3 -m py_compile scripts/e2e/management-compute-lost-ack.py
       - name: Format check
         run: make fmt-check
       - name: Vet
@@ -63,7 +67,7 @@ jobs:
       - name: Test (parallel Go packages with independent PostgreSQL databases)
         run: make test-parallel-isolated
       - name: Release acceptance contracts
-        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path')) }}
         run: make acceptance-contract
       - name: Production supply-chain policy
         if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
