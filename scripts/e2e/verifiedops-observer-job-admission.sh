@@ -269,11 +269,26 @@ if [[ -n "$namespace_component" ]]; then
   exit 1
 fi
 
-# The refusal must come from the operator policy scoped by Kubernetes' immutable
-# namespace-name label. While admission caches converge, the example policy's
-# mutable-label binding may still reject this same malicious Job; retry only
-# that exact expected stale denial. Successful admission and every unrelated
-# rejection remain hard failures rather than being mistaken for scope evidence.
+# Discover whether the shipped guard binding itself has already been
+# migrated to the API-server-managed namespace-name selector. During a rolling
+# policy change this lets the acceptance distinguish a stale old binding from
+# a legitimate denial produced by either immutable-name-scoped policy.
+guard_scope_name="$(kubectl get validatingadmissionpolicybinding verifiedops-observer-job-guard -o jsonpath='{.spec.matchResources.namespaceSelector.matchLabels.kubernetes\\.io/metadata\\.name}')"
+guard_scope_component="$(kubectl get validatingadmissionpolicybinding verifiedops-observer-job-guard -o jsonpath='{.spec.matchResources.namespaceSelector.matchLabels.app\\.kubernetes\\.io/component}')"
+if [[ "$guard_scope_name" == "verifiedops-observer" ]]; then
+  guard_uses_immutable_scope=true
+elif [[ "$guard_scope_component" == "verifiedops-observer" ]]; then
+  guard_uses_immutable_scope=false
+else
+  echo "Observer guard binding has an unknown namespace selector (name=$guard_scope_name component=$guard_scope_component)" >&2
+  exit 1
+fi
+
+# The unsafe Job must be denied while the mutable app label is absent. Prefer
+# the operator envelope's denial; if the guard was migrated too, its identical
+# immutable namespace-name scope is also valid proof. If the guard still uses
+# the old mutable label, retry only its exact stale-cache denial until it falls
+# out of scope. Successful admission and unrelated errors remain hard failures.
 scope_denied=false
 for attempt in $(seq 1 60); do
   if kubectl create --dry-run=server -f "$unsafe" >/dev/null 2>"$unsafe.err"; then
@@ -285,6 +300,10 @@ for attempt in $(seq 1 60); do
     break
   fi
   if grep -Fq "ValidatingAdmissionPolicy 'verifiedops-observer-job-guard' with binding 'verifiedops-observer-job-guard' denied request: VerifiedOps Job must have exactly one pinned, non-overridable Observer process" "$unsafe.err"; then
+    if [[ "$guard_uses_immutable_scope" == true ]]; then
+      scope_denied=true
+      break
+    fi
     sleep 1
     continue
   fi
