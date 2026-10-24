@@ -660,7 +660,6 @@ func TestApplyResourceClaimAdoptsSameGenerationAfterCreateRace(t *testing.T) {
 	}
 }
 
-
 func TestKueueObjectsAndGVRsUseV1beta2API(t *testing.T) {
 	const wantAPIVersion = "kueue.x-k8s.io/v1beta2"
 	objects := map[string]*unstructured.Unstructured{
