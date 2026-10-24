@@ -33,6 +33,7 @@ func NewRouterWithDependencies(store agentstore.Store, bindings BindingStore) ht
 	mux.HandleFunc("POST /api/v1/agent/finalize-desired", agentAPI.FinalizeDesired)
 	mux.HandleFunc("POST /api/v1/agent/workload-create-uid", agentAPI.PublishJobCreateUID)
 	mux.HandleFunc("POST /api/v1/agent/workload-create-attempt", agentAPI.PrepareJobCreateAttempt)
+	mux.HandleFunc("GET /api/v1/agent/workload-create-attempt", agentAPI.ResolveJobCreateAttempt)
 
 	bindingAPI := NewBindingAPI(bindings)
 	mux.HandleFunc("PUT /api/v1/projects/{projectID}/binding", bindingAPI.UpsertProject)
