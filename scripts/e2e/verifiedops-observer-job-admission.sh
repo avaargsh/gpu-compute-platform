@@ -269,18 +269,17 @@ if [[ -n "$namespace_component" ]]; then
   exit 1
 fi
 
-# Discover whether the shipped guard binding itself has already been
-# migrated to the API-server-managed namespace-name selector. During a rolling
-# policy change this lets the acceptance distinguish a stale old binding from
-# a legitimate denial produced by either immutable-name-scoped policy.
-guard_scope_name="$(kubectl get validatingadmissionpolicybinding verifiedops-observer-job-guard -o jsonpath='{.spec.matchResources.namespaceSelector.matchLabels.kubernetes\.io/metadata\.name}')"
-guard_scope_component="$(kubectl get validatingadmissionpolicybinding verifiedops-observer-job-guard -o jsonpath='{.spec.matchResources.namespaceSelector.matchLabels.app\.kubernetes\.io/component}')"
-if [[ "$guard_scope_name" == "verifiedops-observer" ]]; then
+# Discover the complete guard selector from the live API server. The binding
+# must be exactly name-only to count as immutable scope: a conjunction of the
+# Kubernetes-managed name and mutable app label still stops matching when the
+# mutable label is removed, so it is not sufficient evidence.
+guard_selector="$(kubectl get validatingadmissionpolicybinding verifiedops-observer-job-guard -o json | python -c 'import json,sys; obj=json.load(sys.stdin); selector=((obj.get("spec") or {}).get("matchResources") or {}).get("namespaceSelector"); print(json.dumps(selector, sort_keys=True, separators=(",", ":")))' )"
+if [[ "$guard_selector" == '{"matchLabels":{"kubernetes.io/metadata.name":"verifiedops-observer"}}' ]]; then
   guard_uses_immutable_scope=true
-elif [[ "$guard_scope_component" == "verifiedops-observer" ]]; then
+elif [[ "$guard_selector" == '{"matchLabels":{"app.kubernetes.io/component":"verifiedops-observer"}}' ]]; then
   guard_uses_immutable_scope=false
 else
-  echo "Observer guard binding has an unknown namespace selector (name=$guard_scope_name component=$guard_scope_component)" >&2
+  echo "Observer guard binding must use an exact name-only or legacy component-only namespace selector; got: $guard_selector" >&2
   exit 1
 fi
 
