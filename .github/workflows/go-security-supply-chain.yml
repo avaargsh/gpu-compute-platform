@@ -34,6 +34,8 @@ jobs:
             git diff -- go.mod go.sum
             exit 1
           fi
+      - name: Test release attestation ref policy
+        run: python3 -m unittest discover -s scripts/e2e -p 'test_security_attestation_ref_policy.py' -v
       - name: Install pinned security and SBOM tools
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
@@ -75,7 +77,7 @@ jobs:
           retention-days: 14
 
   release-attestation:
-    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master') }}
     name: Release artifact attestations
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -87,6 +89,11 @@ jobs:
       attestations: write
       artifact-metadata: write
     steps:
+      - name: Enforce trusted ref before attestation
+        env:
+          ATTEST_EVENT_NAME: ${{ github.event_name }}
+          ATTEST_SOURCE_REF: ${{ github.ref }}
+        run: bash scripts/verify-attestation-ref.sh "$ATTEST_EVENT_NAME" "$ATTEST_SOURCE_REF"
       - name: Download the exact verified workflow-run artifact
         uses: actions/download-artifact@v4
         with:
