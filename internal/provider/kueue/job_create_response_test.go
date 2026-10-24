@@ -187,3 +187,38 @@ func TestGuardedKubernetesCREATEMarksLostACKAsUnbound(t *testing.T) {
 		t.Fatalf("later GET invented CREATE or prepared again: %#v %v prepared=%d", next, err, prepared)
 	}
 }
+
+func TestACKBoundInspectionRequiresExactLiveUIDAndGeneration(t *testing.T) {
+	job, err := jobObject(responseJob())
+	if err != nil { t.Fatal(err) }
+	job.UID = types.UID("bound-job-uid")
+	job.ResourceVersion = "42"
+	core := kubefake.NewSimpleClientset(job)
+	kube := NewKubeClient(core, nil)
+	if err := kube.InspectBoundJob(context.Background(), responseJob(), "bound-job-uid"); err != nil {
+		t.Fatalf("exact ACK-bound Job should be inspectable: %v", err)
+	}
+	observed, err := kube.ObserveJob(context.Background(), job.Namespace, job.Name)
+	if err != nil || observed.JobUID != "bound-job-uid" {
+		t.Fatalf("observation did not preserve same-read Job UID: %#v err=%v", observed, err)
+	}
+	if err := kube.InspectBoundJob(context.Background(), responseJob(), "replacement-uid"); !errors.Is(err, verifiedops.ErrCreateUIDUnproven) {
+		t.Fatalf("same-name replacement UID was accepted: %v", err)
+	}
+	staleJob, err := jobObject(responseJob())
+	if err != nil { t.Fatal(err) }
+	staleJob.UID = types.UID("old-generation-job")
+	staleJob.ResourceVersion = "43"
+	staleJob.Annotations[generationAnnotation] = "6"
+	stale := NewKubeClient(kubefake.NewSimpleClientset(staleJob), nil)
+	if err := stale.InspectBoundJob(context.Background(), responseJob(), "old-generation-job"); !errors.Is(err, verifiedops.ErrCreateUIDUnproven) {
+		t.Fatalf("stale generation was accepted as ACK-bound: %v", err)
+	}
+	absent := NewKubeClient(kubefake.NewSimpleClientset(), nil)
+	if err := absent.InspectBoundJob(context.Background(), responseJob(), "bound-job-uid"); !errors.Is(err, verifiedops.ErrCreateUIDUnproven) {
+		t.Fatalf("absent ACK-bound Job must not trigger replacement: %v", err)
+	}
+	for _, action := range absent.core.Actions() {
+		if action.GetVerb() == "create" { t.Fatalf("ACK-bound recovery issued CREATE: %#v", absent.core.Actions()) }
+	}
+}
