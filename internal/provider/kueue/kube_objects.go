@@ -14,7 +14,7 @@ import (
 
 func resourceFlavorObject(in ResourceFlavor) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "kueue.x-k8s.io/v1beta1",
+		"apiVersion": "kueue.x-k8s.io/v1beta2",
 		"kind":       "ResourceFlavor",
 		"metadata": map[string]any{
 			"name": in.Name,
@@ -39,7 +39,7 @@ func clusterQueueObject(in ClusterQueue) *unstructured.Unstructured {
 		})
 	}
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "kueue.x-k8s.io/v1beta1",
+		"apiVersion": "kueue.x-k8s.io/v1beta2",
 		"kind":       "ClusterQueue",
 		"metadata": map[string]any{
 			"name": in.Name,
@@ -74,7 +74,7 @@ func coveredResources(quotas []ResourceQuota) []any {
 
 func localQueueObject(in LocalQueue) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "kueue.x-k8s.io/v1beta1",
+		"apiVersion": "kueue.x-k8s.io/v1beta2",
 		"kind":       "LocalQueue",
 		"metadata": map[string]any{
 			"name":      in.Name,
