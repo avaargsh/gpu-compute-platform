@@ -266,7 +266,10 @@ func (s *Store) GetJobCreateAttemptState(ctx context.Context, operationID string
     if err != nil {
         return "", false, err
     }
-    return string(resolution.State), resolution.State != verifiedops.JobCreateAttemptNotFound, nil
+    if resolution.State == verifiedops.JobCreateAttemptNotFound {
+        return "", false, nil
+    }
+    return string(resolution.State), true, nil
 }
 func validJobBinding(in JobCreateUIDBinding) bool {
 	return bindingOperationID.MatchString(in.OperationID) &&
