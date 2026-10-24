@@ -57,6 +57,13 @@ class KueueUpgradeRehearsalTests(unittest.TestCase):
             self.assertIn("LEGACY_ETCD_FIXTURE must be YES or NO", p.stderr)
             self.assertFalse(evidence.exists())
 
+    def test_upgrade_and_install_use_same_explicit_ssa_manager_as_patch(self):
+        data = SCRIPT.read_text()
+        self.assertEqual(data.count("kubectl apply --server-side --field-manager=kubectl -f"), 2)
+        self.assertIn("kubectl patch crd resourceflavors.kueue.x-k8s.io --type=json", data)
+        self.assertIn("--field-manager=kubectl", data)
+        self.assertNotIn("--force-conflicts", data)
+
     def test_storage_flip_preserves_original_kubectl_field_manager(self):
         data = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("--field-manager=kubectl", data)

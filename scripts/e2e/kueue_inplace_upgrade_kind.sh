@@ -57,7 +57,7 @@ curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 90 \
 }
 sha256sum "$tmp/migrate.sh" > "$EVIDENCE_DIR/upstream-migration.sha256"
 
-kubectl apply --server-side -f \
+kubectl apply --server-side --field-manager=kubectl -f \
   https://github.com/kubernetes-sigs/kueue/releases/download/v0.19.6/manifests.yaml \
   > "$EVIDENCE_DIR/install-old.log"
 kubectl rollout status -n kueue-system deployment/kueue-controller-manager --timeout=240s
@@ -220,7 +220,7 @@ if [[ "${LEGACY_ETCD_FIXTURE:-NO}" == YES ]]; then
   kubectl patch crd resourceflavors.kueue.x-k8s.io --subresource=status     --type=merge -p '{"status":{"storedVersions":["v1beta2"]}}'
 fi
 kubectl get crds -o json > "$EVIDENCE_DIR/crds-after-migration.json"
-kubectl apply --server-side -f \
+kubectl apply --server-side --field-manager=kubectl -f \
   https://github.com/kubernetes-sigs/kueue/releases/download/v0.20.3/manifests.yaml \
   > "$EVIDENCE_DIR/upgrade.log"
 kubectl rollout status -n kueue-system deployment/kueue-controller-manager --timeout=240s

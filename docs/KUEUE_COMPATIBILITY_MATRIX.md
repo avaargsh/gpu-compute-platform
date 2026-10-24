@@ -147,9 +147,10 @@ It then restores the CRD storage selection to `v1beta2`, invokes the pinned
 official migration script, directly verifies the fixture's etcd bytes now
 declare `v1beta2`, and only then drops `v1beta1` from the fixture CRD's
 `status.storedVersions`. Both etcd evidence files store the observed
-version, record key and SHA-256, **not raw object data**. The CRD storage-version flip uses the same
-`kubectl` Server-Side Apply field manager as the official manifests,
-avoiding spurious `.spec.versions` ownership conflicts during the upgrade.
+version, record key and SHA-256, **not raw object data**. The fixture's CRD storage-version patch and both pinned manifest
+applies explicitly use the same `kubectl` field manager. A mixed-manager
+`.spec.versions` conflict **must fail** rather than be suppressed by
+`--force-conflicts`.
 The fixture key is
 discovered using an etcd `--keys-only` read and must uniquely match the
 disposable ResourceFlavor; the harness never guesses a CRD's etcd storage prefix. This capability
