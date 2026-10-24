@@ -41,6 +41,33 @@ class KueueUpgradeRehearsalTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("frozen node image only", result.stderr)
 
+    def test_invalid_legacy_fixture_mode_fails_before_any_mutation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            evidence = Path(temp) / "evidence"
+            env = os.environ.copy()
+            env.update({
+                "ALLOW_EPHEMERAL_KUEUE_UPGRADE": "YES",
+                "LEGACY_ETCD_FIXTURE": "NOPE",
+                "CLUSTER_ID": "kueue-upgrade-test-001",
+                "KIND_NODE_IMAGE": "kindest/node:v1.34.0",
+                "EVIDENCE_DIR": str(evidence),
+            })
+            p = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True, env=env, timeout=10)
+            self.assertEqual(p.returncode, 2)
+            self.assertIn("LEGACY_ETCD_FIXTURE must be YES or NO", p.stderr)
+            self.assertFalse(evidence.exists())
+
+    def test_real_legacy_fixture_proof_must_bracket_official_migration(self):
+        data = SCRIPT.read_text()
+        self.assertLess(data.index('probe_disposable_etcd v1beta1'),
+                        data.index('bash "$tmp/migrate.sh"'))
+        self.assertLess(data.index('bash "$tmp/migrate.sh"'),
+                        data.index('probe_disposable_etcd v1beta2'))
+        self.assertLess(data.index('probe_disposable_etcd v1beta2'),
+                        data.index('storedVersions":["v1beta2"]'))
+        self.assertIn('--expected-version "$expected"', data)
+        self.assertIn('LEGACY_ETCD_FIXTURE:-NO', data)
+
     def test_shell_syntax_is_valid(self):
         check = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True, text=True, timeout=5)
         self.assertEqual(check.returncode, 0, check.stderr)

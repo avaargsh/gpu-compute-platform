@@ -137,6 +137,21 @@ Kueue 0.19.6 → 0.20.3. The run preserved pre-existing resource and Workload
 UIDs, passed the upgraded storage preflight, admitted a new Job, and passed
 the Go Golden Path in the same cluster. [Evidence artifact #12548602663](https://github.com/avaargsh/gpu-compute-platform/actions/runs/40064990412/artifacts/12548602663).
 
+**Opt-in legacy storage fixture:** To exercise a *genuine* old persisted version on
+the isolated kind cluster, set `LEGACY_ETCD_FIXTURE=YES` alongside the existing
+rehearsal opt-in and a new disposable `CLUSTER_ID`. The test temporarily
+sets the old Kueue ResourceFlavor CRD storage version to `v1beta1`, creates
+`rehearsal-flavor`, and uses a read-only etcdctl call against the kind etcd
+Pod to prove the actual raw persisted object's API version is `v1beta1`.
+It then restores the CRD storage selection to `v1beta2`, invokes the pinned
+official migration script, directly verifies the fixture's etcd bytes now
+declare `v1beta2`, and only then drops `v1beta1` from the fixture CRD's
+`status.storedVersions`. Both etcd evidence files store the observed
+version, record key and SHA-256, **not raw object data**. This capability
+is strictly for the new disposable kind; it must never be run on a real
+cluster. Failures block the upgrade rather than clearing stale version
+markers without proof.
+
 **Important gap:** Kueue 0.19.6 already writes objects using v1beta2 by default.
 Sending old-version `v1beta1` API requests does *not* seed legacy v1beta1
 etcd records. The new `kueue_upgrade_lineage.py` evidence step explicitly
