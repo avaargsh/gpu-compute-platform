@@ -34,6 +34,7 @@ from typing import Any, NoReturn
 ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 REQUEST_RE = re.compile(r"^[0-9a-f]{32}$")
 IMAGE_DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")
+REQUEST_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 POLL_SECONDS = 2
 
 
@@ -328,8 +329,9 @@ def verify_receipt(
     generation = receipt.get("resultingGeneration")
     if not isinstance(generation, int) or generation < 1:
         fail("operation receipt has no positive resultingGeneration")
-    if not isinstance(receipt.get("requestDigest"), str) or not receipt["requestDigest"]:
-        fail("operation receipt is missing the server-authoritative requestDigest")
+    digest = receipt.get("requestDigest")
+    if not isinstance(digest, str) or not REQUEST_DIGEST_RE.fullmatch(digest) or digest == "0" * 64:
+        fail("operation receipt requestDigest is not a valid nonzero lowercase SHA-256 hex digest")
     return generation
 
 

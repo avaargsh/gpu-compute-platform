@@ -53,6 +53,51 @@ def match_desired(value: dict, generation: int = 1) -> bool:
     )
 
 
+def valid_receipt(digest: str = "a" * 64) -> dict:
+    return {
+        "requestId": "f" * 32,
+        "status": "desired-committed",
+        "clusterId": "cluster-a",
+        "projectId": "project-a",
+        "kind": "Workload",
+        "resourceId": "ack-loss-test",
+        "action": "create",
+        "expectedGeneration": 0,
+        "resultingGeneration": 1,
+        "requestDigest": digest,
+    }
+
+
+class OperationReceiptValidationTests(unittest.TestCase):
+    def test_accepts_nonzero_lowercase_sha256_digest(self) -> None:
+        self.assertEqual(
+            MODULE.verify_receipt(
+                valid_receipt(),
+                request_id="f" * 32,
+                cluster="cluster-a",
+                project="project-a",
+                workload="ack-loss-test",
+                action="create",
+                expected_generation=0,
+            ),
+            1,
+        )
+
+    def test_rejects_malformed_or_zero_request_digest(self) -> None:
+        for digest in ("", "sha256:" + "a" * 64, "A" * 64, "0" * 64, "a" * 63, "a" * 65):
+            with self.subTest(digest=digest):
+                with self.assertRaisesRegex(RuntimeError, "requestDigest"):
+                    MODULE.verify_receipt(
+                        valid_receipt(digest),
+                        request_id="f" * 32,
+                        cluster="cluster-a",
+                        project="project-a",
+                        workload="ack-loss-test",
+                        action="create",
+                        expected_generation=0,
+                    )
+
+
 class DesiredCreateIdentityTests(unittest.TestCase):
     def test_exact_receipt_generation_and_requested_spec_authorize_cleanup(self) -> None:
         self.assertTrue(match_desired(desired()))
@@ -128,7 +173,7 @@ class CleanupGenerationFenceTests(unittest.TestCase):
             "action": "delete-request",
             "expectedGeneration": 1,
             "resultingGeneration": 2,
-            "requestDigest": "sha256:delete-request",
+            "requestDigest": "c" * 64,
         }
         with (
             patch.object(MODULE, "json_call", side_effect=[
