@@ -65,6 +65,7 @@ def valid_receipt(digest: str = "a" * 64) -> dict:
         "expectedGeneration": 0,
         "resultingGeneration": 1,
         "requestDigest": digest,
+        "committedAt": "2026-10-24T00:00:00Z",
     }
 
 
@@ -96,6 +97,30 @@ class OperationReceiptValidationTests(unittest.TestCase):
                         action="create",
                         expected_generation=0,
                     )
+
+
+class ReceiptSnapshotTests(unittest.TestCase):
+    def test_identical_replay_preserves_every_receipt_field(self) -> None:
+        receipt = valid_receipt()
+        self.assertTrue(MODULE.receipt_snapshot_matches(receipt, copy.deepcopy(receipt), expected_generation=1))
+
+    def test_snapshot_rejects_changed_digest(self) -> None:
+        before = valid_receipt()
+        after = copy.deepcopy(before)
+        after["requestDigest"] = "b" * 64
+        self.assertFalse(MODULE.receipt_snapshot_matches(before, after, expected_generation=1))
+
+    def test_snapshot_rejects_changed_generation(self) -> None:
+        before = valid_receipt()
+        after = copy.deepcopy(before)
+        after["resultingGeneration"] = 2
+        self.assertFalse(MODULE.receipt_snapshot_matches(before, after, expected_generation=1))
+
+    def test_snapshot_rejects_changed_commit_time(self) -> None:
+        before = valid_receipt()
+        after = copy.deepcopy(before)
+        after["committedAt"] = "2026-10-24T00:00:01Z"
+        self.assertFalse(MODULE.receipt_snapshot_matches(before, after, expected_generation=1))
 
 
 class DesiredCreateIdentityTests(unittest.TestCase):

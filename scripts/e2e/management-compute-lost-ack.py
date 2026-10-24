@@ -335,6 +335,34 @@ def verify_receipt(
     return generation
 
 
+def receipt_snapshot_matches(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    *,
+    expected_generation: int,
+) -> bool:
+    """Ensure replay/conflict handling did not mutate the committed operation receipt."""
+    immutable_fields = (
+        "requestId",
+        "status",
+        "clusterId",
+        "projectId",
+        "kind",
+        "resourceId",
+        "action",
+        "expectedGeneration",
+        "resultingGeneration",
+        "requestDigest",
+        "committedAt",
+    )
+    return (
+        isinstance(before, dict)
+        and isinstance(after, dict)
+        and after.get("resultingGeneration") == expected_generation
+        and all(after.get(field) == before.get(field) for field in immutable_fields)
+    )
+
+
 def desired_matches_create(
     desired: dict[str, Any],
     *,
@@ -642,8 +670,7 @@ def main() -> int:
         )
         if (
             generation2 != generation
-            or replayed_receipt.get("requestDigest") != receipt.get("requestDigest")
-            or replayed_receipt.get("committedAt") != receipt.get("committedAt")
+            or not receipt_snapshot_matches(receipt, replayed_receipt, expected_generation=generation)
             or replayed_desired.get("generation") != generation
         ):
             fail("same-key replay changed the authoritative receipt or created a new generation")
@@ -668,9 +695,31 @@ def main() -> int:
         if conflict_status != 409:
             fail(f"same requestId with changed body returned HTTP {conflict_status}, expected 409")
         code, unchanged = json_call(base_url, create_path, token)
-        if code != 200 or unchanged is None or unchanged.get("spec", {}).get("image") != image:
+        receipt_status_after_conflict, receipt_after_conflict = json_call(base_url, receipt_url, token)
+        if (
+            code != 200
+            or unchanged is None
+            or not desired_matches_create(
+                unchanged,
+                cluster=cluster,
+                project=project,
+                workload=workload,
+                generation=generation,
+                image=image,
+                pool=pool,
+                command=command,
+                accelerator_class=accelerator_class,
+                quota=quota,
+            )
+        ):
             fail("idempotency-key conflict changed or obscured the committed Workload")
-        print("PASS: changed-body replay rejected with 409 and original Workload preserved")
+        if (
+            receipt_status_after_conflict != 200
+            or receipt_after_conflict is None
+            or not receipt_snapshot_matches(receipt, receipt_after_conflict, expected_generation=generation)
+        ):
+            fail("idempotency-key conflict changed or obscured the original operation receipt")
+        print("PASS: changed-body replay rejected with 409; Desired and receipt remained unchanged")
 
         observed = wait_for_workload(control_plane_url, workload, generation, timeout)
         status = observed.get("status") or {}
