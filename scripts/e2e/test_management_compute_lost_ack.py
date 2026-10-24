@@ -364,3 +364,60 @@ class WorkloadObservationWaitTests(unittest.TestCase):
                 ),
                 snapshot,
             )
+
+class ProviderAbsenceWaitTests(unittest.TestCase):
+    def test_waits_for_pod_termination_after_api_finalization(self) -> None:
+        pod = {
+            "metadata": {
+                "name": "job-ack-loss-test-abc",
+                "uid": "pod-uid",
+                "deletionTimestamp": "2026-10-24T02:00:00Z",
+            },
+            "status": {"phase": "Running"},
+        }
+        pod_queries = 0
+
+        def list_resources(namespace: str, kind: str, selector: str, context: str | None) -> dict:
+            nonlocal pod_queries
+            if kind == "jobs":
+                return {"items": []}
+            pod_queries += 1
+            return {"items": [pod]} if pod_queries == 1 else {"items": []}
+
+        with (
+            patch.object(MODULE, "kubectl_json", side_effect=list_resources),
+            patch.object(MODULE.time, "sleep"),
+        ):
+            MODULE.wait_for_provider_absent(
+                "project-a",
+                "ack-loss-test",
+                context=None,
+                timeout=10,
+            )
+        self.assertEqual(pod_queries, 2)
+
+    def test_timeout_reports_remaining_pod_deletion_state(self) -> None:
+        pod = {
+            "metadata": {
+                "name": "job-ack-loss-test-abc",
+                "uid": "pod-uid",
+                "deletionTimestamp": "2026-10-24T02:00:00Z",
+            },
+            "status": {
+                "phase": "Running",
+                "containerStatuses": [{"name": "worker", "state": {"terminated": {}}, "restartCount": 0}],
+            },
+        }
+
+        def list_resources(namespace: str, kind: str, selector: str, context: str | None) -> dict:
+            return {"items": [] if kind == "jobs" else [pod]}
+
+        with patch.object(MODULE, "kubectl_json", side_effect=list_resources):
+            with self.assertRaisesRegex(RuntimeError, "deletionTimestamp"):
+                MODULE.wait_for_provider_absent(
+                    "project-a",
+                    "ack-loss-test",
+                    context=None,
+                    timeout=0,
+                )
+

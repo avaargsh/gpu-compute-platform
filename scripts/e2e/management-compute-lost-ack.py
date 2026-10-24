@@ -534,11 +534,87 @@ def kubectl_json(namespace: str, kind: str, selector: str, context: str | None) 
 
 
 def verify_provider_absent(namespace: str, workload: str, context: str | None) -> None:
+    """Fail immediately if a supposedly unused Workload ID already owns provider objects."""
     selector = f"ai.compute/workload=job-{workload}"
     for kind in ("jobs", "pods"):
         value = kubectl_json(namespace, kind, selector, context)
         if value["items"]:
-            fail(f"provider cleanup is incomplete: {len(value['items'])} {kind} still match Workload")
+            fail(f"provider resources already exist: {len(value['items'])} {kind} match Workload")
+
+
+def provider_resource_diagnostics(kind: str, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Summarize only lifecycle fields needed to diagnose provider cleanup."""
+    diagnostics: list[dict[str, Any]] = []
+    for item in items[:20]:
+        metadata = item.get("metadata") or {}
+        status = item.get("status") or {}
+        summary: dict[str, Any] = {
+            "kind": kind,
+            "name": metadata.get("name"),
+            "uid": metadata.get("uid"),
+            "deletionTimestamp": metadata.get("deletionTimestamp"),
+        }
+        if kind == "pods":
+            summary["phase"] = status.get("phase")
+            summary["reason"] = status.get("reason")
+            summary["conditions"] = [
+                {"type": condition.get("type"), "status": condition.get("status"), "reason": condition.get("reason")}
+                for condition in (status.get("conditions") or [])
+                if isinstance(condition, dict)
+            ]
+            summary["containerStates"] = [
+                {
+                    "name": container.get("name"),
+                    "state": list((container.get("state") or {}).keys()),
+                    "restartCount": container.get("restartCount"),
+                }
+                for container in (status.get("containerStatuses") or [])
+                if isinstance(container, dict)
+            ]
+        else:
+            summary["active"] = status.get("active")
+            summary["succeeded"] = status.get("succeeded")
+            summary["failed"] = status.get("failed")
+            summary["conditions"] = [
+                {"type": condition.get("type"), "status": condition.get("status"), "reason": condition.get("reason")}
+                for condition in (status.get("conditions") or [])
+                if isinstance(condition, dict)
+            ]
+        diagnostics.append(summary)
+    if len(items) > 20:
+        diagnostics.append({"kind": kind, "truncatedCount": len(items) - 20})
+    return diagnostics
+
+
+def wait_for_provider_absent(
+    namespace: str,
+    workload: str,
+    context: str | None,
+    timeout: float,
+) -> None:
+    """Wait boundedly for Kubernetes foreground/graceful deletion to finish."""
+    selector = f"ai.compute/workload=job-{workload}"
+    deadline = time.monotonic() + max(0.0, timeout)
+    last_items: dict[str, list[dict[str, Any]]] = {"jobs": [], "pods": []}
+    while True:
+        for kind in ("jobs", "pods"):
+            value = kubectl_json(namespace, kind, selector, context)
+            last_items[kind] = value["items"]
+        if not last_items["jobs"] and not last_items["pods"]:
+            return
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            diagnostics = {
+                kind: provider_resource_diagnostics(kind, items)
+                for kind, items in last_items.items()
+                if items
+            }
+            fail(
+                "provider cleanup timed out; Kubernetes resources still match Workload "
+                f"after {timeout:.1f}s: {json.dumps(diagnostics, sort_keys=True, ensure_ascii=True)}"
+            )
+        time.sleep(min(POLL_SECONDS, remaining))
 
 
 def cleanup_workload(
@@ -639,7 +715,15 @@ def cleanup_workload(
         management_status, current = json_call(base_url, path, token)
         runtime_status, _ = json_call(control_plane_url, f"/api/v1/workloads/{workload}", "")
         if management_status == 404 and runtime_status == 404:
-            verify_provider_absent(namespace, workload, context)
+            # API finalization may complete just before Kubernetes finishes a
+            # graceful Pod deletion. Keep the same bounded cleanup deadline and
+            # require actual Job/Pod absence; never accept 404 alone as proof.
+            wait_for_provider_absent(
+                namespace,
+                workload,
+                context,
+                timeout=max(0.0, deadline - time.monotonic()),
+            )
             return
         if management_status not in (200, 404) or runtime_status not in (200, 404):
             fail("unexpected API error while waiting for cleanup/finalization")
