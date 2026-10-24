@@ -42,10 +42,10 @@ func createACKProjection() baseprovider.WorkloadProjection {
 
 func TestKueueOnlyPublishesActualAPICreateACK(t *testing.T) {
 	for _, tc := range []struct {
-		name string
+		name        string
 		disposition JobApplyDisposition
-		wantCalls int
-		wantErr bool
+		wantCalls   int
+		wantErr     bool
 	}{
 		{"created", JobCreateAcknowledged, 1, false},
 		{"existing", JobExistingUnbound, 0, true},
@@ -116,16 +116,18 @@ func TestKueueTimeoutCannotPublishACK(t *testing.T) {
 
 type boundInspectTestClient struct {
 	*fakeClient
-	expectedUID string
-	observedUID string
-	inspectErr error
+	expectedUID  string
+	observedUID  string
+	inspectErr   error
 	inspectCalls int
 }
 
 func (c *boundInspectTestClient) InspectBoundJob(_ context.Context, job Job, expectedUID string) error {
 	c.inspectCalls++
 	c.order = append(c.order, "inspect-bound:"+job.Name)
-	if expectedUID != c.expectedUID { return verifiedops.ErrCreateUIDUnproven }
+	if expectedUID != c.expectedUID {
+		return verifiedops.ErrCreateUIDUnproven
+	}
 	return c.inspectErr
 }
 
@@ -140,7 +142,9 @@ func TestKueueACKBoundRecoveryIsReadOnlyAndChecksUIDAgainOnObservation(t *testin
 	p.OnBeforeCreate = nil
 	p.OnCreateACK = nil
 	got, err := NewProvider(client).ReconcileWorkload(context.Background(), p)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if client.inspectCalls != 1 || client.order[0] != "inspect-bound:job-train-a" {
 		t.Fatalf("bound Job was not inspected read-only: calls=%d order=%#v", client.inspectCalls, client.order)
 	}
@@ -149,7 +153,9 @@ func TestKueueACKBoundRecoveryIsReadOnlyAndChecksUIDAgainOnObservation(t *testin
 			t.Fatalf("ACK-bound recovery issued a write: %#v", client.order)
 		}
 	}
-	if got.ObservedGeneration != p.Generation { t.Fatalf("generation changed: %#v", got) }
+	if got.ObservedGeneration != p.Generation {
+		t.Fatalf("generation changed: %#v", got)
+	}
 }
 
 func TestKueueACKBoundRecoveryRejectsReplacedJobUID(t *testing.T) {
@@ -159,7 +165,9 @@ func TestKueueACKBoundRecoveryRejectsReplacedJobUID(t *testing.T) {
 	p.OnBeforeCreate = nil
 	p.OnCreateACK = nil
 	_, err := NewProvider(client).ReconcileWorkload(context.Background(), p)
-	if !errors.Is(err, verifiedops.ErrCreateUIDUnproven) { t.Fatalf("replacement UID was accepted: %v", err) }
+	if !errors.Is(err, verifiedops.ErrCreateUIDUnproven) {
+		t.Fatalf("replacement UID was accepted: %v", err)
+	}
 	for _, action := range client.order {
 		if strings.HasPrefix(action, "job:") || strings.HasPrefix(action, "claim:") {
 			t.Fatalf("failed identity check still issued a write: %#v", client.order)
