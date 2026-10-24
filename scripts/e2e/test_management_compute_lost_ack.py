@@ -408,6 +408,15 @@ class ProviderAbsenceWaitTests(unittest.TestCase):
                 "name": "job-ack-loss-test-abc",
                 "uid": "pod-uid",
                 "deletionTimestamp": "2026-10-24T02:00:00Z",
+                "labels": {"ai.compute/workload": "job-ack-loss-test"},
+                "annotations": {"ai.compute/generation": "1"},
+                "ownerReferences": [{
+                    "apiVersion": "batch/v1",
+                    "kind": "Job",
+                    "name": "job-ack-loss-test",
+                    "uid": "job-uid",
+                    "controller": True,
+                }],
             },
             "status": {
                 "phase": "Running",
@@ -419,13 +428,15 @@ class ProviderAbsenceWaitTests(unittest.TestCase):
             return {"items": [] if kind == "jobs" else [pod]}
 
         with patch.object(MODULE, "kubectl_json", side_effect=list_resources):
-            with self.assertRaisesRegex(RuntimeError, "deletionTimestamp"):
+            with self.assertRaisesRegex(RuntimeError, "deletionTimestamp") as raised:
                 MODULE.wait_for_provider_absent(
                     "project-a",
                     "ack-loss-test",
                     context=None,
                     timeout=0,
                 )
+        self.assertIn("ownerReferences", str(raised.exception))
+        self.assertIn("job-uid", str(raised.exception))
 
 class ProviderPresenceTests(unittest.TestCase):
     def test_requires_real_job_ready_pod_and_kueue_evidence(self) -> None:
