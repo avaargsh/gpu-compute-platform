@@ -71,14 +71,24 @@ func validExpected(w ExpectedJob) bool {
 		w.ContainerName != "" && digestPattern.MatchString(w.ImageDigest)
 }
 
-func controllerOwnedBy(p *corev1.Pod, uid types.UID) bool {
+// controllerOwnedBy requires one exact Job controller reference. UID is the
+// immutable identity, while name and API version prevent a forged or malformed
+// reference from being treated as evidence for the expected Job.
+func controllerOwnedBy(p *corev1.Pod, jobName string, uid types.UID) bool {
+	controllers := 0
+	matched := false
 	for _, r := range p.OwnerReferences {
-		if r.APIVersion == "batch/v1" && r.Kind == "Job" && r.UID == uid &&
-			r.Controller != nil && *r.Controller {
-			return true
+		if r.Controller == nil || !*r.Controller {
+			continue
 		}
+		controllers++
+		if r.APIVersion != "batch/v1" || r.Kind != "Job" ||
+			r.Name != jobName || r.UID != uid {
+			return false
+		}
+		matched = true
 	}
-	return false
+	return controllers == 1 && matched
 }
 
 func readyPod(p *corev1.Pod) bool {
@@ -145,7 +155,7 @@ func (o *JobObserver) Observe(ctx context.Context, w ExpectedJob) (Observation, 
 	}
 	var owned []corev1.Pod
 	for _, pod := range podList.Items {
-		if controllerOwnedBy(&pod, job.UID) {
+		if controllerOwnedBy(&pod, job.Name, job.UID) {
 			owned = append(owned, pod)
 		}
 	}
@@ -160,7 +170,7 @@ func (o *JobObserver) Observe(ctx context.Context, w ExpectedJob) (Observation, 
 		return unavailable, err
 	}
 	if pod.UID == "" || pod.UID != owned[0].UID || pod.ResourceVersion == "" ||
-		!controllerOwnedBy(pod, job.UID) || pod.Namespace != w.Namespace {
+		!controllerOwnedBy(pod, job.Name, job.UID) || pod.Namespace != w.Namespace {
 		return Observation{Code: OwnershipUnproven}, nil
 	}
 	observed.PodUID = pod.UID
@@ -237,7 +247,7 @@ func (o *JobObserver) Observe(ctx context.Context, w ExpectedJob) (Observation, 
 		return unavailable, err
 	}
 	if latestPod.UID != observed.PodUID || latestPod.ResourceVersion != observed.PodResourceVersion ||
-		!controllerOwnedBy(latestPod, w.JobUID) || !readyPod(latestPod) {
+		!controllerOwnedBy(latestPod, w.Name, w.JobUID) || !readyPod(latestPod) {
 		return Observation{Code: OwnershipUnproven}, nil
 	}
 	// Re-read Node too: a replaced or drained Node cannot authorize Ready.
