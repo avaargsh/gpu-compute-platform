@@ -58,7 +58,7 @@ func TestAgentTLSConfigRequiresTrustedClientCA(t *testing.T) {
 
 func TestDevelopmentCanUseDedicatedLoopbackAgentMTLSListener(t *testing.T) {
 	env := map[string]string{
-		"CONTROL_PLANE_AGENT_LISTEN_ADDR": "127.0.0.1:8082",
+		"CONTROL_PLANE_AGENT_LISTEN_ADDR":  "127.0.0.1:8082",
 		"CONTROL_PLANE_TLS_CERT":           "/tmp/agent-server.crt",
 		"CONTROL_PLANE_TLS_KEY":            "/tmp/agent-server.key",
 		"CONTROL_PLANE_AGENT_CLIENT_CA":    "/tmp/agent-client-ca.crt",
