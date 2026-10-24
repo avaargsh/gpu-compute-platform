@@ -71,14 +71,22 @@ func validExpected(w ExpectedJob) bool {
 		w.ContainerName != "" && digestPattern.MatchString(w.ImageDigest)
 }
 
-func controllerOwnedBy(p *corev1.Pod, uid types.UID) bool {
+func controllerOwnedBy(p *corev1.Pod, job *batchv1.Job) bool {
+	if p == nil || job == nil || job.Name == "" || job.UID == "" {
+		return false
+	}
+	controllers := 0
 	for _, r := range p.OwnerReferences {
-		if r.APIVersion == "batch/v1" && r.Kind == "Job" && r.UID == uid &&
-			r.Controller != nil && *r.Controller {
-			return true
+		if r.Controller == nil || !*r.Controller {
+			continue
+		}
+		controllers++
+		if r.APIVersion != "batch/v1" || r.Kind != "Job" ||
+			r.Name != job.Name || r.UID != job.UID {
+			return false
 		}
 	}
-	return false
+	return controllers == 1
 }
 
 func readyPod(p *corev1.Pod) bool {
@@ -145,7 +153,7 @@ func (o *JobObserver) Observe(ctx context.Context, w ExpectedJob) (Observation, 
 	}
 	var owned []corev1.Pod
 	for _, pod := range podList.Items {
-		if controllerOwnedBy(&pod, job.UID) {
+		if controllerOwnedBy(&pod, job) {
 			owned = append(owned, pod)
 		}
 	}
@@ -160,7 +168,7 @@ func (o *JobObserver) Observe(ctx context.Context, w ExpectedJob) (Observation, 
 		return unavailable, err
 	}
 	if pod.UID == "" || pod.UID != owned[0].UID || pod.ResourceVersion == "" ||
-		!controllerOwnedBy(pod, job.UID) || pod.Namespace != w.Namespace {
+		!controllerOwnedBy(pod, job) || pod.Namespace != w.Namespace {
 		return Observation{Code: OwnershipUnproven}, nil
 	}
 	observed.PodUID = pod.UID
@@ -237,7 +245,7 @@ func (o *JobObserver) Observe(ctx context.Context, w ExpectedJob) (Observation, 
 		return unavailable, err
 	}
 	if latestPod.UID != observed.PodUID || latestPod.ResourceVersion != observed.PodResourceVersion ||
-		!controllerOwnedBy(latestPod, w.JobUID) || !readyPod(latestPod) {
+		!controllerOwnedBy(latestPod, latestJob) || !readyPod(latestPod) {
 		return Observation{Code: OwnershipUnproven}, nil
 	}
 	// Re-read Node too: a replaced or drained Node cannot authorize Ready.
