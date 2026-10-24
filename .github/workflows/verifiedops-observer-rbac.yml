@@ -36,8 +36,6 @@ jobs:
         run: kind create cluster --name verifiedops-rbac-ci --image kindest/node:v1.34.0 --wait 120s
       - name: Validate Observer namespace, limited grants and cross-project denials
         run: bash scripts/e2e/verifiedops-observer-rbac-acceptance.sh
-      - name: API-server validate suspended Observer Job and immutable security envelope
-        run: bash scripts/e2e/verifiedops-observer-job-admission.sh
       - name: Prepare reviewed project for actual Observer token
         run: |
           kubectl create namespace verifiedops-token-a
@@ -54,16 +52,26 @@ jobs:
         run: |
           docker build --target verifiedops-observer-e2e --tag verifiedops-observer:e2e .
           kind load docker-image --name verifiedops-rbac-ci verifiedops-observer:e2e
-      - name: Prepare isolated test-only Pod fixture outside admission scope
-        # Admission-policy acceptance and its negative probes have already run.
-        # The test-only Pod uses ephemeral keys/Secret and a synthetic workload;
-        # temporarily remove the namespace selector label so the deliberately
-        # non-production fixture cannot be mistaken for an admitted workload.
-        run: kubectl label namespace verifiedops-observer app.kubernetes.io/component-
       - name: Execute independent Observer Pod and verify actual DSSE evidence
         env:
           VERIFIEDOPS_OBSERVER_POD_E2E: "1"
-        run: go test ./cmd/verifiedops-observer -run '^TestRealKindObserverPodSignsPendingEvidence$' -count=1 -timeout=180s -v
+        run: go test ./cmd/verifiedops-observer -run '^TestRealKindObserverPodSignsPendingEvidence      - name: Failure diagnostics
+        if: failure()
+        run: |
+          kubectl get roles,rolebindings -n verifiedops-rbac-a -o wide || true
+          kubectl get clusterrolebinding verifiedops-observer-node-get || true
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name verifiedops-rbac-ci || true
+ -count=1 -timeout=180s -v
+      # The Pod E2E fixture uses ephemeral test-only keys and init-file staging,
+      # intentionally outside the production envelope. Exercise it before
+      # installing any admission policy; never remove the namespace labels or
+      # disable a deployed policy to allow an unsafe Pod to run.
+      # The final acceptance step installs all bindings and MUST pass before
+      # this workflow can turn green.
+      - name: API-server validate suspended Observer Job and immutable security envelope
+        run: bash scripts/e2e/verifiedops-observer-job-admission.sh
       - name: Failure diagnostics
         if: failure()
         run: |
