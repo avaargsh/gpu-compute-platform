@@ -61,8 +61,15 @@ def main(argv=None):
         response = json.load(sys.stdin)
         report = inspect(response, expected_version=args.expected_version)
     except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
-        # No raw data in error messages; preserve only a code.
-        report["reason"] = "unexpected_or_unreadable_etcd_fixture"
+        # Emit only finite, predefined diagnostic classes, never raw etcd bytes.
+        reason = str(exc)
+        known_reasons = (
+            "invalid_etcdctl_response", "invalid_etcd_key", "invalid_etcd_value",
+            "expected_one_disposable_fixture_key", "storage_api_version_not_extractable",
+            "unexpected_persisted_version:kueue.x-k8s.io/v1beta1",
+            "unexpected_persisted_version:kueue.x-k8s.io/v1beta2",
+        )
+        report["reason"] = reason if reason in known_reasons else "invalid_etcdctl_json"
     output = json.dumps(report, indent=2, sort_keys=True) + "\n"
     args.evidence_file.write_text(output, encoding="utf-8")
     print(output, end="")

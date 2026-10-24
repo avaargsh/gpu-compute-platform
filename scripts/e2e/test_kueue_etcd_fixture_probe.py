@@ -50,6 +50,23 @@ class EtcdStorageEvidenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             inspect({"kvs": [{"key": "@@@"}]}, expected_version="v1beta1")
 
+    def test_cli_emits_sanitized_failure_reason_without_raw_data(self):
+        import contextlib
+        import io
+        import tempfile
+        from unittest.mock import patch
+        from kueue_etcd_fixture_probe import main
+        with tempfile.TemporaryDirectory() as d:
+            evidence = Path(d) / "evidence.json"
+            with patch("sys.stdin", io.StringIO(json.dumps(encoded("v1beta2")))):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    code = main(["--expected-version", "v1beta1",
+                                 "--evidence-file", str(evidence)])
+            self.assertEqual(code, 2)
+            result = json.loads(evidence.read_text())
+            self.assertEqual(result["reason"], "unexpected_persisted_version:kueue.x-k8s.io/v1beta2")
+            self.assertNotIn("rehearsal-flavor", evidence.read_text())
+
     def test_missing_api_version_is_blocked(self):
         x = encoded("v1beta1")
         x["kvs"][0]["value"] = base64.b64encode(b'{"kind":"ResourceFlavor"}').decode()
