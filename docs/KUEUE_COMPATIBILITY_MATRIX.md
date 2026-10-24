@@ -2,7 +2,7 @@
 
 **Review date:** 2026-10-24  
 **Scope:** Stage B provider SPI and the single production Kueue execution path.  
-**Status:** Candidate rows below are plans, not verified support claims.
+**Status:** Fresh-cluster Golden Path results are version- and commit-specific; in-place Kueue upgrades remain unverified.
 
 ## Frozen v0.1 baseline
 
@@ -27,9 +27,9 @@ Do not change the frozen release claim merely because an upstream version is new
 
 | ID | Kubernetes image | Kueue | Status | Purpose / exit condition |
 | --- | --- | --- | --- | --- |
-| C0 | `kindest/node:v1.34.0` | `v0.19.6` | **Frozen baseline** | Existing supported row. Preserve as the rollback/comparison reference. |
-| C1 | `kindest/node:v1.34.0` | `v0.20.3` | Candidate; not yet accepted | Isolate the Kueue API/version upgrade on the already-qualified Kubernetes minor. Run all code-level contracts and the real Golden Path. |
-| C2 | Published kind image for Kubernetes 1.35.x (record exact tag and observed server version) | `v0.20.3` | Candidate; not yet accepted | Verify the Kueue-only Workload admission, Job/Pod observation, and cleanup path on the Kubernetes minor called out in the upstream MultiKueue fix. Do not add MultiKueue. |
+| C0 | `kindest/node:v1.34.0` | `v0.19.6` | **Frozen baseline / reverified** | Golden Path [run 40063557591](https://github.com/avaargsh/gpu-compute-platform/actions/runs/40063557591) on SHA `65bf8236`; artifact 12547574424. |
+| C1 | `kindest/node:v1.34.0` | `v0.20.3` | **Fresh-cluster PASS**, not live upgrade | Golden Path [run 40060012042](https://github.com/avaargsh/gpu-compute-platform/actions/runs/40060012042) on source SHA `d1d283d8`; artifact 12547480915. No storage or rolling-upgrade claim. |
+| C2 | `kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0` | `v0.20.3` | **Fresh-cluster PASS**, not live upgrade | Golden Path [run 40063626936](https://github.com/avaargsh/gpu-compute-platform/actions/runs/40063626936) on SHA `65bf8236` using kind v0.33.0; actual Kubernetes v1.35.8 and Kueue v0.20.3 observed; artifact 12548451722. |
 | C3 | Latest published kind image in the Kubernetes 1.37 minor line (record exact tag and observed server version) | `v0.20.3` | Optional follow-up | Qualify the newest supported minor only if the product intends to claim it. Do not infer a kind image tag from the Kubernetes patch number. |
 
 A candidate row becomes supported only when the exact tested commit, actual Kubernetes server version, Kueue image/version, command output, and all gate outcomes are recorded. An unavailable image, skipped test, or passing unit test must not be recorded as real-cluster acceptance.
@@ -77,6 +77,42 @@ For C2, use a published digest-pinned `kindest/node:v1.35.x@sha256:<digest>` ima
 
 The real Golden Path must still prove capability registration reports exactly `["kueue"]`, a Workload reaches the expected Kueue admission state, the Job/Pod observation is independently read, invalid accelerator intent fails closed, provider objects are gone before Desired finalization, and the shared ResourceFlavor is not incorrectly deleted.
 
+
+## Read-only storage migration preflight (mandatory before in-place upgrade review)
+
+The fresh-cluster test runs above do not inspect existing etcd objects. Kueue v0.20 stops serving
+`v1beta1`; the [official v0.20.0 release notes](https://github.com/kubernetes-sigs/kueue/releases/tag/v0.20.0)
+require migration of existing objects **before** upgrading to the new release.
+
+Run an explicit-context, read-only inventory from an operator workstation:
+
+```bash
+KUBECTL_CONTEXT=my-reviewed-cluster make kueue-storage-preflight
+# For a saved CRD List fixture (offline; never connects to Kubernetes):
+python3 scripts/e2e/kueue_storage_preflight.py --snapshot crds-before.json --report-file preflight.json
+```
+
+The preflight uses only `kubectl --context CONTEXT get customresourcedefinitions -o json`;
+it performs **no writes**, does not install/upgrade Kueue, and never invokes the upstream migration script.
+It checks all discovered `*.kueue.x-k8s.io` CRDs, including optional Kueue kinds; it requires
+core ClusterQueue, LocalQueue, ResourceFlavor and Workload CRDs. Each must serve `v1beta2`,
+use it as the sole `spec.versions[*].storage` version, and report exactly `["v1beta2"]`
+under `status.storedVersions`. Missing or unreadable data, missing RBAC, malformed JSON,
+or remaining `v1beta1` storage markers return `BLOCKED` with exit code 2 and JSON evidence.
+
+A `PASS` means only that the queried CRD **version metadata** meets this conservative
+precondition at the time of the read. It does **not** establish that all etcd objects were
+actually rewritten, that a configuration/feature-gate change is valid, that Kueue controllers
+can be rolled back after changing stored objects, or that an in-place upgrade is safe.
+
+For `BLOCKED`, stop. Review the upstream
+[migration script](https://github.com/kubernetes-sigs/kueue/blob/main/hack/migrate-to-v1beta2.sh)
+at a pinned upstream commit. Its annotation/rewrite operations are privileged mutations;
+run it only via a separately reviewed rollout plan with etcd backup, restoration authority,
+migration evidence, feature-policy audit and staged controller compatibility checks.
+Do not modify `status.storedVersions` simply to make the preflight green, or interpret
+client-side/server-side dry run as proof that live objects have been rewritten.
+
 ## Live-cluster upgrade boundary
 
 The matrix above creates fresh kind clusters. It does **not** validate an in-place upgrade. Before upgrading a cluster with existing Kueue objects to a version that no longer serves `v1beta1`:
@@ -97,7 +133,7 @@ This compatibility work does not register Volcano/KAI, enable MultiKueue, add a 
 The compatibility run is intentionally opt-in so ordinary pushes do not consume kind-cluster CI minutes.
 
 - **C1:** use the existing `kindest/node:v1.34.0` image with Kueue `v0.20.3`.
-- **C2:** after this workflow revision is present on the default branch, manually dispatch the Go Control Plane workflow with target row `C2` and an exact published `kindest/node:v1.35.x` tag.
+- **C2:** when workflow dispatch is available on the default branch, use row `C2` and an exact published `kindest/node:v1.35.x@sha256:<digest>` image; do not use an unpinned tag. The isolated evidence run used kind v0.33.0.
 - To run C1 directly from this PR without dispatching the full Go/Portal suite, add the `run-kueue-compatibility` label. This label selects only the compatibility job; it does not trigger Portal browser acceptance or the Management ACK-drop experiment.
 - The compatibility job checks the v1beta2 API contract and lifecycle/PostgreSQL acceptance, runs the real Golden Path, verifies the actual Kubernetes server minor and Kueue image tag, and uploads a compatibility evidence artifact. Record the artifact together with the checked-out 40-character SHA before changing a row's status.
 - Do not merge this PR or mark C1/C2 supported solely because the ordinary Go CI passes. A failed, unavailable, or skipped real-cluster check leaves the candidate row unaccepted.
