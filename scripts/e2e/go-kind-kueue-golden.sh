@@ -243,14 +243,9 @@ wait_http
 
 go build -o /tmp/gpu-cluster-agent ./cmd/cluster-agent
 
-# The Management full-stack fixture uses the same PostgreSQL database and
-# seeds these authoritative bindings before starting the Control Plane. Re-PUTing
-# them at generation 1 is a conflicting CAS operation (HTTP 409), not an idempotent
-# bootstrap. In that mode, verify the exact database rows and leave their authority
-# untouched; ordinary standalone Golden Path runs still create the bindings here.
-if [[ "${PRESEEDED_BINDINGS:-0}" == "1" ]]; then
-  : "${GPU_MANAGEMENT_E2E_PG_CONTAINER:?preseeded binding mode requires the shared PostgreSQL fixture}"
-  project_binding="$(docker exec "$GPU_MANAGEMENT_E2E_PG_CONTAINER" psql -X -qAt -U gpu -d gpu_management_fullstack_ci -F put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":4}],\"acceleratorBindings\":[{\"class\":\"$ACCELERATOR_CLASS\",\"resourceName\":\"$ACCELERATOR_RESOURCE\",\"flavor\":\"$ACCELERATOR_FLAVOR\",\"nodeLabels\":{\"nvidia.com/gpu.product\":\"NVIDIA-H100-80GB-HBM3\",\"topology.kubernetes.io/zone\":\"gpu-zone-a\",\"ai.compute/rack\":\"rack-a01\"}}],\"scheduling\":{\"mode\":\"default\"}}}"
+put "/api/v1/projects/$PROJECT_ID/binding" "{\"metadata\":{\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"clusterId\":\"$CLUSTER_ID\",\"namespace\":\"$NAMESPACE\"}"
+put "/api/v1/compute-pools/$POOL_ID/binding" "{\"metadata\":{\"generation\":1},\"poolId\":\"$POOL_ID\",\"clusterId\":\"$CLUSTER_ID\",\"provider\":\"kueue\"}"
+put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"spec\":{\"accelerators\":[{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":4}],\"acceleratorBindings\":[{\"class\":\"$ACCELERATOR_CLASS\",\"resourceName\":\"$ACCELERATOR_RESOURCE\",\"flavor\":\"$ACCELERATOR_FLAVOR\",\"nodeLabels\":{\"nvidia.com/gpu.product\":\"NVIDIA-H100-80GB-HBM3\",\"topology.kubernetes.io/zone\":\"gpu-zone-a\",\"ai.compute/rack\":\"rack-a01\"}}],\"scheduling\":{\"mode\":\"default\"}}}"
 put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":1}}}"
 
 AGENT_INSTANCE_ID=agent-a AGENT_SYNC_INTERVAL=60s \
