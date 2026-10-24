@@ -227,18 +227,32 @@ func (r *Runner) reconcile(ctx context.Context, item DesiredResource, bindings m
 		}
 		projection.AcceleratorBinding = binding
 		if projection.OperationID != "" {
-			// The callback lives inside the leased reconciliation, not the
-			// eventual untrusted Kubernetes observation/report.
-			if publisher, ok := r.control.(CreateUIDPublisher); ok {
-				if preparer, available := r.control.(CreateAttemptPreparer); available {
-					projection.OnBeforeCreate = func(callCtx context.Context, intent provider.JobCreateIntent) error {
-						return preparer.PrepareJobCreateAttempt(callCtx, verifiedops.JobCreateAttempt{
-							OperationID: projection.OperationID, ClusterID: r.clusterID,
-							ProjectID: string(projection.ProjectID), WorkloadID: projection.WorkloadID,
-							Generation: projection.Generation, Namespace: intent.Namespace,
-							JobName: intent.Name, LeaseOwner: r.leaseOwner,
-						})
-					}
+			resolver, available := r.control.(CreateAttemptResolver)
+			if !available {
+				return Observation{}, fmt.Errorf("durable CREATE attempt resolver unavailable")
+			}
+			resolution, resolveErr := resolver.ResolveJobCreateAttempt(
+				ctx, projection.OperationID, r.clusterID, projection.WorkloadID, projection.Generation,
+			)
+			if resolveErr != nil {
+				return Observation{}, provider.MarkRetryable(fmt.Errorf("resolve durable CREATE attempt: %w", resolveErr))
+			}
+			switch resolution.State {
+			case verifiedops.JobCreateAttemptNotFound:
+				// A new provider CREATE is allowed only when the server proves no
+				// durable PREPARED attempt exists. Both callbacks are mandatory.
+				publisher, canPublish := r.control.(CreateUIDPublisher)
+				preparer, canPrepare := r.control.(CreateAttemptPreparer)
+				if !canPublish || !canPrepare {
+					return Observation{}, fmt.Errorf("durable CREATE prepare/publish transport unavailable")
+				}
+				projection.OnBeforeCreate = func(callCtx context.Context, intent provider.JobCreateIntent) error {
+					return preparer.PrepareJobCreateAttempt(callCtx, verifiedops.JobCreateAttempt{
+						OperationID: projection.OperationID, ClusterID: r.clusterID,
+						ProjectID: string(projection.ProjectID), WorkloadID: projection.WorkloadID,
+						Generation: projection.Generation, Namespace: intent.Namespace,
+						JobName: intent.Name, LeaseOwner: r.leaseOwner,
+					})
 				}
 				projection.OnCreateACK = func(callCtx context.Context, ack provider.JobCreateACK) error {
 					return publisher.PublishJobCreateUID(callCtx, JobCreateUIDCandidate{
@@ -249,8 +263,46 @@ func (r *Runner) reconcile(ctx context.Context, item DesiredResource, bindings m
 						JobResourceVersion: ack.ResourceVersion, LeaseOwner: r.leaseOwner,
 					})
 				}
+			case verifiedops.JobCreateAttemptUnknown:
+				// The provider may have accepted CREATE before the prior process died.
+				// Never repeat CREATE or promote a name/label match to ownership.
+				return Observation{
+					Kind: item.Kind, ID: item.ID, ObservedGeneration: item.Generation,
+					Conditions: []domain.Condition{{
+						Type: "Ready", Status: "False", Reason: "CreateAttemptUnresolved",
+						Message: "prior provider CREATE outcome is unknown; automatic CREATE retry is blocked",
+					}},
+				}, nil
+			case verifiedops.JobCreateAttemptStale:
+				return Observation{
+					Kind: item.Kind, ID: item.ID, ObservedGeneration: item.Generation,
+					Conditions: []domain.Condition{{
+						Type: "Ready", Status: "False", Reason: "CreateAttemptStale",
+						Message: "persisted provider CREATE attempt no longer matches current Desired state",
+					}},
+				}, nil
+			case verifiedops.JobCreateAttemptACKBound:
+				b := resolution.Binding
+				if b == nil || b.OperationID != projection.OperationID || b.ClusterID != r.clusterID ||
+					b.ProjectID != string(projection.ProjectID) || b.WorkloadID != projection.WorkloadID ||
+					b.Generation != projection.Generation || b.Namespace != projection.Namespace ||
+					b.JobUID == "" || b.JobResourceVersion == "" || b.JobName == "" {
+					return Observation{
+						Kind: item.Kind, ID: item.ID, ObservedGeneration: item.Generation,
+						Conditions: []domain.Condition{{
+							Type: "Ready", Status: "False", Reason: "CreateAttemptStale",
+							Message: "persisted CREATE ACK binding does not match current Workload identity",
+						}},
+					}, nil
+				}
+				// A bound retry is read-only: the provider must verify the exact
+				// live UID and must not call CREATE or mutate the ResourceClaim.
+				projection.ExpectedCreateUID = b.JobUID
+			default:
+				return Observation{}, fmt.Errorf("unsupported durable CREATE attempt state %q", resolution.State)
 			}
 		}
+		
 		got, err := r.runtime.ReconcileWorkload(ctx, projection)
 		if err != nil {
 			return Observation{}, err
