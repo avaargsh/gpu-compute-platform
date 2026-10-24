@@ -16,7 +16,7 @@ type JobCreateUIDBinding struct {
 	Generation         int64     `json:"generation"`
 	Namespace          string    `json:"namespace"`
 	JobName            string    `json:"jobName"`
-	JobUID              string    `json:"jobUid"`
+	JobUID             string    `json:"jobUid"`
 	JobResourceVersion string    `json:"jobResourceVersion"`
 	LeaseOwner         string    `json:"leaseOwner"`
 }
@@ -36,8 +36,8 @@ const (
 // Agent. Binding is an immutable candidate captured from the API-server CREATE
 // response; consumers must still verify that a live Job has this UID.
 type JobCreateAttemptResolution struct {
-	State JobCreateAttemptState `json:"state"`
-	Binding *JobCreateUIDBinding `json:"binding,omitempty"`
+	State   JobCreateAttemptState `json:"state"`
+	Binding *JobCreateUIDBinding  `json:"binding,omitempty"`
 }
 
 var ErrCreateUIDUnproven = errors.New("provider CREATE UID ownership unproven")
