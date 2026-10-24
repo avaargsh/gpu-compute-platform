@@ -16,6 +16,8 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+
+	"github.com/avaargsh/gpu-compute-platform/internal/verifiedops"
 )
 
 func TestKubeClientPoolAndWorkloadGoldenPath(t *testing.T) {
@@ -657,5 +659,130 @@ func TestApplyResourceClaimAdoptsSameGenerationAfterCreateRace(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("same-generation ResourceClaim create race must converge by adoption: %v", err)
+	}
+}
+
+
+func TestGuardedKubernetesCREATEPreparesBeforeDRAClaim(t *testing.T) {
+	ctx := context.Background()
+	job := Job{
+		Generation: 7,
+		Name:       "job-dra-guard",
+		Namespace:  "research",
+		Image:      "example/train",
+		DRA: &DRARequest{
+			ClaimName:       "accelerator-dra-guard",
+			DeviceClassName: "gpu.nvidia.com",
+			Count:           1,
+		},
+	}
+	client := kubefake.NewSimpleClientset()
+	var events []string
+	client.PrependReactor("create", "resourceclaims", func(ktesting.Action) (bool, runtime.Object, error) {
+		events = append(events, "claim")
+		return false, nil, nil
+	})
+	client.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+		events = append(events, "job")
+		created := action.(ktesting.CreateAction).GetObject().(*batchv1.Job).DeepCopy()
+		created.UID = types.UID("apiserver-created-dra-job")
+		created.ResourceVersion = "501"
+		return true, created, nil
+	})
+
+	result, err := NewKubeClient(client, nil).ApplyJobWithGuardedCreate(ctx, job, func(context.Context) error {
+		events = append(events, "prepared")
+		return nil
+	})
+	if err != nil || result.Disposition != JobCreateAcknowledged ||
+		result.UID != types.UID("apiserver-created-dra-job") || result.ResourceVersion != "501" {
+		t.Fatalf("guarded DRA Job CREATE failed: %#v err=%v", result, err)
+	}
+	want := []string{"prepared", "claim", "job"}
+	if len(events) != len(want) {
+		t.Fatalf("unexpected side-effect sequence: got %#v want %#v", events, want)
+	}
+	for i := range want {
+		if events[i] != want[i] {
+			t.Fatalf("event[%d]=%q, want %q; sequence=%#v", i, events[i], want[i], events)
+		}
+	}
+
+	// An unresolved durable attempt must not mutate either Kubernetes object.
+	refusedClient := kubefake.NewSimpleClientset()
+	refusedCalls := 0
+	_, err = NewKubeClient(refusedClient, nil).ApplyJobWithGuardedCreate(ctx, job, func(context.Context) error {
+		refusedCalls++
+		return verifiedops.ErrCreateAttemptUnresolved
+	})
+	if !errors.Is(err, verifiedops.ErrCreateAttemptUnresolved) || refusedCalls != 1 {
+		t.Fatalf("unresolved durable attempt was not refused exactly once: err=%v calls=%d", err, refusedCalls)
+	}
+	for _, action := range refusedClient.Actions() {
+		if action.GetVerb() == "create" &&
+			(action.GetResource().Resource == "jobs" || action.GetResource().Resource == "resourceclaims") {
+			t.Fatalf("refused durable attempt mutated Kubernetes: %#v", refusedClient.Actions())
+		}
+	}
+}
+
+func TestApplyExistingResourceClaimRejectsSameGenerationIdentityOrSpecDrift(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name      string
+		mutate    string
+		wantError string
+	}{
+		{name: "foreign-workload", mutate: "owner", wantError: "owner identity mismatch"},
+		{name: "different-device-class", mutate: "device-class", wantError: "desired spec drift"},
+		{name: "different-device-count", mutate: "count", wantError: "desired spec drift"},
+		{name: "different-project-binding", mutate: "project", wantError: "identity annotation"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			coreClient := kubefake.NewSimpleClientset()
+			client := NewKubeClient(coreClient, nil)
+			job := Job{
+				Generation: 5,
+				Name:       "job-dra-identity",
+				Namespace:  "project-1",
+				Image:      "busybox:1.36",
+				Annotations: map[string]string{
+					logProjectIDAnnotation:  "project-1",
+					logWorkloadIDAnnotation: "train-1",
+				},
+				DRA: &DRARequest{
+					ClaimName:       "accelerator-dra-identity",
+					DeviceClassName: "gpu.nvidia.com",
+					Count:           1,
+				},
+			}
+			if err := client.ApplyResourceClaim(ctx, job); err != nil {
+				t.Fatal(err)
+			}
+			claims := coreClient.ResourceV1().ResourceClaims(job.Namespace)
+			claim, err := claims.Get(ctx, job.DRA.ClaimName, metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch tc.mutate {
+			case "owner":
+				claim.Labels["ai.compute/workload"] = "job-another-workload"
+			case "device-class":
+				claim.Spec.Devices.Requests[0].Exactly.DeviceClassName = "another.gpu.example"
+			case "count":
+				claim.Spec.Devices.Requests[0].Exactly.Count = 2
+			case "project":
+				claim.Annotations[logProjectIDAnnotation] = "project-other"
+			default:
+				t.Fatalf("unknown mutation %q", tc.mutate)
+			}
+			if _, err := claims.Update(ctx, claim, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := client.ApplyResourceClaim(ctx, job); err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("same-generation conflicting ResourceClaim should be rejected with %q, got %v", tc.wantError, err)
+			}
+		})
 	}
 }
