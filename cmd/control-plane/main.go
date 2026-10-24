@@ -34,8 +34,8 @@ func main() {
 	handler := httpapi.NewRouterWithDependencies(store, placement)
 	if operatorPreviewConfigured() {
 		// A loopback browser preview cannot share the Agent-only mTLS router.
-		if agentListener.Enabled {
-			log.Fatal("operator preview cannot coexist with Agent-only mTLS listener")
+		if agentListener.Enabled && !agentListener.Separate {
+			log.Fatal("operator preview cannot coexist with the legacy Agent-only mTLS listener")
 		}
 		if !isLoopbackAddress(cfg.ListenAddr) {
 			log.Fatal("operator preview requires an explicit loopback listener")
@@ -56,20 +56,40 @@ func main() {
 		Handler: handler,
 	}
 	if agentListener.Enabled {
-		// This listener only exposes the Agent protocol and /healthz.
-		// User/admin paths stay disabled until OIDC/RBAC is independently
-		// implemented. VerifiedChains comes from Go's TLS handshake.
-		handler, err = httpapi.AgentMTLSRouter(handler, agentListener.TrustDomain)
-		if err != nil {
-			log.Fatalf("Agent identity router: %v", err)
+		// This handler exposes only the Agent protocol and /healthz. It is a
+		// separate handler instance so the ordinary loopback API never inherits
+		// the Agent identity gate or becomes reachable through the mTLS port.
+		agentHandler, routerErr := httpapi.AgentMTLSRouter(handler, agentListener.TrustDomain)
+		if routerErr != nil {
+			log.Fatalf("Agent identity router: %v", routerErr)
 		}
-		server.Handler = handler
-		server.TLSConfig, err = bootstrap.AgentTLSConfig(agentListener.ClientCA)
-		if err != nil {
-			log.Fatalf("Agent client CA: %v", err)
+		tlsConfig, tlsErr := bootstrap.AgentTLSConfig(agentListener.ClientCA)
+		if tlsErr != nil {
+			log.Fatalf("Agent client CA: %v", tlsErr)
 		}
-		log.Printf("cluster-agent mTLS-only control plane listening on %s", server.Addr)
-		err = server.ListenAndServeTLS(agentListener.ServerCert, agentListener.ServerKey)
+		if agentListener.Separate {
+			agentServer := &http.Server{
+				Addr:      agentListener.ListenAddr,
+				Handler:   agentHandler,
+				TLSConfig: tlsConfig,
+			}
+			go func() {
+				log.Printf("cluster-agent mTLS-only listener listening on %s", agentServer.Addr)
+				listenerErr := agentServer.ListenAndServeTLS(agentListener.ServerCert, agentListener.ServerKey)
+				if listenerErr != nil && listenerErr != http.ErrServerClosed {
+					log.Fatalf("cluster-agent mTLS listener failed: %v", listenerErr)
+				}
+			}()
+			log.Printf("development control plane listening on %s", server.Addr)
+			err = server.ListenAndServe()
+		} else {
+			// Preserve the original PoC mode: one mTLS-only listener, with no
+			// user/admin/internal route exposure.
+			server.Handler = agentHandler
+			server.TLSConfig = tlsConfig
+			log.Printf("cluster-agent mTLS-only control plane listening on %s", server.Addr)
+			err = server.ListenAndServeTLS(agentListener.ServerCert, agentListener.ServerKey)
+		}
 	} else {
 		log.Printf("development control plane listening on %s", server.Addr)
 		err = server.ListenAndServe()

@@ -13,11 +13,13 @@ set -euo pipefail
 : "${ACCELERATOR_RESOURCE:=nvidia.com/gpu}"
 : "${ACCELERATOR_CLASS:=h100-80g}"
 : "${ACCELERATOR_FLAVOR:=h100-80g}"
+AGENT_TLS_TMP=""
 
 cleanup() {
   [[ -z "${AGENT_A_PID:-}" ]] || kill "$AGENT_A_PID" 2>/dev/null || true
   [[ -z "${AGENT_B_PID:-}" ]] || kill "$AGENT_B_PID" 2>/dev/null || true
   [[ -z "${CONTROL_PID:-}" ]] || kill "$CONTROL_PID" 2>/dev/null || true
+  [[ -z "${AGENT_TLS_TMP:-}" ]] || rm -rf "$AGENT_TLS_TMP"
 }
 trap cleanup EXIT
 
@@ -241,9 +243,81 @@ kubectl label node "$node" topology.kubernetes.io/zone=gpu-zone-a ai.compute/rac
 bash scripts/e2e/install-fake-gpu.sh
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
+AGENT_CONTROL_PLANE_URL="${AGENT_CONTROL_PLANE_URL:-$BASE_URL}"
+if [[ "${RUN_MANAGEMENT_LOST_ACK_ACCEPTANCE:-0}" == "1" ]]; then
+  # Management-originated Workloads carry an operation ID. Durable pre-CREATE
+  # and CREATE-ACK publication intentionally require the Agent's verified
+  # SPIFFE mTLS identity; do not weaken that authority in the test harness.
+  AGENT_TLS_TMP="$(mktemp -d)"
+  chmod 700 "$AGENT_TLS_TMP"
+  trust_domain="gpu-compute-ci"
+
+  # Server identity for the dedicated Agent listener. This certificate is
+  # ephemeral and trusted only by the test Agent for 127.0.0.1:8082.
+  openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+    -keyout "$AGENT_TLS_TMP/server.key" -out "$AGENT_TLS_TMP/server.crt" \
+    -subj "/CN=127.0.0.1" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign,cRLSign" \
+    -addext "extendedKeyUsage=serverAuth" \
+    -addext "subjectAltName=IP:127.0.0.1" >/dev/null 2>&1
+
+  # Separate Agent-issuing CA. The client certificate has exactly one
+  # cluster-scoped SPIFFE URI and ClientAuth EKU.
+  openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+    -keyout "$AGENT_TLS_TMP/agent-ca.key" -out "$AGENT_TLS_TMP/agent-ca.crt" \
+    -subj "/CN=Disposable GPU Compute Agent CA" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
+  openssl req -new -newkey rsa:2048 -sha256 -nodes \
+    -keyout "$AGENT_TLS_TMP/agent-client.key" -out "$AGENT_TLS_TMP/agent-client.csr" \
+    -subj "/CN=cluster-agent-$CLUSTER_ID" >/dev/null 2>&1
+  cat > "$AGENT_TLS_TMP/agent-client.ext" <<CERT
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=clientAuth
+subjectAltName=URI:spiffe://$trust_domain/cluster/$CLUSTER_ID/agent
+CERT
+  openssl x509 -req -sha256 -days 1 -in "$AGENT_TLS_TMP/agent-client.csr" \
+    -CA "$AGENT_TLS_TMP/agent-ca.crt" -CAkey "$AGENT_TLS_TMP/agent-ca.key" \
+    -CAcreateserial -out "$AGENT_TLS_TMP/agent-client.crt" \
+    -extfile "$AGENT_TLS_TMP/agent-client.ext" >/dev/null 2>&1
+  chmod 600 "$AGENT_TLS_TMP/server.key" "$AGENT_TLS_TMP/agent-ca.key" "$AGENT_TLS_TMP/agent-client.key"
+  chmod 644 "$AGENT_TLS_TMP/server.crt" "$AGENT_TLS_TMP/agent-ca.crt" "$AGENT_TLS_TMP/agent-client.crt"
+
+  export CONTROL_PLANE_AGENT_LISTEN_ADDR=127.0.0.1:8082
+  export CONTROL_PLANE_TLS_CERT="$AGENT_TLS_TMP/server.crt"
+  export CONTROL_PLANE_TLS_KEY="$AGENT_TLS_TMP/server.key"
+  export CONTROL_PLANE_AGENT_CLIENT_CA="$AGENT_TLS_TMP/agent-ca.crt"
+  export CONTROL_PLANE_AGENT_TRUST_DOMAIN="$trust_domain"
+  export AGENT_CONTROL_PLANE_URL=https://127.0.0.1:8082
+  export CLUSTER_AGENT_TLS_CA="$AGENT_TLS_TMP/server.crt"
+  export CLUSTER_AGENT_TLS_CERT="$AGENT_TLS_TMP/agent-client.crt"
+  export CLUSTER_AGENT_TLS_KEY="$AGENT_TLS_TMP/agent-client.key"
+fi
+export AGENT_CONTROL_PLANE_URL
+
 go run ./cmd/control-plane >/tmp/go-control-plane.log 2>&1 &
 CONTROL_PID=$!
 wait_http
+
+if [[ -n "$AGENT_TLS_TMP" ]]; then
+  agent_tls_ready=0
+  for attempt in $(seq 1 60); do
+    if curl -fsS --max-time 2 --cacert "$CONTROL_PLANE_TLS_CERT" \
+        --cert "$CLUSTER_AGENT_TLS_CERT" --key "$CLUSTER_AGENT_TLS_KEY" \
+        "$AGENT_CONTROL_PLANE_URL/healthz" >/dev/null 2>&1; then
+      agent_tls_ready=1
+      break
+    fi
+    sleep 0.25
+  done
+  [[ "$agent_tls_ready" == "1" ]] || {
+    echo "Agent mTLS listener did not become ready on $AGENT_CONTROL_PLANE_URL" >&2
+    cat /tmp/go-control-plane.log >&2 || true
+    exit 1
+  }
+fi
 
 go build -o /tmp/gpu-cluster-agent ./cmd/cluster-agent
 
@@ -275,7 +349,7 @@ put "/api/v1/compute-pools/$POOL_ID" "{\"metadata\":{\"id\":\"$POOL_ID\",\"gener
 put "/api/v1/workloads/$WORKLOAD_ID" "{\"metadata\":{\"id\":\"$WORKLOAD_ID\",\"generation\":1},\"projectId\":\"$PROJECT_ID\",\"poolId\":\"$POOL_ID\",\"spec\":{\"image\":\"busybox:1.36\",\"command\":[\"sh\",\"-c\",\"echo go-kind-kueue-golden && sleep 5\"],\"accelerator\":{\"class\":\"$ACCELERATOR_CLASS\",\"quota\":1}}}"
 
 AGENT_INSTANCE_ID=agent-a AGENT_SYNC_INTERVAL=60s \
-  CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" \
+  CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$AGENT_CONTROL_PLANE_URL" \
   /tmp/gpu-cluster-agent >/tmp/go-cluster-agent-a.log 2>&1 &
 AGENT_A_PID=$!
 
@@ -327,7 +401,7 @@ wait_workload_lease_free
 claim_workload_lease "agent-a" 12
 
 AGENT_INSTANCE_ID=agent-b AGENT_SYNC_INTERVAL=1s \
-  CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$BASE_URL" \
+  CLUSTER_ID="$CLUSTER_ID" CONTROL_PLANE_URL="$AGENT_CONTROL_PLANE_URL" \
   /tmp/gpu-cluster-agent >/tmp/go-cluster-agent-b.log 2>&1 &
 AGENT_B_PID=$!
 
