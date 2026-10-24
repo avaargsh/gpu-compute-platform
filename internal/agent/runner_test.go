@@ -27,9 +27,9 @@ type fakeControlPlane struct {
 	prepareErr             error
 	publishErr             error
 	publishedBeforeRelease bool
-	attemptResolution     verifiedops.JobCreateAttemptResolution
-	attemptResolveErr     error
-	attemptResolveCalls   int
+	attemptResolution      verifiedops.JobCreateAttemptResolution
+	attemptResolveErr      error
+	attemptResolveCalls    int
 }
 
 func (f *fakeControlPlane) Register(context.Context, Registration) error { return nil }
@@ -486,7 +486,6 @@ func TestRunnerPreservesProviderSpecificBindingWithoutKueueFields(t *testing.T) 
 	}
 }
 
-
 func TestRunnerNeverRepeatsUnknownCreateOutcome(t *testing.T) {
 	control := &fakeControlPlane{
 		attemptResolution: verifiedops.JobCreateAttemptResolution{State: verifiedops.JobCreateAttemptUnknown},
@@ -497,20 +496,25 @@ func TestRunnerNeverRepeatsUnknownCreateOutcome(t *testing.T) {
 			}},
 			{Kind: "Workload", ID: "train-1", Generation: 4, OperationID: "0123456789abcdef0123456789abcdef", Spec: map[string]any{
 				"projectID": "project-1", "poolID": "pool-1", "namespace": "project-1",
-				"image": "example/train@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"image":       "example/train@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 				"accelerator": map[string]any{"class": "h100", "quota": float64(1)},
 			}},
 		},
 	}
 	runtime := &fakeRuntime{}
 	runner := NewRunnerWithLeaseOwner("cluster-a", control, runtime, "agent-recovery")
-	if err := runner.Sync(context.Background()); err != nil { t.Fatal(err) }
+	if err := runner.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	if runtime.workloadCalls != 0 || len(control.prepared) != 0 || len(control.published) != 0 {
 		t.Fatalf("UNKNOWN attempt touched provider or retried CREATE: workloadCalls=%d prepared=%d published=%d", runtime.workloadCalls, len(control.prepared), len(control.published))
 	}
 	var workloadObservation *Observation
 	for i := range control.reported {
-		if control.reported[i].Kind == "Workload" { workloadObservation = &control.reported[i]; break }
+		if control.reported[i].Kind == "Workload" {
+			workloadObservation = &control.reported[i]
+			break
+		}
 	}
 	if workloadObservation == nil || len(workloadObservation.Conditions) != 1 ||
 		workloadObservation.Conditions[0].Reason != "CreateAttemptUnresolved" || workloadObservation.Conditions[0].Status != "False" {
