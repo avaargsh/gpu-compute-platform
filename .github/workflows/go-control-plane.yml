@@ -186,7 +186,7 @@ jobs:
   management-lost-ack:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-golden-path')) }}
     name: Real Management OIDC + PostgreSQL + kind/Kueue ACK-drop
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
