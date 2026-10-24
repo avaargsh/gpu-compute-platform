@@ -153,10 +153,9 @@ func TestResolveJobCreateAttemptDistinguishesNotFoundUnknownBoundAndStale(t *tes
 		bound.Binding.OperationID != binding.OperationID || bound.Binding.Generation != binding.Generation {
 		t.Fatalf("ACK-bound resolution lost exact provider identity: %#v err=%v", bound, err)
 	}
-	if _, err := restarted.db.ExecContext(ctx, `
-	UPDATE desired_resources SET generation=generation+1
-	WHERE cluster_id=$1 AND kind='Workload' AND resource_id=$2
-	`, binding.ClusterID, binding.WorkloadID); err != nil { t.Fatal(err) }
+	if err := restarted.MarkDesiredDeleting(ctx, binding.ClusterID, "Workload", binding.WorkloadID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
 	stale, err := restarted.ResolveJobCreateAttempt(ctx, binding.OperationID, binding.ClusterID, binding.WorkloadID, binding.Generation)
 	if err != nil || stale.State != verifiedops.JobCreateAttemptStale || stale.Binding != nil {
 		t.Fatalf("old generation must not expose stale binding: %#v err=%v", stale, err)
